@@ -1,46 +1,26 @@
-import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-
-type OperationShift = {
-  id: string;
-  tenantId: string;
-  dailyOperationId: string;
-  name: string;
-  startTime: string;
-  endTime: string;
-  status: 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
-  createdAt: string;
-};
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class OperationShiftService {
-  private shifts: OperationShift[] = [];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findByOperation(dailyOperationId: string) {
-    return this.shifts.filter((s) => s.dailyOperationId === dailyOperationId);
+  async findByOperation(dailyOperationId: string, tenantId: string) {
+    return this.prisma.operationShift.findMany({
+      where: { dailyOperationId, tenantId },
+      orderBy: { startTime: 'asc' },
+    });
   }
 
-  create(payload: Omit<OperationShift, 'id' | 'createdAt'>) {
-    const shift: OperationShift = {
-      ...payload,
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-    };
-    this.shifts.push(shift);
-    return shift;
+  async create(tenantId: string, data: { dailyOperationId: string; name: string; startTime: string; endTime: string }) {
+    return this.prisma.operationShift.create({
+      data: { tenantId, ...data, status: 'PENDING' },
+    });
   }
 
-  activate(id: string) {
-    const shift = this.shifts.find((s) => s.id === id);
-    if (!shift) return { updated: false };
-    shift.status = 'ACTIVE';
-    return { updated: true, shift };
-  }
-
-  complete(id: string) {
-    const shift = this.shifts.find((s) => s.id === id);
-    if (!shift) return { updated: false };
-    shift.status = 'COMPLETED';
-    return { updated: true, shift };
+  async updateStatus(id: string, tenantId: string, status: string) {
+    const shift = await this.prisma.operationShift.findFirst({ where: { id, tenantId } });
+    if (!shift) throw new NotFoundException('Shift not found');
+    return this.prisma.operationShift.update({ where: { id }, data: { status: status as any } });
   }
 }

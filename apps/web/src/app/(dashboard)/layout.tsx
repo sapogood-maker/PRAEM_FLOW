@@ -1,16 +1,27 @@
 'use client';
 
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useAuthStore } from '@/store/auth.store';
 import { normalizeChildren } from '@/lib/normalize-children';
 
 const queryClient = new QueryClient();
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   useWebSocket();
+  const token = useAuthStore((s) => s.token);
+  const router = useRouter();
   const normalizedChildren = normalizeChildren(children);
+
+  useEffect(() => {
+    if (!token) router.push('/login');
+  }, [token, router]);
+
+  if (!token) return null;
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -24,3 +35,4 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     </QueryClientProvider>
   );
 }
+

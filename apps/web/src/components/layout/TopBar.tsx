@@ -3,11 +3,13 @@
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { useAuthStore } from '@/store/auth.store';
 import { useRealtimeStore } from '@/store/realtime.store';
+import { useAuth } from '@/hooks/useAuth';
 
 export function TopBar() {
   const tenantName = useAuthStore((s) => s.tenantName);
   const userName = useAuthStore((s) => s.userName);
   const connected = useRealtimeStore((s) => s.connected);
+  const { logout } = useAuth();
   const now = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
   return (
@@ -29,6 +31,13 @@ export function TopBar() {
           <p className='text-xs text-slate-500'>Operador</p>
           <p className='text-sm text-slate-300'>{userName || '—'}</p>
         </div>
+        <button
+          type='button'
+          onClick={logout}
+          className='rounded-lg border border-border px-3 py-1.5 text-xs text-slate-400 hover:border-red-800 hover:text-red-400 transition-colors'
+        >
+          Sair
+        </button>
       </div>
     </header>
   );

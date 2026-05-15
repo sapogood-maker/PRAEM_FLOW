@@ -35,6 +35,7 @@ model User {
   tenantId   String
   name       String
   email      String
+  password   String
   phone      String?
   role       Role
   active     Boolean  @default(true)
@@ -47,11 +48,13 @@ model User {
 }
 
 enum Role {
+  ADMIN
   OPERATOR
   COORDINATOR
   SUPERVISOR
   ADMIN_PREFEITURA
   DRIVER
+  VIEWER
 }
 
 model Patient {

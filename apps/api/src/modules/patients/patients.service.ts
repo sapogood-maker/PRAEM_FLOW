@@ -1,51 +1,90 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
-type Patient = {
-  id: string;
+export interface ListPatientsQuery {
   tenantId: string;
-  name: string;
-  cpf: string;
-  address: string;
-  mobility: 'NORMAL' | 'WHEELCHAIR' | 'STRETCHER' | 'OXYGEN';
-  clinicalRisk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  qrCode?: string;
-};
+  search?: string;
+  clinicalRisk?: string;
+  page?: number;
+  limit?: number;
+}
 
 @Injectable()
 export class PatientsService {
-  private patients: Patient[] = [];
+  constructor(private readonly prisma: PrismaService) {}
 
-  list(filters: { search?: string; priority?: string; status?: string }) {
-    const { search } = filters;
-    if (!search) return this.patients;
-    const q = search.toLowerCase();
-    return this.patients.filter((p) => p.name.toLowerCase().includes(q) || p.cpf.includes(search));
+  async list({ tenantId, search, clinicalRisk, page = 1, limit = 20 }: ListPatientsQuery) {
+    const skip = (page - 1) * limit;
+    const where: Prisma.PatientWhereInput = {
+      tenantId,
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { cpf: { contains: search } },
+        ],
+      }),
+      ...(clinicalRisk && { clinicalRisk: clinicalRisk as any }),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.patient.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.patient.count({ where }),
+    ]);
+
+    return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
-  create(patient: Omit<Patient, 'id'>) {
-    const created = { ...patient, id: randomUUID() };
-    this.patients.push(created);
-    return created;
-  }
-
-  update(id: string, payload: Partial<Patient>) {
-    const patient = this.patients.find((item) => item.id === id);
+  async findOne(id: string, tenantId: string) {
+    const patient = await this.prisma.patient.findFirst({ where: { id, tenantId } });
     if (!patient) throw new NotFoundException('Patient not found');
-    Object.assign(patient, payload);
     return patient;
   }
 
-  qr(id: string) {
-    const patient = this.patients.find((item) => item.id === id);
-    if (!patient) throw new NotFoundException('Patient not found');
-    patient.qrCode = patient.qrCode ?? `PRAEM-${patient.cpf}`;
-    return { patientId: id, qrCode: patient.qrCode };
+  async create(tenantId: string, data: Prisma.PatientUncheckedCreateInput) {
+    const existing = await this.prisma.patient.findFirst({
+      where: { tenantId, cpf: data.cpf },
+    });
+    if (existing) throw new BadRequestException('CPF already registered for this tenant');
+
+    return this.prisma.patient.create({
+      data: { ...data, tenantId, operationalId: `OP-${Date.now()}` },
+    });
   }
 
-  scan(payload: { qrCode?: string; cpf?: string }) {
-    const patient = this.patients.find((item) => item.qrCode === payload.qrCode || item.cpf === payload.cpf);
+  async update(id: string, tenantId: string, data: Prisma.PatientUncheckedUpdateInput) {
+    await this.findOne(id, tenantId);
+    return this.prisma.patient.update({ where: { id }, data });
+  }
+
+  async remove(id: string, tenantId: string) {
+    await this.findOne(id, tenantId);
+    await this.prisma.patient.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  async qr(id: string, tenantId: string) {
+    const patient = await this.findOne(id, tenantId);
+    if (!patient.qrCode) {
+      await this.prisma.patient.update({
+        where: { id },
+        data: { qrCode: `PRAEM-${patient.cpf.replace(/\D/g, '')}` },
+      });
+    }
+    const updated = await this.prisma.patient.findUnique({ where: { id } });
+    return { patientId: id, qrCode: updated!.qrCode };
+  }
+
+  async scan(tenantId: string, payload: { qrCode?: string; cpf?: string }) {
+    const patient = await this.prisma.patient.findFirst({
+      where: {
+        tenantId,
+        ...(payload.qrCode ? { qrCode: payload.qrCode } : {}),
+        ...(payload.cpf ? { cpf: payload.cpf } : {}),
+      },
+    });
     if (!patient) throw new NotFoundException('Patient not found');
     return { valid: true, patient };
   }
 }
+

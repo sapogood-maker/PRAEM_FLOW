@@ -1,57 +1,46 @@
-import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-
-type DailyOperation = {
-  id: string;
-  tenantId: string;
-  date: string;
-  status: 'PLANNING' | 'ACTIVE' | 'CLOSED' | 'CANCELLED';
-  totalVehicles: number;
-  totalDrivers: number;
-  totalPatients: number;
-  totalRoutes: number;
-  notes?: string;
-  createdAt: string;
-};
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class DailyOperationService {
-  private operations: DailyOperation[] = [];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll(tenantId: string) {
-    return this.operations.filter((o) => o.tenantId === tenantId);
+  async findAll(tenantId: string) {
+    return this.prisma.dailyOperation.findMany({
+      where: { tenantId },
+      include: { shifts: true },
+      orderBy: { date: 'desc' },
+      take: 30,
+    });
   }
 
-  findToday(tenantId: string) {
-    const today = new Date().toISOString().split('T')[0];
-    return this.operations.find(
-      (o) => o.tenantId === tenantId && o.date.startsWith(today),
-    ) ?? this.openToday(tenantId);
-  }
-
-  openToday(tenantId: string): DailyOperation {
-    const today = new Date().toISOString().split('T')[0];
-    const existing = this.operations.find((o) => o.tenantId === tenantId && o.date.startsWith(today));
+  async findToday(tenantId: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const existing = await this.prisma.dailyOperation.findFirst({
+      where: { tenantId, date: today },
+      include: { shifts: true },
+    });
     if (existing) return existing;
-    const op: DailyOperation = {
-      id: randomUUID(),
-      tenantId,
-      date: new Date().toISOString(),
-      status: 'PLANNING',
-      totalVehicles: 0,
-      totalDrivers: 0,
-      totalPatients: 0,
-      totalRoutes: 0,
-      createdAt: new Date().toISOString(),
-    };
-    this.operations.push(op);
-    return op;
+    // auto-create if not found
+    return this.prisma.dailyOperation.create({
+      data: { tenantId, date: today, status: 'PLANNING' },
+      include: { shifts: true },
+    });
   }
 
-  updateStatus(id: string, status: DailyOperation['status']) {
-    const op = this.operations.find((o) => o.id === id);
-    if (!op) return { updated: false };
-    op.status = status;
-    return { updated: true, operation: op };
+  async create(tenantId: string, data: { date: string; notes?: string }) {
+    const date = new Date(data.date);
+    date.setHours(0, 0, 0, 0);
+    return this.prisma.dailyOperation.create({
+      data: { tenantId, date, notes: data.notes, status: 'PLANNING' },
+      include: { shifts: true },
+    });
+  }
+
+  async updateStatus(id: string, tenantId: string, status: string) {
+    const op = await this.prisma.dailyOperation.findFirst({ where: { id, tenantId } });
+    if (!op) throw new NotFoundException('DailyOperation not found');
+    return this.prisma.dailyOperation.update({ where: { id }, data: { status: status as any } });
   }
 }

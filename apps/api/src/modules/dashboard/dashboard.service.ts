@@ -1,50 +1,99 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 
 export interface OperationalKpis {
-  // Volume
   patientsToday: number;
   waitingPatients: number;
   criticalPatients: number;
-  // Operação
   activeRoutes: number;
   completedTrips: number;
   activeVehicles: number;
-  // Qualidade
   averageOccupancy: number;
   absences: number;
   delays: number;
-  // Confirmação
   confirmationRate: number;
   absenceRate: number;
   unreachablePatients: number;
-  // Eficiência
   estimatedKmToday: number;
   emptyTrips: number;
 }
 
 @Injectable()
 export class DashboardService {
-  kpis(): OperationalKpis {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async kpis(tenantId: string): Promise<OperationalKpis> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const [
+      patientsToday,
+      waitingPatients,
+      criticalPatients,
+      activeRoutes,
+      completedTrips,
+      activeVehicles,
+      confirmedCount,
+      unreachablePatients,
+      absences,
+      routesWithKm,
+    ] = await Promise.all([
+      // Pacientes com agendamento hoje
+      this.prisma.operationalQueue.count({
+        where: { tenantId, appointmentDate: { gte: today, lt: tomorrow } },
+      }),
+      // Aguardando
+      this.prisma.operationalQueue.count({
+        where: { tenantId, status: 'WAITING' },
+      }),
+      // Críticos
+      this.prisma.operationalQueue.count({
+        where: { tenantId, priority: 'CRITICAL', status: { in: ['WAITING', 'ASSIGNED'] } },
+      }),
+      // Rotas ativas
+      this.prisma.route.count({ where: { tenantId, status: 'ACTIVE' } }),
+      // Viagens concluídas
+      this.prisma.trip.count({ where: { tenantId, status: 'COMPLETED' } }),
+      // Veículos ativos
+      this.prisma.vehicle.count({ where: { tenantId, status: 'ON_ROUTE', active: true } }),
+      // Confirmados hoje
+      this.prisma.operationalQueue.count({
+        where: { tenantId, confirmationStatus: 'CONFIRMED', appointmentDate: { gte: today, lt: tomorrow } },
+      }),
+      // Inacessíveis
+      this.prisma.operationalQueue.count({
+        where: { tenantId, confirmationStatus: 'UNREACHABLE' },
+      }),
+      // Faltas (NO_SHOW)
+      this.prisma.trip.count({ where: { tenantId, status: 'NO_SHOW' } }),
+      // Km estimado
+      this.prisma.route.findMany({
+        where: { tenantId, date: { gte: today, lt: tomorrow }, estimatedKm: { not: null } },
+        select: { estimatedKm: true },
+      }),
+    ]);
+
+    const estimatedKmToday = routesWithKm.reduce((sum, r) => sum + (r.estimatedKm ?? 0), 0);
+    const confirmationRate = patientsToday > 0 ? Math.round((confirmedCount / patientsToday) * 100) : 0;
+    const absenceRate = patientsToday > 0 ? Math.round((absences / patientsToday) * 100) : 0;
+
     return {
-      // Volume
-      patientsToday: 124,
-      waitingPatients: 14,
-      criticalPatients: 7,
-      // Operação
-      activeRoutes: 17,
-      completedTrips: 89,
-      activeVehicles: 22,
-      // Qualidade
-      averageOccupancy: 81,
-      absences: 5,
-      delays: 3,
-      // Confirmação
-      confirmationRate: 87,
-      absenceRate: 4,
-      unreachablePatients: 3,
-      // Eficiência
-      estimatedKmToday: 1240,
-      emptyTrips: 2,
+      patientsToday,
+      waitingPatients,
+      criticalPatients,
+      activeRoutes,
+      completedTrips,
+      activeVehicles,
+      averageOccupancy: 0, // computed separately when trip data richer
+      absences,
+      delays: 0,
+      confirmationRate,
+      absenceRate,
+      unreachablePatients,
+      estimatedKmToday: Math.round(estimatedKmToday),
+      emptyTrips: 0,
     };
   }
 }

@@ -1,91 +1,94 @@
-import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-
-type QueueItem = {
-  id: string;
-  tenantId: string;
-  patientId: string;
-  destination: string;
-  appointmentDate: string;
-  priority: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'PENDING';
-  status: 'WAITING' | 'ASSIGNED' | 'CONFIRMED' | 'CANCELLED';
-  queueType: 'MEDICAL' | 'LOGISTICS';
-  confirmationStatus: 'PENDING' | 'CONFIRMED' | 'CANCELED' | 'UNREACHABLE' | 'WAITING_MANUAL_CONFIRMATION';
-  requiresCompanion?: boolean;
-  recurrenceType?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'CUSTOM';
-};
-
-const PRIORITY_ORDER = ['CRITICAL', 'HIGH', 'NORMAL', 'PENDING'];
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class QueuesService {
-  private queue: QueueItem[] = [];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll(queueType?: string) {
-    const base = queueType
-      ? this.queue.filter((q) => q.queueType === queueType)
-      : this.queue;
-    return [...base].sort(
-      (a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority),
-    );
+  async findAll(tenantId: string, query: {
+    queueType?: string;
+    priority?: string;
+    status?: string;
+    confirmationStatus?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { queueType, priority, status, confirmationStatus, page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+    const where: Prisma.OperationalQueueWhereInput = {
+      tenantId,
+      ...(queueType && { queueType: queueType as any }),
+      ...(priority && { priority: priority as any }),
+      ...(status && { status: status as any }),
+      ...(confirmationStatus && { confirmationStatus: confirmationStatus as any }),
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.operationalQueue.findMany({
+        where,
+        skip,
+        take: limit,
+        include: { patient: { select: { id: true, name: true, cpf: true, requiresCompanion: true, clinicalRisk: true } } },
+        orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.operationalQueue.count({ where }),
+    ]);
+    return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
-  create(payload: Omit<QueueItem, 'id'>) {
-    const item = { ...payload, id: randomUUID() };
-    this.queue.push(item);
-    return item;
+  async create(tenantId: string, data: Prisma.OperationalQueueUncheckedCreateInput) {
+    return this.prisma.operationalQueue.create({ data: { ...data, tenantId } });
   }
 
-  updatePriority(id: string, priority: QueueItem['priority']) {
-    const item = this.queue.find((q) => q.id === id);
-    if (!item) return { updated: false };
-    item.priority = priority;
-    return { updated: true, item };
+  async updatePriority(id: string, tenantId: string, priority: string) {
+    await this.findOne(id, tenantId);
+    return this.prisma.operationalQueue.update({ where: { id }, data: { priority: priority as any } });
   }
 
-  updateConfirmation(id: string, status: QueueItem['confirmationStatus'], channel?: string) {
-    const item = this.queue.find((q) => q.id === id);
-    if (!item) return { updated: false };
-    item.confirmationStatus = status;
-    return { updated: true, item };
+  async updateConfirmation(id: string, tenantId: string, confirmationStatus: string, channel?: string) {
+    await this.findOne(id, tenantId);
+    return this.prisma.operationalQueue.update({
+      where: { id },
+      data: {
+        confirmationStatus: confirmationStatus as any,
+        ...(channel && { confirmationChannel: channel as any }),
+        ...(confirmationStatus === 'CONFIRMED' && { confirmedAt: new Date() }),
+        confirmationAttempts: { increment: 1 },
+        lastContactAt: new Date(),
+      },
+    });
   }
 
-  aiSuggest() {
-    const critical = this.queue.filter((q) => q.priority === 'CRITICAL');
-    const recurrent = this.queue.filter((q) => q.recurrenceType);
-    const companions = this.queue.filter((q) => q.requiresCompanion);
+  async findOne(id: string, tenantId: string) {
+    const q = await this.prisma.operationalQueue.findFirst({ where: { id, tenantId } });
+    if (!q) throw new NotFoundException('Queue item not found');
+    return q;
+  }
 
+  async remove(id: string, tenantId: string) {
+    await this.findOne(id, tenantId);
+    await this.prisma.operationalQueue.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  aiSuggest(tenantId: string) {
     return {
       suggestions: [
         {
           type: 'GROUPING',
           group: 'Cluster Prioritário',
-          queueIds: critical.slice(0, 4).map((q) => q.id),
           reason: 'Pacientes críticos — embarque prioritário imediato',
           action: 'ASSIGN_VEHICLE',
         },
         {
           type: 'RECURRENCE_BATCH',
           group: 'Lote Recorrente',
-          queueIds: recurrent.slice(0, 6).map((q) => q.id),
           reason: 'Tratamento recorrente — mesma rota, mesma janela de horário',
           action: 'CREATE_ROUTE',
         },
-        {
-          type: 'ACCESSIBILITY',
-          group: 'Acompanhantes',
-          queueIds: companions.slice(0, 3).map((q) => q.id),
-          reason: 'Requer acompanhante — considerar capacidade de assento duplo',
-          action: 'RESERVE_SEATS',
-        },
-        {
-          type: 'GEOGRAPHIC',
-          group: 'Agrupamento Norte',
-          queueIds: this.queue.slice(0, 3).map((q) => q.id),
-          reason: 'Proximidade geográfica e janela de horário compatível',
-          action: 'OPTIMIZE_ROUTE',
-        },
       ],
+      tenantId,
     };
   }
 }
+

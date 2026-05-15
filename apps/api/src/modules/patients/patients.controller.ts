@@ -1,39 +1,62 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Request, UseGuards } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PatientsService } from './patients.service';
 
+interface AuthRequest {
+  user: { tenantId: string; userId: string };
+}
+
+@UseGuards(JwtAuthGuard)
 @Controller('patients')
 export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
 
   @Get()
   findAll(
+    @Request() req: AuthRequest,
     @Query('search') search?: string,
-    @Query('priority') priority?: string,
-    @Query('status') status?: string,
+    @Query('clinicalRisk') clinicalRisk?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.patientsService.list({ search, priority, status });
+    return this.patientsService.list({
+      tenantId: req.user.tenantId,
+      search,
+      clinicalRisk,
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 20,
+    });
+  }
+
+  @Get(':id')
+  findOne(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.patientsService.findOne(id, req.user.tenantId);
   }
 
   @Post()
-  create(@Body() body: any) {
-    const created = this.patientsService.create(sanitizePayload(body));
-    return { created: true, id: created.id };
+  create(@Request() req: AuthRequest, @Body() body: any) {
+    return this.patientsService.create(req.user.tenantId, sanitizePayload(body));
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() body: any) {
-    const updated = this.patientsService.update(id, sanitizePayload(body));
-    return { updated: true, id: updated.id };
+  update(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: any) {
+    return this.patientsService.update(id, req.user.tenantId, sanitizePayload(body));
+  }
+
+  @Delete(':id')
+  remove(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.patientsService.remove(id, req.user.tenantId);
   }
 
   @Get(':id/qr')
-  qr(@Param('id') id: string) {
-    return this.patientsService.qr(id);
+  qr(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.patientsService.qr(id, req.user.tenantId);
   }
 
   @Post('scan')
-  scan(@Body() body: { qrCode?: string; cpf?: string }) {
-    return this.patientsService.scan(body);
+  scan(@Request() req: AuthRequest, @Body() body: { qrCode?: string; cpf?: string }) {
+    return this.patientsService.scan(req.user.tenantId, body);
   }
 }
+

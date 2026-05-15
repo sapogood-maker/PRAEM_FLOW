@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { UsersModule } from './modules/users/users.module';
@@ -22,6 +24,8 @@ import { DashboardService } from './modules/dashboard/dashboard.service';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
     AuthModule,
     TenantsModule,
     UsersModule,
@@ -47,9 +51,6 @@ export class AppModule {
   constructor(
     private readonly gateway: RealtimeGateway,
     private readonly dashboardService: DashboardService,
-  ) {
-    setInterval(() => {
-      this.gateway.emitDashboardKpis(this.dashboardService.kpis());
-    }, 30000);
-  }
+  ) {}
 }
+

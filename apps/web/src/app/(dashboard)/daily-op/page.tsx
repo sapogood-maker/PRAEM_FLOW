@@ -1,5 +1,12 @@
 'use client';
 
+const shiftStatusLabel: Record<string, string> = {
+  PENDING: 'Aguardando',
+  ACTIVE: 'Ativo',
+  COMPLETED: 'Concluído',
+  CANCELLED: 'Cancelado',
+};
+
 export default function DailyOpPage() {
   return (
     <section className='space-y-6'>
@@ -13,7 +20,9 @@ export default function DailyOpPage() {
         <div className='flex items-center justify-between'>
           <div>
             <p className='text-xs uppercase tracking-wider text-cyan-400'>Operação Atual</p>
-            <p className='text-lg font-bold text-slate-100'>{new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <p className='text-lg font-bold text-slate-100'>
+              {new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
           </div>
           <span className='rounded-full bg-cyan-700 px-4 py-1 text-sm font-medium text-white'>PLANEJANDO</span>
         </div>
@@ -32,7 +41,7 @@ export default function DailyOpPage() {
               <p className='font-semibold'>{shift.name}</p>
               <p className='text-sm text-slate-400'>{shift.start} – {shift.end}</p>
               <span className='mt-2 inline-block rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-400'>
-                {shift.status}
+                {shiftStatusLabel[shift.status] ?? shift.status}
               </span>
             </div>
           ))}

@@ -2,6 +2,12 @@ import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
 import { QueuesService } from './queues.service';
 
+type ConfirmationStatus = 'PENDING' | 'CONFIRMED' | 'CANCELED' | 'UNREACHABLE' | 'WAITING_MANUAL_CONFIRMATION';
+
+const VALID_CONFIRMATION_STATUSES: ConfirmationStatus[] = [
+  'PENDING', 'CONFIRMED', 'CANCELED', 'UNREACHABLE', 'WAITING_MANUAL_CONFIRMATION',
+];
+
 @Controller('queue')
 export class QueuesController {
   constructor(private readonly queuesService: QueuesService) {}
@@ -24,7 +30,10 @@ export class QueuesController {
 
   @Put(':id/confirmation')
   updateConfirmation(@Param('id') id: string, @Body() body: { status: string; channel?: string }) {
-    return this.queuesService.updateConfirmation(id, body.status as any, body.channel);
+    const status = VALID_CONFIRMATION_STATUSES.includes(body.status as ConfirmationStatus)
+      ? (body.status as ConfirmationStatus)
+      : 'PENDING';
+    return this.queuesService.updateConfirmation(id, status, body.channel);
   }
 
   @Post('ai-suggest')

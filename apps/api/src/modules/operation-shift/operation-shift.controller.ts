@@ -13,7 +13,8 @@ export class OperationShiftController {
 
   @Post()
   create(@Body() body: any) {
-    return this.service.create(sanitizePayload(body));
+    const created = this.service.create(sanitizePayload(body));
+    return { created: true, id: created.id };
   }
 
   @Put(':id/activate')

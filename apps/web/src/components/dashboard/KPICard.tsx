@@ -23,7 +23,7 @@ export function KPICard({ title, value, unit, accent = 'default', icon }: KPICar
         <p className='text-xs text-slate-400 uppercase tracking-wider'>{title}</p>
         {icon && <span className='text-lg'>{icon}</span>}
       </div>
-      <p className={`mt-2 text-3xl font-bold tabular-nums ${accentStyles[accent]}`}>
+      <p className={`mt-2 text-3xl font-bold tabular-nums ${accentStyles[accent] ?? accentStyles.default}`}>
         {value}
         {unit && <span className='ml-1 text-base font-normal text-slate-400'>{unit}</span>}
       </p>

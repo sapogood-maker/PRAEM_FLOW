@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { sanitizePayload } from '../../common/sanitize';
 import { RoutesService } from './routes.service';
 
 @Controller('routes')
@@ -12,12 +13,14 @@ export class RoutesController {
 
   @Post()
   create(@Body() body: any) {
-    return this.routesService.create(body);
+    const created = this.routesService.create(sanitizePayload(body));
+    return { created: true, id: created.id };
   }
 
   @Put(':id')
   update(@Param('id') id: string, @Body() body: any) {
-    return this.routesService.update(id, body);
+    const updated = this.routesService.update(id, sanitizePayload(body));
+    return { updated: updated.updated };
   }
 
   @Post(':id/optimize')

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { QueueItem } from '@/types';
 
 type QueueState = {
-  filters: { priority?: string; status?: string; destination?: string };
+  filters: { date?: string; priority?: string; status?: string; destination?: string };
   setFilters: (value: QueueState['filters']) => void;
   queue: QueueItem[];
   setQueue: (items: QueueItem[]) => void;

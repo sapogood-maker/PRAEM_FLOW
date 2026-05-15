@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { sanitizePayload } from '../../common/sanitize';
 import { QueuesService } from './queues.service';
 
 @Controller('queue')
@@ -12,7 +13,8 @@ export class QueuesController {
 
   @Post()
   create(@Body() body: any) {
-    return this.queuesService.create(body);
+    const created = this.queuesService.create(sanitizePayload(body));
+    return { created: true, id: created.id };
   }
 
   @Put(':id/priority')

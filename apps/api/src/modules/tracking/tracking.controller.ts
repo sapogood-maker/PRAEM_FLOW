@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
+import { sanitizePayload } from '../../common/sanitize';
 import { TrackingService } from './tracking.service';
 
 @Controller('tracking')
@@ -7,7 +8,8 @@ export class TrackingController {
 
   @Post('update')
   update(@Body() body: { vehicleId: string; driverId: string; tenantId: string; lat: number; lng: number }) {
-    return this.trackingService.update(body);
+    this.trackingService.update(sanitizePayload(body));
+    return { updated: true };
   }
 
   @Get('vehicles')

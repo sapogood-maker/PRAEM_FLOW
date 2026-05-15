@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { isValidElement } from 'react';
+import { normalizeChildren } from '@/lib/normalize-children';
 
 export const metadata: Metadata = {
   title: 'PRAEM OPS',
@@ -8,15 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const isSlotObject =
-    typeof children === 'object' &&
-    children !== null &&
-    !isValidElement(children) &&
-    !Array.isArray(children) &&
-    !(children instanceof Promise);
-
-  const normalizedChildren =
-    isSlotObject ? Object.values(children as unknown as Record<string, React.ReactNode>) : children;
+  const normalizedChildren = normalizeChildren(children);
 
   return (
     <html lang='pt-BR'>

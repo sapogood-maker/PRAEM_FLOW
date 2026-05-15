@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { sanitizePayload } from '../../common/sanitize';
 import { PatientsService } from './patients.service';
 
 @Controller('patients')
@@ -16,12 +17,14 @@ export class PatientsController {
 
   @Post()
   create(@Body() body: any) {
-    return this.patientsService.create(body);
+    const created = this.patientsService.create(sanitizePayload(body));
+    return { created: true, id: created.id };
   }
 
   @Put(':id')
   update(@Param('id') id: string, @Body() body: any) {
-    return this.patientsService.update(id, body);
+    const updated = this.patientsService.update(id, sanitizePayload(body));
+    return { updated: true, id: updated.id };
   }
 
   @Get(':id/qr')

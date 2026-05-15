@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id         String             @id @default(uuid())
+  name       String
+  slug       String             @unique
+  cnpj       String?
+  city       String
+  state      String
+  active     Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  users      User[]
+  patients   Patient[]
+  drivers    Driver[]
+  vehicles   Vehicle[]
+  queues     OperationalQueue[]
+  routes     Route[]
+  trips      Trip[]
+  checkpoints Checkpoint[]
+  auditLogs  AuditLog[]
+}
+
+model User {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  email      String
+  phone      String?
+  role       Role
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  driver     Driver?
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+enum Role {
+  OPERATOR
+  COORDINATOR
+  SUPERVISOR
+  ADMIN_PREFEITURA
+  DRIVER
+}
+
+model Patient {
+  id            String        @id @default(uuid())
+  tenantId      String
+  name          String
+  cpf           String
+  birthDate     DateTime
+  phone         String?
+  address       String
+  lat           Float?
+  lng           Float?
+  mobility      MobilityType
+  clinicalRisk  RiskLevel
+  recurrent     Boolean       @default(false)
+  notes         String?
+  qrCode        String?       @unique
+  operationalId String?       @unique
+  createdAt     DateTime      @default(now())
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  queues        OperationalQueue[]
+  trips         Trip[]
+
+  @@unique([tenantId, cpf])
+  @@index([tenantId])
+}
+
+enum MobilityType {
+  NORMAL
+  WHEELCHAIR
+  STRETCHER
+  OXYGEN
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Driver {
+  id         String       @id @default(uuid())
+  tenantId   String
+  userId     String       @unique
+  cnh        String
+  cnhExpiry  DateTime
+  active     Boolean      @default(true)
+  lat        Float?
+  lng        Float?
+  status     DriverStatus
+  tenant     Tenant       @relation(fields: [tenantId], references: [id])
+  user       User         @relation(fields: [userId], references: [id])
+  routes     Route[]
+  checkpoints Checkpoint[]
+
+  @@index([tenantId])
+}
+
+enum DriverStatus {
+  AVAILABLE
+  ON_ROUTE
+  OFFLINE
+  REST
+}
+
+model Vehicle {
+  id         String        @id @default(uuid())
+  tenantId   String
+  plate      String        @unique
+  model      String
+  type       VehicleType
+  capacity   Int
+  wheelchair Boolean       @default(false)
+  stretcher  Boolean       @default(false)
+  active     Boolean       @default(true)
+  status     VehicleStatus
+  tenant     Tenant        @relation(fields: [tenantId], references: [id])
+  routes     Route[]
+
+  @@index([tenantId])
+}
+
+enum VehicleType {
+  VAN
+  BUS
+  AMBULANCE
+  CAR
+  ADAPTED
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  ON_ROUTE
+  MAINTENANCE
+  INACTIVE
+}
+
+model OperationalQueue {
+  id              String        @id @default(uuid())
+  tenantId        String
+  patientId       String
+  appointmentDate DateTime
+  destination     String
+  lat             Float?
+  lng             Float?
+  priority        QueuePriority
+  status          QueueStatus
+  notes           String?
+  createdAt       DateTime      @default(now())
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  patient         Patient       @relation(fields: [patientId], references: [id])
+
+  @@index([tenantId])
+  @@index([patientId])
+}
+
+enum QueuePriority {
+  CRITICAL
+  HIGH
+  NORMAL
+  PENDING
+}
+
+enum QueueStatus {
+  WAITING
+  ASSIGNED
+  CONFIRMED
+  CANCELLED
+}
+
+model Route {
+  id                String      @id @default(uuid())
+  tenantId          String
+  driverId          String
+  vehicleId         String
+  date              DateTime
+  origin            String
+  destination       String
+  status            RouteStatus
+  waypoints         Json?
+  estimatedKm       Float?
+  estimatedDuration Int?
+  createdAt         DateTime    @default(now())
+  tenant            Tenant      @relation(fields: [tenantId], references: [id])
+  driver            Driver      @relation(fields: [driverId], references: [id])
+  vehicle           Vehicle     @relation(fields: [vehicleId], references: [id])
+  trips             Trip[]
+  checkpoints       Checkpoint[]
+
+  @@index([tenantId])
+}
+
+enum RouteStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model Trip {
+  id          String     @id @default(uuid())
+  tenantId    String
+  routeId     String
+  patientId   String
+  status      TripStatus
+  boardedAt   DateTime?
+  completedAt DateTime?
+  qrScanned   Boolean    @default(false)
+  notes       String?
+  tenant      Tenant     @relation(fields: [tenantId], references: [id])
+  route       Route      @relation(fields: [routeId], references: [id])
+  patient     Patient    @relation(fields: [patientId], references: [id])
+  checkpoints Checkpoint[]
+
+  @@index([tenantId])
+}
+
+enum TripStatus {
+  SCHEDULED
+  CONFIRMED
+  BOARDED
+  IN_PROGRESS
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+model Checkpoint {
+  id        String         @id @default(uuid())
+  tenantId  String
+  tripId    String
+  routeId   String
+  type      CheckpointType
+  lat       Float
+  lng       Float
+  address   String?
+  timestamp DateTime       @default(now())
+  driverId  String
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
+  trip      Trip           @relation(fields: [tripId], references: [id])
+  route     Route          @relation(fields: [routeId], references: [id])
+  driver    Driver         @relation(fields: [driverId], references: [id])
+
+  @@index([tenantId])
+}
+
+enum CheckpointType {
+  DEPARTURE
+  PICKUP
+  DROP_OFF
+  ARRIVAL
+  BREAK
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+}

@@ -26,4 +26,6 @@ COPY --from=builder /app/apps/web/package.json ./apps/web/package.json
 
 EXPOSE 8087
 
-CMD ["npm", "run", "start", "-w", "apps/web", "--", "-p", "8087"]
+WORKDIR /app/apps/web
+
+CMD ["npm", "run", "start", "--", "-p", "8087"]

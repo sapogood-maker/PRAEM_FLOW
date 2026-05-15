@@ -1,10 +1,32 @@
 import { Card } from '@/components/ui/card';
 
-export function KPICard({ title, value }: { title: string; value: string | number }) {
+interface KPICardProps {
+  title: string;
+  value: string | number;
+  unit?: string;
+  accent?: 'default' | 'critical' | 'warning' | 'ok' | 'info';
+  icon?: string;
+}
+
+const accentStyles: Record<string, string> = {
+  default: 'text-slate-100',
+  critical: 'text-red-400',
+  warning: 'text-amber-400',
+  ok: 'text-emerald-400',
+  info: 'text-cyan-400',
+};
+
+export function KPICard({ title, value, unit, accent = 'default', icon }: KPICardProps) {
   return (
     <Card>
-      <p className='text-sm text-slate-400'>{title}</p>
-      <p className='mt-2 text-3xl font-semibold'>{value}</p>
+      <div className='flex items-start justify-between'>
+        <p className='text-xs text-slate-400 uppercase tracking-wider'>{title}</p>
+        {icon && <span className='text-lg'>{icon}</span>}
+      </div>
+      <p className={`mt-2 text-3xl font-bold tabular-nums ${accentStyles[accent]}`}>
+        {value}
+        {unit && <span className='ml-1 text-base font-normal text-slate-400'>{unit}</span>}
+      </p>
     </Card>
   );
 }

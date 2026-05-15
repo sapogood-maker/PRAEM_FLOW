@@ -8,23 +8,26 @@ datasource db {
 }
 
 model Tenant {
-  id         String             @id @default(uuid())
-  name       String
-  slug       String             @unique
-  cnpj       String?
-  city       String
-  state      String
-  active     Boolean            @default(true)
-  createdAt  DateTime           @default(now())
-  users      User[]
-  patients   Patient[]
-  drivers    Driver[]
-  vehicles   Vehicle[]
-  queues     OperationalQueue[]
-  routes     Route[]
-  trips      Trip[]
-  checkpoints Checkpoint[]
-  auditLogs  AuditLog[]
+  id               String             @id @default(uuid())
+  name             String
+  slug             String             @unique
+  cnpj             String?
+  city             String
+  state            String
+  active           Boolean            @default(true)
+  createdAt        DateTime           @default(now())
+  users            User[]
+  patients         Patient[]
+  drivers          Driver[]
+  vehicles         Vehicle[]
+  queues           OperationalQueue[]
+  routes           Route[]
+  trips            Trip[]
+  checkpoints      Checkpoint[]
+  auditLogs        AuditLog[]
+  dailyOperations  DailyOperation[]
+  operationShifts  OperationShift[]
+  vehicleTrackings VehicleTracking[]
 }
 
 model User {
@@ -52,25 +55,30 @@ enum Role {
 }
 
 model Patient {
-  id            String        @id @default(uuid())
-  tenantId      String
-  name          String
-  cpf           String
-  birthDate     DateTime
-  phone         String?
-  address       String
-  lat           Float?
-  lng           Float?
-  mobility      MobilityType
-  clinicalRisk  RiskLevel
-  recurrent     Boolean       @default(false)
-  notes         String?
-  qrCode        String?       @unique
-  operationalId String?       @unique
-  createdAt     DateTime      @default(now())
-  tenant        Tenant        @relation(fields: [tenantId], references: [id])
-  queues        OperationalQueue[]
-  trips         Trip[]
+  id                String        @id @default(uuid())
+  tenantId          String
+  name              String
+  cpf               String
+  birthDate         DateTime
+  phone             String?
+  address           String
+  lat               Float?
+  lng               Float?
+  mobility          MobilityType
+  clinicalRisk      RiskLevel
+  recurrent         Boolean       @default(false)
+  notes             String?
+  qrCode            String?       @unique
+  operationalId     String?       @unique
+  // Companion / Acompanhante
+  requiresCompanion Boolean       @default(false)
+  companionName     String?
+  companionDocument String?
+  companionPhone    String?
+  createdAt         DateTime      @default(now())
+  tenant            Tenant        @relation(fields: [tenantId], references: [id])
+  queues            OperationalQueue[]
+  trips             Trip[]
 
   @@unique([tenantId, cpf])
   @@index([tenantId])
@@ -116,18 +124,19 @@ enum DriverStatus {
 }
 
 model Vehicle {
-  id         String        @id @default(uuid())
-  tenantId   String
-  plate      String        @unique
-  model      String
-  type       VehicleType
-  capacity   Int
-  wheelchair Boolean       @default(false)
-  stretcher  Boolean       @default(false)
-  active     Boolean       @default(true)
-  status     VehicleStatus
-  tenant     Tenant        @relation(fields: [tenantId], references: [id])
-  routes     Route[]
+  id               String          @id @default(uuid())
+  tenantId         String
+  plate            String          @unique
+  model            String
+  type             VehicleType
+  capacity         Int
+  wheelchair       Boolean         @default(false)
+  stretcher        Boolean         @default(false)
+  active           Boolean         @default(true)
+  status           VehicleStatus
+  tenant           Tenant          @relation(fields: [tenantId], references: [id])
+  routes           Route[]
+  trackings        VehicleTracking[]
 
   @@index([tenantId])
 }
@@ -148,22 +157,63 @@ enum VehicleStatus {
 }
 
 model OperationalQueue {
-  id              String        @id @default(uuid())
-  tenantId        String
-  patientId       String
-  appointmentDate DateTime
-  destination     String
-  lat             Float?
-  lng             Float?
-  priority        QueuePriority
-  status          QueueStatus
-  notes           String?
-  createdAt       DateTime      @default(now())
-  tenant          Tenant        @relation(fields: [tenantId], references: [id])
-  patient         Patient       @relation(fields: [patientId], references: [id])
+  id                     String              @id @default(uuid())
+  tenantId               String
+  patientId              String
+  appointmentDate        DateTime
+  destination            String
+  lat                    Float?
+  lng                    Float?
+  priority               QueuePriority
+  status                 QueueStatus
+  queueType              QueueType           @default(LOGISTICS)
+  notes                  String?
+  // Confirmação operacional
+  confirmationStatus     ConfirmationStatus  @default(PENDING)
+  confirmedAt            DateTime?
+  confirmationChannel    ConfirmationChannel @default(MANUAL)
+  confirmationAttempts   Int                 @default(0)
+  lastContactAt          DateTime?
+  // Recorrência de tratamento
+  recurrenceType         RecurrenceType?
+  recurrenceDays         String?             // JSON array de dias: "[1,3,5]" (0=dom … 6=sáb)
+  recurrenceInterval     Int?                @default(1)
+  recurrenceEndDate      DateTime?
+  createdAt              DateTime            @default(now())
+  tenant                 Tenant              @relation(fields: [tenantId], references: [id])
+  patient                Patient             @relation(fields: [patientId], references: [id])
 
   @@index([tenantId])
   @@index([patientId])
+  @@index([confirmationStatus])
+}
+
+enum QueueType {
+  MEDICAL
+  LOGISTICS
+}
+
+enum ConfirmationStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  UNREACHABLE
+  WAITING_MANUAL_CONFIRMATION
+}
+
+enum ConfirmationChannel {
+  TELEGRAM
+  WHATSAPP
+  SMS
+  PHONE_CALL
+  MANUAL
+}
+
+enum RecurrenceType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
 }
 
 enum QueuePriority {
@@ -279,4 +329,82 @@ model AuditLog {
 
   @@index([tenantId])
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle Tracking — separado do motorista; pertence ao veículo e à rota
+// ---------------------------------------------------------------------------
+model VehicleTracking {
+  id        String   @id @default(uuid())
+  tenantId  String
+  vehicleId String
+  routeId   String?
+  lat       Float
+  lng       Float
+  speed     Float?   // km/h
+  heading   Float?   // graus 0–360
+  accuracy  Float?   // metros
+  ignition  Boolean  @default(false)
+  online    Boolean  @default(true)
+  timestamp DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+
+  @@index([tenantId])
+  @@index([vehicleId])
+  @@index([routeId])
+}
+
+// ---------------------------------------------------------------------------
+// DailyOperation — operação do dia (prefeitura pensa em "operação diária")
+// ---------------------------------------------------------------------------
+model DailyOperation {
+  id              String          @id @default(uuid())
+  tenantId        String
+  date            DateTime
+  status          OperationStatus @default(PLANNING)
+  totalVehicles   Int             @default(0)
+  totalDrivers    Int             @default(0)
+  totalPatients   Int             @default(0)
+  totalRoutes     Int             @default(0)
+  notes           String?
+  createdAt       DateTime        @default(now())
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  shifts          OperationShift[]
+
+  @@unique([tenantId, date])
+  @@index([tenantId])
+}
+
+enum OperationStatus {
+  PLANNING
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// OperationShift — turno operacional (manhã, tarde, noite, integral)
+// ---------------------------------------------------------------------------
+model OperationShift {
+  id               String         @id @default(uuid())
+  tenantId         String
+  dailyOperationId String
+  name             String
+  startTime        String         // "06:00"
+  endTime          String         // "12:00"
+  status           ShiftStatus    @default(PENDING)
+  createdAt        DateTime       @default(now())
+  tenant           Tenant         @relation(fields: [tenantId], references: [id])
+  dailyOperation   DailyOperation @relation(fields: [dailyOperationId], references: [id])
+
+  @@index([tenantId])
+  @@index([dailyOperationId])
+}
+
+enum ShiftStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
 }

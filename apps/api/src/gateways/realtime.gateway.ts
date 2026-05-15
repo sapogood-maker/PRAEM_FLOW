@@ -1,10 +1,11 @@
 import {
+  ConnectedSocket,
   MessageBody,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { sanitizePayload } from '../common/sanitize';
 
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -12,6 +13,16 @@ export class RealtimeGateway {
   @WebSocketServer()
   server!: Server;
 
+  // Vehicle sends GPS position — broadcast to tenant room
+  @SubscribeMessage('vehicle:tracking')
+  onVehicleTracking(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : 'global';
+    client.to(room).emit('vehicle:tracking', safe);
+    return { ok: true };
+  }
+
+  // Legacy vehicle:position kept for compatibility
   @SubscribeMessage('vehicle:position')
   onVehiclePosition(@MessageBody() payload: unknown) {
     this.server.emit('vehicle:position', sanitizePayload(payload));
@@ -36,7 +47,20 @@ export class RealtimeGateway {
     return { ok: true };
   }
 
+  @SubscribeMessage('join:tenant')
+  onJoinTenant(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    if (typeof safe['tenantId'] === 'string') {
+      client.join(`tenant:${safe['tenantId']}`);
+    }
+    return { ok: true };
+  }
+
   emitDashboardKpis(payload: unknown) {
     this.server.emit('dashboard:kpis', sanitizePayload(payload));
+  }
+
+  emitToTenant(tenantId: string, event: string, payload: unknown) {
+    this.server.to(`tenant:${tenantId}`).emit(event, sanitizePayload(payload));
   }
 }

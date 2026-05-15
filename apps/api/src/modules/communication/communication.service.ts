@@ -1,10 +1,19 @@
 import { Injectable } from '@nestjs/common';
 
-interface MessagePayload {
+export type CommunicationFlowType =
+  | 'CONFIRMATION'
+  | 'REMINDER'
+  | 'CHANGE'
+  | 'DELAY'
+  | 'RETURN'
+  | 'CANCELLATION';
+
+export interface MessagePayload {
   tenantId: string;
   to: string;
   message: string;
-  provider: 'telegram' | 'whatsapp' | 'sms';
+  provider: 'telegram' | 'whatsapp' | 'sms' | 'voice_call';
+  flow?: CommunicationFlowType;
 }
 
 interface MessageProvider {
@@ -29,12 +38,19 @@ class SmsProvider implements MessageProvider {
   }
 }
 
+class VoiceCallProvider implements MessageProvider {
+  async send() {
+    return { delivered: true, provider: 'voice_call' };
+  }
+}
+
 @Injectable()
 export class CommunicationService {
   private providers: Record<MessagePayload['provider'], MessageProvider> = {
     telegram: new TelegramProvider(),
     whatsapp: new WhatsAppProvider(),
     sms: new SmsProvider(),
+    voice_call: new VoiceCallProvider(),
   };
 
   async send(payload: MessagePayload) {

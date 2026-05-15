@@ -15,6 +15,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AiOpsModule } from './modules/ai-ops/ai-ops.module';
+import { DailyOperationModule } from './modules/daily-operation/daily-operation.module';
+import { OperationShiftModule } from './modules/operation-shift/operation-shift.module';
 import { RealtimeGateway } from './gateways/realtime.gateway';
 import { DashboardService } from './modules/dashboard/dashboard.service';
 
@@ -36,6 +38,8 @@ import { DashboardService } from './modules/dashboard/dashboard.service';
     AnalyticsModule,
     AuditModule,
     AiOpsModule,
+    DailyOperationModule,
+    OperationShiftModule,
   ],
   providers: [RealtimeGateway],
 })

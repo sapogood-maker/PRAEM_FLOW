@@ -2,7 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { queueService } from '@/services/queue.service';
+import type { QueueItem } from '@/types';
 
 export function useQueue() {
-  return useQuery({ queryKey: ['queue'], queryFn: queueService.list });
+  return useQuery<QueueItem[]>({ queryKey: ['queue'], queryFn: queueService.list });
 }

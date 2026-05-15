@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class DriversService {
@@ -9,7 +8,7 @@ export class DriversService {
   async findAll(tenantId: string, query: { search?: string; status?: string; page?: number; limit?: number }) {
     const { search, status, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
-    const where: Prisma.DriverWhereInput = {
+    const where: any = {
       tenantId,
       ...(status && { status: status as any }),
       ...(search && {
@@ -29,7 +28,7 @@ export class DriversService {
     return d;
   }
 
-  async update(id: string, tenantId: string, data: Prisma.DriverUncheckedUpdateInput) {
+  async update(id: string, tenantId: string, data: any) {
     await this.findOne(id, tenantId);
     return this.prisma.driver.update({ where: { id }, data });
   }

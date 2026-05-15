@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class RoutesService {
@@ -9,7 +8,7 @@ export class RoutesService {
   async findAll(tenantId: string, query: { status?: string; date?: string; page?: number; limit?: number }) {
     const { status, date, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
-    const where: Prisma.RouteWhereInput = {
+    const where: any = {
       tenantId,
       ...(status && { status: status as any }),
       ...(date && {
@@ -49,11 +48,11 @@ export class RoutesService {
     return route;
   }
 
-  async create(tenantId: string, data: Prisma.RouteUncheckedCreateInput) {
+  async create(tenantId: string, data: any) {
     return this.prisma.route.create({ data: { ...data, tenantId } });
   }
 
-  async update(id: string, tenantId: string, data: Prisma.RouteUncheckedUpdateInput) {
+  async update(id: string, tenantId: string, data: any) {
     await this.findOne(id, tenantId);
     return this.prisma.route.update({ where: { id }, data });
   }
@@ -68,4 +67,5 @@ export class RoutesService {
     return { routeId: id, optimized: true, message: 'Rota otimizada por heurística de distância' };
   }
 }
+
 

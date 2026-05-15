@@ -75,7 +75,7 @@ export class DashboardService {
       }),
     ]);
 
-    const estimatedKmToday = routesWithKm.reduce((sum, r) => sum + (r.estimatedKm ?? 0), 0);
+    const estimatedKmToday = routesWithKm.reduce((sum: number, r: { estimatedKm: number | null }) => sum + (r.estimatedKm ?? 0), 0);
     const confirmationRate = patientsToday > 0 ? Math.round((confirmedCount / patientsToday) * 100) : 0;
     const absenceRate = patientsToday > 0 ? Math.round((absences / patientsToday) * 100) : 0;
 

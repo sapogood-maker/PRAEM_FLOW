@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 
 export interface ListPatientsQuery {
   tenantId: string;
@@ -16,7 +15,7 @@ export class PatientsService {
 
   async list({ tenantId, search, clinicalRisk, page = 1, limit = 20 }: ListPatientsQuery) {
     const skip = (page - 1) * limit;
-    const where: Prisma.PatientWhereInput = {
+    const where: any = {
       tenantId,
       ...(search && {
         OR: [
@@ -41,7 +40,7 @@ export class PatientsService {
     return patient;
   }
 
-  async create(tenantId: string, data: Prisma.PatientUncheckedCreateInput) {
+  async create(tenantId: string, data: any) {
     const existing = await this.prisma.patient.findFirst({
       where: { tenantId, cpf: data.cpf },
     });
@@ -52,7 +51,7 @@ export class PatientsService {
     });
   }
 
-  async update(id: string, tenantId: string, data: Prisma.PatientUncheckedUpdateInput) {
+  async update(id: string, tenantId: string, data: any) {
     await this.findOne(id, tenantId);
     return this.prisma.patient.update({ where: { id }, data });
   }
@@ -87,4 +86,5 @@ export class PatientsService {
     return { valid: true, patient };
   }
 }
+
 

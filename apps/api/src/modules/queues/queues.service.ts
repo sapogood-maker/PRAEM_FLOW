@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class QueuesService {
@@ -16,7 +15,7 @@ export class QueuesService {
   }) {
     const { queueType, priority, status, confirmationStatus, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
-    const where: Prisma.OperationalQueueWhereInput = {
+    const where: any = {
       tenantId,
       ...(queueType && { queueType: queueType as any }),
       ...(priority && { priority: priority as any }),
@@ -36,7 +35,7 @@ export class QueuesService {
     return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
-  async create(tenantId: string, data: Prisma.OperationalQueueUncheckedCreateInput) {
+  async create(tenantId: string, data: any) {
     return this.prisma.operationalQueue.create({ data: { ...data, tenantId } });
   }
 

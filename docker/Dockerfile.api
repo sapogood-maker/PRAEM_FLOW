@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:20 AS builder
 
 WORKDIR /app
 
@@ -8,17 +8,13 @@ COPY packages/shared/package.json ./packages/shared/package.json
 
 RUN npm install
 
-COPY tsconfig.base.json ./
-COPY apps/api ./apps/api
-COPY packages/shared ./packages/shared
+COPY . .
 
-# Prisma generate
-RUN npx prisma generate --schema=apps/api/src/prisma/schema.prisma
+RUN npx prisma generate
 
-# Build NestJS
 RUN npm run build -w apps/api
 
-FROM node:20-alpine AS runner
+FROM node:20
 
 WORKDIR /app
 
@@ -27,7 +23,7 @@ ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
-COPY --from=builder /app/apps/api/src/prisma ./apps/api/src/prisma
+COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
 
 EXPOSE 3010
 

@@ -13,7 +13,7 @@ COPY apps/api ./apps/api
 COPY packages/shared ./packages/shared
 
 # Prisma generate
-RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
+RUN npx prisma generate --schema=apps/api/src/prisma/schema.prisma
 
 # Build NestJS
 RUN npm run build -w apps/api
@@ -27,7 +27,7 @@ ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
-COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder /app/apps/api/src/prisma ./apps/api/src/prisma
 
 EXPOSE 3010
 

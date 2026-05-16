@@ -80,6 +80,30 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     return { ok: true };
   }
 
+  @SubscribeMessage('vehicle.online')
+  onVehicleOnline(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) this.server.to(room).emit('vehicle.online', safe);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('vehicle.offline')
+  onVehicleOffline(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) this.server.to(room).emit('vehicle.offline', safe);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('vehicle.idle')
+  onVehicleIdle(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) this.server.to(room).emit('vehicle.idle', safe);
+    return { ok: true };
+  }
+
   // ─── Patient domain ───────────────────────────────────────────────────────
 
   @SubscribeMessage('patient.checked_in')
@@ -139,6 +163,22 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     const safe = sanitizePayload(payload) as Record<string, unknown>;
     const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
     if (room) this.server.to(room).emit('trip.status_changed', safe);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('trip.started')
+  onTripStarted(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) this.server.to(room).emit('trip.started', safe);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('trip.completed')
+  onTripCompleted(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) this.server.to(room).emit('trip.completed', safe);
     return { ok: true };
   }
 

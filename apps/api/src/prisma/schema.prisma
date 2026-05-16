@@ -30,6 +30,7 @@ model Tenant {
   vehicleTrackings     VehicleTracking[]
   healthcareLocations  HealthcareLocation[]
   devices              Device[]
+  geoFenceEvents       GeoFenceEvent[]
 }
 
 model User {
@@ -414,24 +415,65 @@ model AuditLog {
 // Vehicle Tracking — separado do motorista; pertence ao veículo e à rota
 // ---------------------------------------------------------------------------
 model VehicleTracking {
-  id                String   @id @default(uuid())
-  tenantId          String
-  vehicleId         String
-  routeId           String?
-  lat               Float
-  lng               Float
-  speed             Float?            // km/h
-  heading           Float?            // graus 0–360
-  accuracy          Float?            // metros
-  batteryLevel      Float?            // 0–100 %
-  signalStrength    Float?            // dBm
-  gpsSource         String?           // GPS | NETWORK | FUSED
-  ignition          Boolean  @default(false)
-  online            Boolean  @default(true)
-  lastHeartbeatAt   DateTime?
-  timestamp         DateTime @default(now())
-  tenant            Tenant   @relation(fields: [tenantId], references: [id])
-  vehicle           Vehicle  @relation(fields: [vehicleId], references: [id])
+  id                    String                   @id @default(uuid())
+  tenantId              String
+  vehicleId             String
+  routeId               String?
+  driverId              String?
+  lat                   Float
+  lng                   Float
+  speed                 Float?                   // km/h
+  heading               Float?                   // graus 0–360
+  accuracy              Float?                   // metros
+  batteryLevel          Float?                   // 0–100 %
+  signalStrength        Float?                   // dBm
+  gpsSource             String?                  // GPS | NETWORK | FUSED
+  ignition              Boolean                  @default(false)
+  online                Boolean                  @default(true)
+  operationalStatus     VehicleOperationalStatus @default(OFFLINE)
+  lastHeartbeatAt       DateTime?
+  lastMovementAt        DateTime?                // last time speed > 0
+  timestamp             DateTime                 @default(now())
+  tenant                Tenant                   @relation(fields: [tenantId], references: [id])
+  vehicle               Vehicle                  @relation(fields: [vehicleId], references: [id])
+
+  @@index([tenantId])
+  @@index([vehicleId])
+  @@index([routeId])
+  @@index([operationalStatus])
+  @@index([lastHeartbeatAt])
+}
+
+// ---------------------------------------------------------------------------
+// VehicleOperationalStatus — derived from GPS + speed + heartbeat
+// ---------------------------------------------------------------------------
+enum VehicleOperationalStatus {
+  ONLINE
+  OFFLINE
+  MOVING
+  IDLE
+  BOARDING
+  WAITING
+  ARRIVED
+  MAINTENANCE
+}
+
+// ---------------------------------------------------------------------------
+// GeoFenceEvent — prepared for automated geofence detection (hospital/UBS arrival)
+// ---------------------------------------------------------------------------
+model GeoFenceEvent {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  vehicleId            String
+  routeId              String?
+  tripId               String?
+  eventType            String   // ARRIVED_AT_DESTINATION | LEFT_DESTINATION | ENTERED_ZONE | EXITED_ZONE
+  locationId           String?  // HealthcareLocation id if applicable
+  locationName         String?
+  lat                  Float
+  lng                  Float
+  detectedAt           DateTime @default(now())
+  tenant               Tenant   @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
   @@index([vehicleId])

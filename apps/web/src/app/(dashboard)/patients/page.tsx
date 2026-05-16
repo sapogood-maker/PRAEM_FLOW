@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { patientService } from '@/services/operational.service';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import QRCode from 'qrcode';
 
 const RISK_BADGE: Record<string, string> = {
   CRITICAL: 'bg-red-900 text-red-300',
@@ -18,6 +19,13 @@ const MOBILITY_LABEL: Record<string, string> = {
   STRETCHER: '🛏 Maca',
   OXYGEN: '💨 Oxigênio',
 };
+
+/** Mask CPF: show only first 3 and last 2 digits for listing */
+function maskCpf(cpf: string): string {
+  const digits = cpf.replace(/\D/g, '');
+  if (digits.length !== 11) return '***.***.***-**';
+  return `${digits.slice(0, 3)}.***.***-${digits.slice(9)}`;
+}
 
 type PatientForm = {
   name: string;
@@ -38,12 +46,22 @@ const EMPTY_FORM: PatientForm = {
   requiresCompanion: false, companionName: '', companionPhone: '',
 };
 
+type QrModal = {
+  patientId: string;
+  patientName: string;
+  qrToken: string | null;
+  loading: boolean;
+};
+
 export default function PatientsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<PatientForm>(EMPTY_FORM);
   const [error, setError] = useState('');
+  const [qrModal, setQrModal] = useState<QrModal | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const printRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['patients', search],
@@ -62,6 +80,61 @@ export default function PatientsPage() {
       setError(err?.response?.data?.message ?? 'Erro ao criar paciente.');
     },
   });
+
+  // Render QR code as data URL whenever qrToken changes
+  useEffect(() => {
+    if (!qrModal?.qrToken) { setQrDataUrl(null); return; }
+    QRCode.toDataURL(qrModal.qrToken, {
+      width: 256,
+      margin: 2,
+      color: { dark: '#000000', light: '#ffffff' },
+    }).then(setQrDataUrl).catch(() => setQrDataUrl(null));
+  }, [qrModal?.qrToken]);
+
+  async function openQrModal(patientId: string, patientName: string) {
+    setQrModal({ patientId, patientName, qrToken: null, loading: true });
+    try {
+      const { qrToken } = await patientService.qr(patientId);
+      setQrModal({ patientId, patientName, qrToken, loading: false });
+    } catch {
+      setQrModal(null);
+    }
+  }
+
+  function handlePrint() {
+    if (!printRef.current || !qrDataUrl || !qrModal) return;
+    const win = window.open('', '_blank', 'width=600,height=800');
+    if (!win) return;
+    win.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8"/>
+          <title>QR Code – ${qrModal.patientName}</title>
+          <style>
+            @page { size: A6 portrait; margin: 10mm; }
+            body { font-family: sans-serif; text-align: center; background: #fff; color: #000; }
+            h2 { font-size: 14pt; margin: 0 0 6px; }
+            p  { font-size: 8pt; color: #555; margin: 2px 0; }
+            img { width: 200px; height: 200px; margin: 12px auto; display: block; }
+            .token { font-size: 7pt; font-family: monospace; color: #888; word-break: break-all; margin-top: 8px; }
+            .footer { font-size: 7pt; color: #aaa; margin-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <h2>${qrModal.patientName}</h2>
+          <p>Sistema de Transporte SUS – PRAEM OPS</p>
+          <img src="${qrDataUrl}" alt="QR Code"/>
+          <p class="token">${qrModal.qrToken}</p>
+          <p class="footer">Documento operacional. Não contém dados pessoais sensíveis.</p>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
+    win.close();
+  }
 
   const items = data?.items ?? [];
 
@@ -104,16 +177,17 @@ export default function PatientsPage() {
                 <th className='p-3 text-left'>Risco</th>
                 <th className='p-3 text-left'>Acomp.</th>
                 <th className='p-3 text-left'>Cód. Op.</th>
+                <th className='p-3 text-left'>QR</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
-                <tr><td colSpan={6} className='p-6 text-center text-slate-500'>Nenhum paciente cadastrado</td></tr>
+                <tr><td colSpan={7} className='p-6 text-center text-slate-500'>Nenhum paciente cadastrado</td></tr>
               )}
               {items.map((p: any) => (
                 <tr key={p.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
                   <td className='p-3 font-medium'>{p.name}</td>
-                  <td className='p-3 font-mono text-xs'>{p.cpf}</td>
+                  <td className='p-3 font-mono text-xs text-slate-500'>{maskCpf(p.cpf ?? '')}</td>
                   <td className='p-3 text-xs'>{MOBILITY_LABEL[p.mobility] ?? p.mobility}</td>
                   <td className='p-3'>
                     <span className={`rounded px-2 py-0.5 text-xs font-medium ${RISK_BADGE[p.clinicalRisk] ?? 'text-slate-400'}`}>
@@ -122,6 +196,16 @@ export default function PatientsPage() {
                   </td>
                   <td className='p-3 text-center'>{p.requiresCompanion ? '👥' : '—'}</td>
                   <td className='p-3 font-mono text-xs text-slate-500'>{p.operationalId ?? '—'}</td>
+                  <td className='p-3'>
+                    <button
+                      type='button'
+                      title='Gerar / Visualizar QR Code'
+                      onClick={() => openQrModal(p.id, p.name)}
+                      className='rounded bg-slate-800 px-2 py-1 text-xs text-cyan-400 hover:bg-slate-700 transition-colors'
+                    >
+                      📱 QR
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -129,7 +213,54 @@ export default function PatientsPage() {
         </div>
       )}
 
-      {/* Create modal */}
+      {/* QR Code modal */}
+      {qrModal && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/70'>
+          <div className='w-full max-w-sm rounded-xl border border-border bg-panel p-6 space-y-4'>
+            <div className='flex items-center justify-between'>
+              <h3 className='text-lg font-semibold'>QR Code — {qrModal.patientName}</h3>
+              <button type='button' onClick={() => setQrModal(null)} className='text-slate-400 hover:text-slate-200'>✕</button>
+            </div>
+
+            {qrModal.loading ? (
+              <div className='flex justify-center py-8'><LoadingSpinner /></div>
+            ) : qrDataUrl ? (
+              <div className='space-y-3' ref={printRef}>
+                <div className='flex justify-center rounded-lg bg-white p-4'>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={qrDataUrl} alt='QR Code do paciente' width={200} height={200} />
+                </div>
+                <p className='text-center text-xs text-slate-500'>
+                  Token operacional seguro (não contém CPF)
+                </p>
+                <p className='break-all text-center font-mono text-[10px] text-slate-600'>
+                  {qrModal.qrToken}
+                </p>
+                <div className='flex gap-2'>
+                  <button
+                    type='button'
+                    onClick={handlePrint}
+                    className='flex-1 rounded-lg border border-border px-3 py-2 text-sm hover:bg-slate-800 transition-colors'
+                  >
+                    🖨️ Imprimir (A6)
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => setQrModal(null)}
+                    className='flex-1 rounded-lg bg-cyan-700 px-3 py-2 text-sm font-semibold hover:bg-cyan-600 transition-colors'
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className='text-center text-sm text-red-400'>Erro ao gerar QR Code.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Create patient modal */}
       {showModal && (
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60'>
           <div className='w-full max-w-lg rounded-xl border border-border bg-panel p-6 space-y-4'>

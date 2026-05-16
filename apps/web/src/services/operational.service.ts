@@ -7,6 +7,15 @@ export const patientService = {
   create: (data: any) => api.post('/patients', data).then((r) => r.data),
   update: (id: string, data: any) => api.put(`/patients/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/patients/${id}`).then((r) => r.data),
+  /** Returns (or re-generates) the secure QR token for a patient */
+  qr: (id: string) => api.get(`/patients/${id}/qr`).then((r) => r.data),
+  /** Validates a QR token scan — returns safe operational data, never CPF */
+  validateQr: (payload: { qrToken: string; vehicleId?: string; checkpoint?: string }) =>
+    api.post('/patients/qr/validate', payload).then((r) => r.data),
+  /** Returns QR scan history (audit log) for a patient */
+  qrLogs: (id: string) => api.get(`/patients/${id}/qr/logs`).then((r) => r.data),
+  /** Deactivates the current QR token */
+  revokeQr: (id: string) => api.post(`/patients/${id}/qr/revoke`).then((r) => r.data),
 };
 
 export const vehicleService = {

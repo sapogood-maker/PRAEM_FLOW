@@ -73,6 +73,11 @@ model Patient {
   notes             String?
   qrCode            String?       @unique
   operationalId     String?       @unique
+  // QR Code seguro (LGPD) — token criptográfico, nunca contém CPF
+  qrToken           String?       @unique
+  qrIssuedAt        DateTime?
+  qrActive          Boolean       @default(false)
+  qrLastReadAt      DateTime?
   // Companion / Acompanhante
   requiresCompanion Boolean       @default(false)
   companionName     String?
@@ -82,9 +87,11 @@ model Patient {
   tenant            Tenant        @relation(fields: [tenantId], references: [id])
   queues            OperationalQueue[]
   trips             Trip[]
+  qrAccessLogs      PatientQrAccessLog[]
 
   @@unique([tenantId, cpf])
   @@index([tenantId])
+  @@index([qrToken])
 }
 
 enum MobilityType {
@@ -410,4 +417,25 @@ enum ShiftStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// PatientQrAccessLog — rastreabilidade e antifraude de leituras de QR Code
+// ---------------------------------------------------------------------------
+model PatientQrAccessLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  patientId  String
+  qrToken    String
+  scannedAt  DateTime @default(now())
+  ip         String?
+  device     String?
+  vehicleId  String?
+  checkpoint String?
+  patient    Patient  @relation(fields: [patientId], references: [id])
+
+  @@index([patientId])
+  @@index([qrToken])
+  @@index([scannedAt])
+  @@index([tenantId])
 }

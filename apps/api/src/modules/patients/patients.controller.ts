@@ -1,4 +1,20 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Request, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  Ip,
+  Param,
+  Post,
+  Put,
+  Query,
+  Request,
+  Res,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PatientsService } from './patients.service';
@@ -49,11 +65,56 @@ export class PatientsController {
     return this.patientsService.remove(id, req.user.tenantId);
   }
 
+  /** Returns (or re-generates) the secure QR token for the patient */
   @Get(':id/qr')
   qr(@Request() req: AuthRequest, @Param('id') id: string) {
     return this.patientsService.qr(id, req.user.tenantId);
   }
 
+  /** Returns a PNG image of the QR Code for printing / display */
+  @Get(':id/qr/image')
+  async qrImage(
+    @Request() req: AuthRequest,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const buffer = await this.patientsService.getQrImage(id, req.user.tenantId);
+    res.set({ 'Content-Type': 'image/png', 'Content-Disposition': 'inline; filename="qr.png"' });
+    return new StreamableFile(buffer);
+  }
+
+  /**
+   * Validates a QR Code scan — operational endpoint used by drivers / totems.
+   * NEVER returns CPF or other sensitive PII.
+   */
+  @Post('qr/validate')
+  validateQr(
+    @Request() req: AuthRequest,
+    @Body() body: { qrToken: string; vehicleId?: string; checkpoint?: string },
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.patientsService.validateQr(
+      req.user.tenantId,
+      sanitizePayload(body) as { qrToken: string; vehicleId?: string; checkpoint?: string },
+      ip,
+      userAgent,
+    );
+  }
+
+  /** Returns QR scan history for a patient */
+  @Get(':id/qr/logs')
+  qrLogs(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.patientsService.qrAccessLogs(id, req.user.tenantId);
+  }
+
+  /** Deactivates the current QR token for a patient */
+  @Post(':id/qr/revoke')
+  revokeQr(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.patientsService.revokeQr(id, req.user.tenantId);
+  }
+
+  /** Legacy scan endpoint kept for backwards compat */
   @Post('scan')
   scan(@Request() req: AuthRequest, @Body() body: { qrCode?: string; cpf?: string }) {
     return this.patientsService.scan(req.user.tenantId, body);

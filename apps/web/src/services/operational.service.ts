@@ -40,3 +40,14 @@ export const routeService = {
   update: (id: string, data: any) => api.put(`/routes/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/routes/${id}`).then((r) => r.data),
 };
+
+export const healthcareLocationService = {
+  list: (params?: Record<string, string | number>) =>
+    api.get('/healthcare-locations', { params }).then((r) => r.data),
+  get: (id: string) => api.get(`/healthcare-locations/${id}`).then((r) => r.data),
+  create: (data: any) => api.post('/healthcare-locations', data).then((r) => r.data),
+  update: (id: string, data: any) => api.put(`/healthcare-locations/${id}`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/healthcare-locations/${id}`).then((r) => r.data),
+  bySpecialty: (specialty: string) =>
+    api.get(`/healthcare-locations/by-specialty/${encodeURIComponent(specialty)}`).then((r) => r.data),
+};

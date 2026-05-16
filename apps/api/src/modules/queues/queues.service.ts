@@ -27,7 +27,10 @@ export class QueuesService {
         where,
         skip,
         take: limit,
-        include: { patient: { select: { id: true, name: true, cpf: true, requiresCompanion: true, clinicalRisk: true } } },
+        include: {
+          patient: { select: { id: true, name: true, requiresCompanion: true, clinicalRisk: true } },
+          healthcareLocation: { select: { id: true, name: true, type: true, city: true, address: true, latitude: true, longitude: true, specialties: { select: { specialty: true } } } },
+        },
         orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
       }),
       this.prisma.operationalQueue.count({ where }),

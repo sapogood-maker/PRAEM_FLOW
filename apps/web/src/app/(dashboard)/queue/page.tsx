@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useQueue } from '@/hooks/useQueue';
 import { queueService } from '@/services/queue.service';
-import { patientService } from '@/services/operational.service';
+import { patientService, healthcareLocationService } from '@/services/operational.service';
 import type { QueueType } from '@/types';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
@@ -23,16 +23,26 @@ const CONFIRMATION_BADGE: Record<string, string> = {
   WAITING_MANUAL_CONFIRMATION: 'bg-cyan-900 text-cyan-300',
 };
 
+const TYPE_LABEL: Record<string, string> = {
+  HOSPITAL: '🏥',
+  CLINIC: '🏨',
+  LAB: '🔬',
+  UBS: '🩺',
+  SPECIALTY_CENTER: '⚕️',
+  HEMODIALYSIS: '💉',
+  ONCOLOGY_CENTER: '🎗️',
+};
+
 type QueueForm = {
   patientId: string;
-  destination: string;
+  healthcareLocationId: string;
   appointmentDate: string;
   priority: string;
   queueType: string;
   notes: string;
 };
 const EMPTY_FORM: QueueForm = {
-  patientId: '', destination: '', appointmentDate: '',
+  patientId: '', healthcareLocationId: '', appointmentDate: '',
   priority: 'NORMAL', queueType: 'LOGISTICS', notes: '',
 };
 
@@ -42,6 +52,7 @@ export default function QueuePage() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<QueueForm>(EMPTY_FORM);
+  const [locationSearch, setLocationSearch] = useState('');
   const [error, setError] = useState('');
 
   const { data, isLoading } = useQueue({ type: activeTab, limit: 50 });
@@ -54,13 +65,34 @@ export default function QueuePage() {
   });
   const patients = (patientsData?.items ?? []) as any[];
 
+  const { data: locationsData } = useQuery({
+    queryKey: ['healthcare-locations-select', locationSearch],
+    queryFn: () => healthcareLocationService.list({ limit: 100, active: 'true', ...(locationSearch ? { search: locationSearch } : {}) }),
+  });
+  const locations = (locationsData?.items ?? []) as any[];
+
   const create = useMutation({
-    mutationFn: (body: QueueForm) =>
-      queueService.create({ ...body, status: 'WAITING', confirmationStatus: 'PENDING', appointmentDate: new Date(body.appointmentDate) }),
+    mutationFn: (body: QueueForm) => {
+      const selectedLoc = locations.find((l: any) => l.id === body.healthcareLocationId);
+      return queueService.create({
+        patientId: body.patientId,
+        healthcareLocationId: body.healthcareLocationId || undefined,
+        destination: selectedLoc?.name ?? '',
+        lat: selectedLoc?.latitude ?? undefined,
+        lng: selectedLoc?.longitude ?? undefined,
+        status: 'WAITING',
+        confirmationStatus: 'PENDING',
+        appointmentDate: new Date(body.appointmentDate),
+        priority: body.priority,
+        queueType: body.queueType,
+        notes: body.notes || undefined,
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       setShowModal(false);
       setForm(EMPTY_FORM);
+      setLocationSearch('');
       setError('');
     },
     onError: (err: any) => setError(err?.response?.data?.message ?? 'Erro ao criar entrada na fila.'),
@@ -79,6 +111,7 @@ export default function QueuePage() {
   const filtered = search
     ? items.filter((q: any) =>
         q.patient?.name?.toLowerCase().includes(search.toLowerCase()) ||
+        q.healthcareLocation?.name?.toLowerCase().includes(search.toLowerCase()) ||
         q.destination?.toLowerCase().includes(search.toLowerCase()))
     : items;
 
@@ -125,31 +158,43 @@ export default function QueuePage() {
               {filtered.length === 0 && (
                 <tr><td colSpan={6} className='p-6 text-center text-slate-500'>Nenhum paciente nesta fila</td></tr>
               )}
-              {filtered.map((q: any) => (
-                <tr key={q.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
-                  <td className='p-3 font-medium'>{q.patient?.name ?? '—'}</td>
-                  <td className='p-3 text-xs text-slate-300 max-w-[160px] truncate'>{q.destination}</td>
-                  <td className='p-3 text-xs'>
-                    {q.appointmentDate ? new Date(q.appointmentDate).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
-                  </td>
-                  <td className='p-3'>
-                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${PRIORITY_BADGE[q.priority] ?? 'text-slate-400'}`}>{q.priority}</span>
-                  </td>
-                  <td className='p-3'>
-                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${CONFIRMATION_BADGE[q.confirmationStatus] ?? 'text-slate-400'}`}>
-                      {q.confirmationStatus?.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className='p-3'>
-                    {q.confirmationStatus !== 'CONFIRMED' && (
-                      <button type='button' onClick={() => updateConfirmation.mutate({ id: q.id, status: 'CONFIRMED' })}
-                        className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>
-                        ✓ Confirmar
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((q: any) => {
+                const loc = q.healthcareLocation;
+                return (
+                  <tr key={q.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
+                    <td className='p-3 font-medium'>{q.patient?.name ?? '—'}</td>
+                    <td className='p-3 text-xs text-slate-300 max-w-[200px]'>
+                      {loc ? (
+                        <span className='flex flex-col gap-0.5'>
+                          <span className='font-medium'>{TYPE_LABEL[loc.type] ?? ''} {loc.name}</span>
+                          <span className='text-slate-500'>{loc.city}</span>
+                        </span>
+                      ) : (
+                        <span className='truncate'>{q.destination ?? '—'}</span>
+                      )}
+                    </td>
+                    <td className='p-3 text-xs'>
+                      {q.appointmentDate ? new Date(q.appointmentDate).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                    </td>
+                    <td className='p-3'>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${PRIORITY_BADGE[q.priority] ?? 'text-slate-400'}`}>{q.priority}</span>
+                    </td>
+                    <td className='p-3'>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${CONFIRMATION_BADGE[q.confirmationStatus] ?? 'text-slate-400'}`}>
+                        {q.confirmationStatus?.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td className='p-3'>
+                      {q.confirmationStatus !== 'CONFIRMED' && (
+                        <button type='button' onClick={() => updateConfirmation.mutate({ id: q.id, status: 'CONFIRMED' })}
+                          className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>
+                          ✓ Confirmar
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -160,25 +205,57 @@ export default function QueuePage() {
           <div className='w-full max-w-lg rounded-xl border border-border bg-panel p-6 space-y-4'>
             <div className='flex items-center justify-between'>
               <h3 className='text-lg font-semibold'>Adicionar à Fila</h3>
-              <button type='button' onClick={() => setShowModal(false)} className='text-slate-400 hover:text-slate-200'>✕</button>
+              <button type='button' onClick={() => { setShowModal(false); setForm(EMPTY_FORM); setLocationSearch(''); }} className='text-slate-400 hover:text-slate-200'>✕</button>
             </div>
             {error && <p className='text-sm text-red-400'>{error}</p>}
             <div className='grid gap-3 sm:grid-cols-2'>
+              {/* Patient */}
               <label className='col-span-2 space-y-1'>
                 <span className='text-xs text-slate-400'>Paciente *</span>
                 <select className='w-full rounded bg-slate-900 border border-border px-3 py-2 text-sm' value={form.patientId} onChange={(e) => setForm((f) => ({ ...f, patientId: e.target.value }))}>
                   <option value=''>Selecionar paciente…</option>
-                  {patients.map((p: any) => (<option key={p.id} value={p.id}>{p.name} — {p.cpf}</option>))}
+                  {patients.map((p: any) => (<option key={p.id} value={p.id}>{p.name}</option>))}
                 </select>
               </label>
+
+              {/* Destination — searchable from registered locations */}
               <label className='col-span-2 space-y-1'>
-                <span className='text-xs text-slate-400'>Destino *</span>
-                <input className='w-full rounded bg-slate-900 border border-border px-3 py-2 text-sm' value={form.destination} onChange={(e) => setForm((f) => ({ ...f, destination: e.target.value }))} placeholder='Hospital das Clínicas' />
+                <span className='text-xs text-slate-400'>Destino Médico *</span>
+                <input
+                  type='search'
+                  className='w-full rounded-t bg-slate-900 border border-border px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none'
+                  placeholder='Buscar hospital, clínica, UBS…'
+                  value={locationSearch}
+                  onChange={(e) => { setLocationSearch(e.target.value); setForm((f) => ({ ...f, healthcareLocationId: '' })); }}
+                />
+                {locations.length > 0 ? (
+                  <select
+                    className='w-full rounded-b bg-slate-900 border-x border-b border-border px-3 py-2 text-sm'
+                    value={form.healthcareLocationId}
+                    onChange={(e) => setForm((f) => ({ ...f, healthcareLocationId: e.target.value }))}
+                    size={Math.min(locations.length + 1, 6)}
+                  >
+                    <option value=''>— Selecionar destino —</option>
+                    {locations.map((l: any) => (
+                      <option key={l.id} value={l.id}>
+                        {TYPE_LABEL[l.type] ?? ''} {l.name} — {l.city}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className='text-xs text-amber-400 pt-1'>
+                    Nenhum destino encontrado. <a href='/healthcare-locations' className='underline text-cyan-400'>Cadastrar destino</a>
+                  </p>
+                )}
               </label>
+
+              {/* Date */}
               <label className='space-y-1'>
                 <span className='text-xs text-slate-400'>Data/Hora Consulta *</span>
                 <input type='datetime-local' className='w-full rounded bg-slate-900 border border-border px-3 py-2 text-sm' value={form.appointmentDate} onChange={(e) => setForm((f) => ({ ...f, appointmentDate: e.target.value }))} />
               </label>
+
+              {/* Queue type */}
               <label className='space-y-1'>
                 <span className='text-xs text-slate-400'>Tipo de Fila</span>
                 <select className='w-full rounded bg-slate-900 border border-border px-3 py-2 text-sm' value={form.queueType} onChange={(e) => setForm((f) => ({ ...f, queueType: e.target.value }))}>
@@ -186,6 +263,8 @@ export default function QueuePage() {
                   <option value='MEDICAL'>Médica</option>
                 </select>
               </label>
+
+              {/* Priority */}
               <label className='space-y-1'>
                 <span className='text-xs text-slate-400'>Prioridade</span>
                 <select className='w-full rounded bg-slate-900 border border-border px-3 py-2 text-sm' value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}>
@@ -195,14 +274,17 @@ export default function QueuePage() {
                   <option value='CRITICAL'>Crítica</option>
                 </select>
               </label>
+
+              {/* Notes */}
               <label className='col-span-2 space-y-1'>
                 <span className='text-xs text-slate-400'>Observações</span>
                 <textarea rows={2} className='w-full rounded bg-slate-900 border border-border px-3 py-2 text-sm resize-none' value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </label>
             </div>
             <div className='flex justify-end gap-3'>
-              <button type='button' onClick={() => setShowModal(false)} className='rounded-lg border border-border px-4 py-2 text-sm hover:bg-slate-800 transition-colors'>Cancelar</button>
-              <button type='button' onClick={() => create.mutate(form)} disabled={create.isPending || !form.patientId || !form.destination || !form.appointmentDate}
+              <button type='button' onClick={() => { setShowModal(false); setForm(EMPTY_FORM); setLocationSearch(''); }} className='rounded-lg border border-border px-4 py-2 text-sm hover:bg-slate-800 transition-colors'>Cancelar</button>
+              <button type='button' onClick={() => create.mutate(form)}
+                disabled={create.isPending || !form.patientId || !form.healthcareLocationId || !form.appointmentDate}
                 className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold hover:bg-cyan-600 disabled:opacity-50 transition-colors'>
                 {create.isPending ? 'Salvando…' : 'Adicionar à Fila'}
               </button>

@@ -10,4 +10,5 @@ export const NAV_ITEMS = [
   { href: '/drivers', label: '🧑‍✈️ Motoristas' },
   { href: '/vehicles', label: '🚌 Veículos' },
   { href: '/daily-op', label: '📅 Operação do Dia' },
+  { href: '/healthcare-locations', label: '🏥 Destinos Médicos' },
 ];

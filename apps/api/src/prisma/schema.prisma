@@ -16,18 +16,19 @@ model Tenant {
   state            String
   active           Boolean            @default(true)
   createdAt        DateTime           @default(now())
-  users            User[]
-  patients         Patient[]
-  drivers          Driver[]
-  vehicles         Vehicle[]
-  queues           OperationalQueue[]
-  routes           Route[]
-  trips            Trip[]
-  checkpoints      Checkpoint[]
-  auditLogs        AuditLog[]
-  dailyOperations  DailyOperation[]
-  operationShifts  OperationShift[]
-  vehicleTrackings VehicleTracking[]
+  users                User[]
+  patients             Patient[]
+  drivers              Driver[]
+  vehicles             Vehicle[]
+  queues               OperationalQueue[]
+  routes               Route[]
+  trips                Trip[]
+  checkpoints          Checkpoint[]
+  auditLogs            AuditLog[]
+  dailyOperations      DailyOperation[]
+  operationShifts      OperationShift[]
+  vehicleTrackings     VehicleTracking[]
+  healthcareLocations  HealthcareLocation[]
 }
 
 model User {
@@ -171,7 +172,8 @@ model OperationalQueue {
   tenantId               String
   patientId              String
   appointmentDate        DateTime
-  destination            String
+  destination            String?
+  healthcareLocationId   String?
   lat                    Float?
   lng                    Float?
   priority               QueuePriority
@@ -192,10 +194,12 @@ model OperationalQueue {
   createdAt              DateTime            @default(now())
   tenant                 Tenant              @relation(fields: [tenantId], references: [id])
   patient                Patient             @relation(fields: [patientId], references: [id])
+  healthcareLocation     HealthcareLocation? @relation(fields: [healthcareLocationId], references: [id])
 
   @@index([tenantId])
   @@index([patientId])
   @@index([confirmationStatus])
+  @@index([healthcareLocationId])
 }
 
 enum QueueType {
@@ -417,6 +421,56 @@ enum ShiftStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// HealthcareLocation — destinos médicos padronizados (hospitais, clínicas, etc.)
+// ---------------------------------------------------------------------------
+model HealthcareLocation {
+  id           String                       @id @default(uuid())
+  tenantId     String
+  name         String
+  type         HealthcareLocationType
+  address      String
+  number       String?
+  district     String?
+  city         String
+  state        String
+  zipCode      String?
+  latitude     Float?
+  longitude    Float?
+  contactPhone String?
+  active       Boolean                      @default(true)
+  notes        String?
+  createdAt    DateTime                     @default(now())
+  updatedAt    DateTime                     @updatedAt
+  tenant       Tenant                       @relation(fields: [tenantId], references: [id])
+  specialties  HealthcareLocationSpecialty[]
+  queues       OperationalQueue[]
+
+  @@index([tenantId])
+  @@index([type])
+  @@index([active])
+}
+
+enum HealthcareLocationType {
+  HOSPITAL
+  CLINIC
+  LAB
+  UBS
+  SPECIALTY_CENTER
+  HEMODIALYSIS
+  ONCOLOGY_CENTER
+}
+
+model HealthcareLocationSpecialty {
+  id                   String             @id @default(uuid())
+  healthcareLocationId String
+  specialty            String
+  healthcareLocation   HealthcareLocation @relation(fields: [healthcareLocationId], references: [id], onDelete: Cascade)
+
+  @@index([healthcareLocationId])
+  @@index([specialty])
 }
 
 // ---------------------------------------------------------------------------

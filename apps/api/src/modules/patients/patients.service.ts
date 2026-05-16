@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -11,6 +11,11 @@ export interface ListPatientsQuery {
   limit?: number;
 }
 
+/** SHA-256 hash of a raw QR token — only the hash is stored in DB */
+function hashToken(raw: string): string {
+  return createHash('sha256').update(raw).digest('hex');
+}
+
 /** Fields returned in operational/public contexts — CPF never included */
 const SAFE_SELECT = {
   id: true,
@@ -19,10 +24,12 @@ const SAFE_SELECT = {
   clinicalRisk: true,
   requiresCompanion: true,
   operationalId: true,
-  qrToken: true,
+  qrTokenHash: true,
   qrIssuedAt: true,
   qrActive: true,
   qrLastReadAt: true,
+  qrExpiresAt: true,
+  qrVersion: true,
   address: true,
   lat: true,
   lng: true,
@@ -71,17 +78,22 @@ export class PatientsService {
     });
     if (existing) throw new BadRequestException('CPF already registered for this tenant');
 
-    const qrToken = randomUUID();
-    return this.prisma.patient.create({
+    const rawToken = randomUUID();
+    const tokenHash = hashToken(rawToken);
+    const patient = await this.prisma.patient.create({
       data: {
         ...data,
         tenantId,
         operationalId: `OP-${randomUUID().slice(0, 8).toUpperCase()}`,
-        qrToken,
+        qrToken: rawToken,        // kept for legacy lookup, will be phased out
+        qrTokenHash: tokenHash,
         qrIssuedAt: new Date(),
         qrActive: true,
+        qrVersion: 1,
       },
     });
+    // Return the raw token once at creation so front-end can display QR
+    return { ...patient, _rawQrToken: rawToken };
   }
 
   async update(id: string, tenantId: string, data: any) {
@@ -95,18 +107,32 @@ export class PatientsService {
     return { deleted: true };
   }
 
-  /** Returns (or re-generates) a secure QR token for a patient — never exposes CPF */
+  /**
+   * Returns (or re-generates) a secure QR token for a patient.
+   * The raw token is returned ONCE here and encoded into the QR image.
+   * Only the SHA-256 hash is stored in the DB.
+   */
   async qr(id: string, tenantId: string) {
     const patient = await this.findOne(id, tenantId);
-    let qrToken = patient.qrToken;
-    if (!qrToken || !patient.qrActive) {
-      qrToken = randomUUID();
+    const needsNew = !patient.qrToken || !patient.qrActive || !patient.qrTokenHash;
+    if (needsNew) {
+      const rawToken = randomUUID();
+      const tokenHash = hashToken(rawToken);
       await this.prisma.patient.update({
         where: { id },
-        data: { qrToken, qrIssuedAt: new Date(), qrActive: true },
+        data: {
+          qrToken: rawToken,
+          qrTokenHash: tokenHash,
+          qrIssuedAt: new Date(),
+          qrActive: true,
+          qrVersion: { increment: 1 },
+          qrRevokedAt: null,
+          qrExpiresAt: null,
+        },
       });
+      return { patientId: id, qrToken: rawToken };
     }
-    return { patientId: id, qrToken };
+    return { patientId: id, qrToken: patient.qrToken };
   }
 
   /** Generates a PNG buffer containing the QR Code for a patient */
@@ -122,14 +148,24 @@ export class PatientsService {
   }
 
   /**
-   * Validates a QR token scan.
+   * Validates a QR token scan using the SHA-256 hash lookup.
    * - Never returns CPF or sensitive PII.
-   * - Logs every access for audit/antifraude.
+   * - Logs every access for audit/antifraude with status.
    * - Rate-limits: max 15 scans per IP per 60 seconds.
    */
   async validateQr(
     tenantId: string,
-    payload: { qrToken: string; vehicleId?: string; checkpoint?: string },
+    payload: {
+      qrToken: string;
+      vehicleId?: string;
+      checkpoint?: string;
+      gpsLat?: number;
+      gpsLng?: number;
+      operatorId?: string;
+      tripId?: string;
+      routeId?: string;
+      source?: string;
+    },
     ip?: string,
     device?: string,
   ) {
@@ -144,8 +180,14 @@ export class PatientsService {
       }
     }
 
+    const tokenHash = hashToken(payload.qrToken);
+
+    // Look up by hash first (new secure path), then fallback to raw token (legacy)
     const patient = await this.prisma.patient.findFirst({
-      where: { tenantId, qrToken: payload.qrToken },
+      where: {
+        tenantId,
+        OR: [{ qrTokenHash: tokenHash }, { qrToken: payload.qrToken }],
+      },
       select: {
         id: true,
         tenantId: true,
@@ -157,16 +199,22 @@ export class PatientsService {
         companionPhone: true,
         operationalId: true,
         qrActive: true,
+        qrExpiresAt: true,
+        qrRevokedAt: true,
+        qrVersion: true,
         address: true,
         lat: true,
         lng: true,
-        qrToken: true,
         queues: {
           select: {
+            healthcareLocationId: true,
             destination: true,
             priority: true,
             status: true,
             appointmentDate: true,
+            healthcareLocation: {
+              select: { name: true, city: true, address: true, specialties: { select: { specialty: true } } },
+            },
           },
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -174,31 +222,65 @@ export class PatientsService {
       },
     });
 
-    if (!patient) throw new NotFoundException('QR token not found');
-    if (!patient.qrActive) throw new ForbiddenException('This QR token has been deactivated');
+    const source = (payload.source as any) ?? 'API';
+    const logBase = {
+      tenantId,
+      patientId: patient?.id ?? 'unknown',
+      qrToken: payload.qrToken,
+      ip: ip ?? null,
+      device: device ?? null,
+      vehicleId: payload.vehicleId ?? null,
+      checkpoint: payload.checkpoint ?? null,
+      gpsLat: payload.gpsLat ?? null,
+      gpsLng: payload.gpsLng ?? null,
+      operatorId: payload.operatorId ?? null,
+      tripId: payload.tripId ?? null,
+      routeId: payload.routeId ?? null,
+      source,
+    };
 
-    // Log the scan
+    if (!patient) {
+      if (patient !== null) { /* noop */ }
+      await this.prisma.patientQrAccessLog.create({
+        data: { ...logBase, patientId: 'unknown', status: 'INVALID' as any },
+      }).catch(() => {/* best effort */});
+      throw new NotFoundException('QR token not found');
+    }
+
+    if (patient.qrRevokedAt) {
+      await this.prisma.patientQrAccessLog.create({
+        data: { ...logBase, patientId: patient.id, status: 'REVOKED' as any },
+      });
+      throw new ForbiddenException('This QR token has been revoked');
+    }
+
+    if (!patient.qrActive) {
+      await this.prisma.patientQrAccessLog.create({
+        data: { ...logBase, patientId: patient.id, status: 'REVOKED' as any },
+      });
+      throw new ForbiddenException('This QR token has been deactivated');
+    }
+
+    if (patient.qrExpiresAt && patient.qrExpiresAt < new Date()) {
+      await this.prisma.patientQrAccessLog.create({
+        data: { ...logBase, patientId: patient.id, status: 'EXPIRED' as any },
+      });
+      throw new ForbiddenException('This QR token has expired');
+    }
+
+    // Log successful scan
     await this.prisma.patientQrAccessLog.create({
-      data: {
-        tenantId,
-        patientId: patient.id,
-        qrToken: payload.qrToken,
-        ip: ip ?? null,
-        device: device ?? null,
-        vehicleId: payload.vehicleId ?? null,
-        checkpoint: payload.checkpoint ?? null,
-      },
+      data: { ...logBase, patientId: patient.id, status: 'SUCCESS' as any },
     });
 
-    // Update last read timestamp
+    // Update last used timestamp
     await this.prisma.patient.update({
       where: { id: patient.id },
-      data: { qrLastReadAt: new Date() },
+      data: { qrLastReadAt: new Date(), qrLastUsedAt: new Date() },
     });
 
     const activeQueue = patient.queues[0] ?? null;
 
-    // Return only operationally relevant, non-sensitive fields
     return {
       valid: true,
       name: patient.name,
@@ -212,7 +294,9 @@ export class PatientsService {
       location: patient.lat != null ? { lat: patient.lat, lng: patient.lng } : null,
       queue: activeQueue
         ? {
-            destination: activeQueue.destination,
+            destination: activeQueue.healthcareLocation?.name ?? activeQueue.destination,
+            city: activeQueue.healthcareLocation?.city ?? null,
+            specialties: activeQueue.healthcareLocation?.specialties?.map((s) => s.specialty) ?? [],
             priority: activeQueue.priority,
             status: activeQueue.status,
             appointmentDate: activeQueue.appointmentDate,
@@ -226,7 +310,7 @@ export class PatientsService {
     await this.findOne(id, tenantId);
     await this.prisma.patient.update({
       where: { id },
-      data: { qrActive: false },
+      data: { qrActive: false, qrRevokedAt: new Date() },
     });
     return { revoked: true };
   }
@@ -241,10 +325,17 @@ export class PatientsService {
       select: {
         id: true,
         scannedAt: true,
+        status: true,
+        source: true,
         ip: true,
         device: true,
         vehicleId: true,
         checkpoint: true,
+        gpsLat: true,
+        gpsLng: true,
+        operatorId: true,
+        tripId: true,
+        routeId: true,
       },
     });
   }
@@ -262,5 +353,3 @@ export class PatientsService {
     return { valid: true, patient: stripSensitive(patient as unknown as Record<string, unknown>) };
   }
 }
-
-

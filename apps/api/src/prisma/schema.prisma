@@ -79,6 +79,12 @@ model Patient {
   qrIssuedAt        DateTime?
   qrActive          Boolean       @default(false)
   qrLastReadAt      DateTime?
+  // QR hardening — only SHA-256 hash stored in DB, raw token lives only in QR image
+  qrTokenHash       String?       @unique
+  qrExpiresAt       DateTime?
+  qrRevokedAt       DateTime?
+  qrVersion         Int           @default(1)
+  qrLastUsedAt      DateTime?
   // Companion / Acompanhante
   requiresCompanion Boolean       @default(false)
   companionName     String?
@@ -231,9 +237,11 @@ enum RecurrenceType {
 }
 
 enum QueuePriority {
+  EMERGENCY
   CRITICAL
   HIGH
   NORMAL
+  LOW
   PENDING
 }
 
@@ -245,23 +253,28 @@ enum QueueStatus {
 }
 
 model Route {
-  id                String      @id @default(uuid())
-  tenantId          String
-  driverId          String
-  vehicleId         String
-  date              DateTime
-  origin            String
-  destination       String
-  status            RouteStatus
-  waypoints         Json?
-  estimatedKm       Float?
-  estimatedDuration Int?
-  createdAt         DateTime    @default(now())
-  tenant            Tenant      @relation(fields: [tenantId], references: [id])
-  driver            Driver      @relation(fields: [driverId], references: [id])
-  vehicle           Vehicle     @relation(fields: [vehicleId], references: [id])
-  trips             Trip[]
-  checkpoints       Checkpoint[]
+  id                      String      @id @default(uuid())
+  tenantId                String
+  driverId                String
+  vehicleId               String
+  date                    DateTime
+  origin                  String
+  destination             String
+  status                  RouteStatus
+  waypoints               Json?
+  estimatedKm             Float?
+  estimatedDuration       Int?
+  // IA logistics fields — prepared for route optimization
+  estimatedDistanceKm     Float?
+  estimatedFuelCost       Float?
+  routeOptimizationScore  Float?
+  occupancyPrediction     Float?
+  createdAt               DateTime    @default(now())
+  tenant                  Tenant      @relation(fields: [tenantId], references: [id])
+  driver                  Driver      @relation(fields: [driverId], references: [id])
+  vehicle                 Vehicle     @relation(fields: [vehicleId], references: [id])
+  trips                   Trip[]
+  checkpoints             Checkpoint[]
 
   @@index([tenantId])
 }
@@ -427,26 +440,32 @@ enum ShiftStatus {
 // HealthcareLocation — destinos médicos padronizados (hospitais, clínicas, etc.)
 // ---------------------------------------------------------------------------
 model HealthcareLocation {
-  id           String                       @id @default(uuid())
-  tenantId     String
-  name         String
-  type         HealthcareLocationType
-  address      String
-  number       String?
-  district     String?
-  city         String
-  state        String
-  zipCode      String?
-  latitude     Float?
-  longitude    Float?
-  contactPhone String?
-  active       Boolean                      @default(true)
-  notes        String?
-  createdAt    DateTime                     @default(now())
-  updatedAt    DateTime                     @updatedAt
-  tenant       Tenant                       @relation(fields: [tenantId], references: [id])
-  specialties  HealthcareLocationSpecialty[]
-  queues       OperationalQueue[]
+  id                    String                       @id @default(uuid())
+  tenantId              String
+  name                  String
+  type                  HealthcareLocationType
+  address               String
+  number                String?
+  district              String?
+  city                  String
+  state                 String
+  zipCode               String?
+  latitude              Float?
+  longitude             Float?
+  contactPhone          String?
+  active                Boolean                      @default(true)
+  notes                 String?
+  // Google Maps / Geolocation integration
+  googlePlaceId         String?
+  geocodingValidated    Boolean                      @default(false)
+  routeNotes            String?
+  operationalArea       String?
+  estimatedTravelMinutes Int?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  tenant                Tenant                       @relation(fields: [tenantId], references: [id])
+  specialties           HealthcareLocationSpecialty[]
+  queues                OperationalQueue[]
 
   @@index([tenantId])
   @@index([type])
@@ -477,19 +496,43 @@ model HealthcareLocationSpecialty {
 // PatientQrAccessLog — rastreabilidade e antifraude de leituras de QR Code
 // ---------------------------------------------------------------------------
 model PatientQrAccessLog {
-  id         String   @id @default(uuid())
-  tenantId   String
-  patientId  String
-  qrToken    String
-  scannedAt  DateTime @default(now())
-  ip         String?
-  device     String?
-  vehicleId  String?
-  checkpoint String?
-  patient    Patient  @relation(fields: [patientId], references: [id])
+  id           String        @id @default(uuid())
+  tenantId     String
+  patientId    String
+  qrToken      String
+  // Audit & antifraude
+  status       QrScanStatus  @default(SUCCESS)
+  gpsLat       Float?
+  gpsLng       Float?
+  operatorId   String?
+  tripId       String?
+  routeId      String?
+  source       QrScanSource  @default(API)
+  scannedAt    DateTime      @default(now())
+  ip           String?
+  device       String?
+  vehicleId    String?
+  checkpoint   String?
+  patient      Patient       @relation(fields: [patientId], references: [id])
 
   @@index([patientId])
   @@index([qrToken])
   @@index([scannedAt])
   @@index([tenantId])
+  @@index([status])
+}
+
+enum QrScanStatus {
+  SUCCESS
+  INVALID
+  EXPIRED
+  REVOKED
+  DUPLICATED
+}
+
+enum QrScanSource {
+  TABLET
+  TOTEM
+  MOBILE
+  API
 }

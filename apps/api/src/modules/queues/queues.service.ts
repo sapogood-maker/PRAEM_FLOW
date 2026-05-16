@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -39,7 +39,29 @@ export class QueuesService {
   }
 
   async create(tenantId: string, data: any) {
-    return this.prisma.operationalQueue.create({ data: { ...data, tenantId } });
+    if (!data.healthcareLocationId) {
+      throw new BadRequestException(
+        'healthcareLocationId é obrigatório. Selecione um destino médico cadastrado.',
+      );
+    }
+    // Validate the location exists and is active for this tenant
+    const loc = await this.prisma.healthcareLocation.findFirst({
+      where: { id: data.healthcareLocationId, tenantId, active: true },
+    });
+    if (!loc) {
+      throw new BadRequestException(
+        'Destino médico não encontrado ou inativo. Verifique o destino selecionado.',
+      );
+    }
+    // Auto-populate destination text and coordinates from the registered location
+    const payload = {
+      ...data,
+      tenantId,
+      destination: loc.name,
+      lat: data.lat ?? loc.latitude ?? undefined,
+      lng: data.lng ?? loc.longitude ?? undefined,
+    };
+    return this.prisma.operationalQueue.create({ data: payload });
   }
 
   async updatePriority(id: string, tenantId: string, priority: string) {

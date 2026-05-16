@@ -86,17 +86,28 @@ export class PatientsController {
   /**
    * Validates a QR Code scan — operational endpoint used by drivers / totems.
    * NEVER returns CPF or other sensitive PII.
+   * Accepts extended audit fields: gpsLat, gpsLng, operatorId, tripId, routeId, source.
    */
   @Post('qr/validate')
   validateQr(
     @Request() req: AuthRequest,
-    @Body() body: { qrToken: string; vehicleId?: string; checkpoint?: string },
+    @Body() body: {
+      qrToken: string;
+      vehicleId?: string;
+      checkpoint?: string;
+      gpsLat?: number;
+      gpsLng?: number;
+      operatorId?: string;
+      tripId?: string;
+      routeId?: string;
+      source?: string;
+    },
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ) {
     return this.patientsService.validateQr(
       req.user.tenantId,
-      sanitizePayload(body) as { qrToken: string; vehicleId?: string; checkpoint?: string },
+      sanitizePayload(body) as any,
       ip,
       userAgent,
     );

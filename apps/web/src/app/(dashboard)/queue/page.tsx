@@ -9,9 +9,11 @@ import type { QueueType } from '@/types';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
 const PRIORITY_BADGE: Record<string, string> = {
+  EMERGENCY: 'bg-red-600 text-white animate-pulse',
   CRITICAL: 'bg-red-900 text-red-300',
   HIGH: 'bg-orange-900 text-orange-300',
   NORMAL: 'bg-slate-700 text-slate-300',
+  LOW: 'bg-slate-800 text-slate-500',
   PENDING: 'bg-slate-800 text-slate-400',
 };
 
@@ -268,10 +270,12 @@ export default function QueuePage() {
               <label className='space-y-1'>
                 <span className='text-xs text-slate-400'>Prioridade</span>
                 <select className='w-full rounded bg-slate-900 border border-border px-3 py-2 text-sm' value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}>
+                  <option value='EMERGENCY'>🚨 Emergência</option>
                   <option value='PENDING'>Pendente</option>
                   <option value='NORMAL'>Normal</option>
                   <option value='HIGH'>Alta</option>
                   <option value='CRITICAL'>Crítica</option>
+                  <option value='LOW'>Baixa</option>
                 </select>
               </label>
 

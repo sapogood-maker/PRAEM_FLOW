@@ -40,7 +40,7 @@ export class TripsService {
     if (!trip) throw new NotFoundException('Trip not found');
     return this.prisma.trip.update({
       where: { id },
-      data: { status: 'BOARDED', qrScanned: true, boardedAt: new Date() },
+      data: { status: 'BOARDING', qrScanned: true, boardedAt: new Date() },
     });
   }
 

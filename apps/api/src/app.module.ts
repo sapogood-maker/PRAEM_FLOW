@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
@@ -20,13 +22,18 @@ import { AiOpsModule } from './modules/ai-ops/ai-ops.module';
 import { DailyOperationModule } from './modules/daily-operation/daily-operation.module';
 import { OperationShiftModule } from './modules/operation-shift/operation-shift.module';
 import { HealthcareLocationsModule } from './modules/healthcare-locations/healthcare-locations.module';
+import { DevicesModule } from './modules/devices/devices.module';
+import { HealthModule } from './modules/health/health.module';
+import { GatewaysModule } from './gateways/gateways.module';
 import { RealtimeGateway } from './gateways/realtime.gateway';
 import { DashboardService } from './modules/dashboard/dashboard.service';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     PrismaModule,
+    GatewaysModule,
     AuthModule,
     TenantsModule,
     UsersModule,
@@ -46,8 +53,12 @@ import { DashboardService } from './modules/dashboard/dashboard.service';
     DailyOperationModule,
     OperationShiftModule,
     HealthcareLocationsModule,
+    DevicesModule,
+    HealthModule,
   ],
-  providers: [RealtimeGateway],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {
   constructor(
@@ -55,4 +66,6 @@ export class AppModule {
     private readonly dashboardService: DashboardService,
   ) {}
 }
+
+
 

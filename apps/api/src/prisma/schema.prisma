@@ -29,6 +29,7 @@ model Tenant {
   operationShifts      OperationShift[]
   vehicleTrackings     VehicleTracking[]
   healthcareLocations  HealthcareLocation[]
+  devices              Device[]
 }
 
 model User {
@@ -169,8 +170,11 @@ enum VehicleType {
 enum VehicleStatus {
   AVAILABLE
   ON_ROUTE
+  BOARDING
+  WAITING
   MAINTENANCE
   INACTIVE
+  OFFLINE
 }
 
 model OperationalQueue {
@@ -307,8 +311,9 @@ model Trip {
 enum TripStatus {
   SCHEDULED
   CONFIRMED
-  BOARDED
+  BOARDING
   IN_PROGRESS
+  ARRIVED
   COMPLETED
   NO_SHOW
   CANCELLED
@@ -348,6 +353,9 @@ model AuditLog {
   action    String
   entity    String
   entityId  String
+  endpoint  String?
+  method    String?
+  deviceId  String?
   before    Json?
   after     Json?
   ip        String?
@@ -356,26 +364,31 @@ model AuditLog {
 
   @@index([tenantId])
   @@index([userId])
+  @@index([entity])
 }
 
 // ---------------------------------------------------------------------------
 // Vehicle Tracking — separado do motorista; pertence ao veículo e à rota
 // ---------------------------------------------------------------------------
 model VehicleTracking {
-  id        String   @id @default(uuid())
-  tenantId  String
-  vehicleId String
-  routeId   String?
-  lat       Float
-  lng       Float
-  speed     Float?   // km/h
-  heading   Float?   // graus 0–360
-  accuracy  Float?   // metros
-  ignition  Boolean  @default(false)
-  online    Boolean  @default(true)
-  timestamp DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  id                String   @id @default(uuid())
+  tenantId          String
+  vehicleId         String
+  routeId           String?
+  lat               Float
+  lng               Float
+  speed             Float?            // km/h
+  heading           Float?            // graus 0–360
+  accuracy          Float?            // metros
+  batteryLevel      Float?            // 0–100 %
+  signalStrength    Float?            // dBm
+  gpsSource         String?           // GPS | NETWORK | FUSED
+  ignition          Boolean  @default(false)
+  online            Boolean  @default(true)
+  lastHeartbeatAt   DateTime?
+  timestamp         DateTime @default(now())
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  vehicle           Vehicle  @relation(fields: [vehicleId], references: [id])
 
   @@index([tenantId])
   @@index([vehicleId])
@@ -535,4 +548,49 @@ enum QrScanSource {
   TOTEM
   MOBILE
   API
+}
+
+// ---------------------------------------------------------------------------
+// Device — dispositivos operacionais (tablets motoristas, totens, mobiles)
+// ---------------------------------------------------------------------------
+model Device {
+  id            String      @id @default(uuid())
+  tenantId      String
+  name          String
+  serialNumber  String?     @unique
+  type          DeviceType
+  vehicleId     String?
+  driverId      String?
+  active        Boolean     @default(true)
+  lastSeenAt    DateTime?
+  appVersion    String?
+  ipAddress     String?
+  authToken     String?     @unique
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([type])
+  @@index([vehicleId])
+}
+
+enum DeviceType {
+  TABLET
+  TOTEM
+  MOBILE
+  DISPATCH
+}
+
+// ---------------------------------------------------------------------------
+// PatientTransportStatus — ciclo de vida do transporte do paciente
+// ---------------------------------------------------------------------------
+enum PatientTransportStatus {
+  WAITING
+  CONFIRMED
+  CHECKED_IN
+  BOARDED
+  IN_TRANSIT
+  ARRIVED
+  MISSED
 }

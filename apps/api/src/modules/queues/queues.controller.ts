@@ -8,6 +8,11 @@ const VALID_CONFIRMATION_STATUSES: ConfirmationStatus[] = [
   'PENDING', 'CONFIRMED', 'CANCELED', 'UNREACHABLE', 'WAITING_MANUAL_CONFIRMATION',
 ];
 
+const VALID_QUEUE_STATUSES = [
+  'WAITING', 'CALLED', 'CONFIRMED', 'CHECKED_IN', 'BOARDING',
+  'IN_TRANSIT', 'ARRIVED', 'COMPLETED', 'CANCELLED', 'NO_SHOW', 'ASSIGNED',
+];
+
 interface AuthRequest { user: { tenantId: string } }
 
 @UseGuards(JwtAuthGuard)
@@ -21,10 +26,24 @@ export class QueuesController {
     @Query('type') queueType?: string,
     @Query('priority') priority?: string,
     @Query('status') status?: string,
+    @Query('slaStatus') slaStatus?: string,
     @Query('confirmationStatus') confirmationStatus?: string,
     @Query('page') page?: string,
   ) {
-    return this.queuesService.findAll(req.user.tenantId, { queueType, priority, status, confirmationStatus, page: page ? Number(page) : 1 });
+    return this.queuesService.findAll(req.user.tenantId, {
+      queueType, priority, status, slaStatus, confirmationStatus,
+      page: page ? Number(page) : 1,
+    });
+  }
+
+  @Get('metrics')
+  metrics(@Request() req: AuthRequest) {
+    return this.queuesService.metrics(req.user.tenantId);
+  }
+
+  @Get(':id')
+  findOne(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.queuesService.findOne(id, req.user.tenantId);
   }
 
   @Post()
@@ -35,6 +54,23 @@ export class QueuesController {
   @Put(':id/priority')
   updatePriority(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { priority: string }) {
     return this.queuesService.updatePriority(id, req.user.tenantId, body.priority);
+  }
+
+  @Put(':id/status')
+  updateStatus(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { status: string; [key: string]: unknown }) {
+    const { status, ...extra } = body;
+    const safeStatus = VALID_QUEUE_STATUSES.includes(status) ? status : 'WAITING';
+    return this.queuesService.updateStatus(id, req.user.tenantId, safeStatus, sanitizePayload(extra) as Record<string, unknown>);
+  }
+
+  @Post(':id/no-show')
+  noShow(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.queuesService.markNoShow(id, req.user.tenantId, body.reason);
+  }
+
+  @Post(':id/sla/refresh')
+  refreshSla(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.queuesService.refreshSla(id, req.user.tenantId);
   }
 
   @Put(':id/confirmation')
@@ -55,3 +91,4 @@ export class QueuesController {
     return this.queuesService.aiSuggest(req.user.tenantId);
   }
 }
+

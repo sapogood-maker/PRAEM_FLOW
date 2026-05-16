@@ -201,6 +201,24 @@ model OperationalQueue {
   recurrenceDays         String?             // JSON array de dias: "[1,3,5]" (0=dom … 6=sáb)
   recurrenceInterval     Int?                @default(1)
   recurrenceEndDate      DateTime?
+  // ─── Timestamps operacionais (timeline do paciente) ───────────────────
+  calledAt               DateTime?
+  boardedAt              DateTime?
+  departedAt             DateTime?
+  arrivedAt              DateTime?
+  cancelledAt            DateTime?
+  noShowAt               DateTime?
+  checkedInAt            DateTime?
+  // ─── SLA operacional ──────────────────────────────────────────────────
+  estimatedDepartureAt   DateTime?
+  expectedArrivalAt      DateTime?
+  slaMinutes             Int?                // limite SLA em minutos por prioridade
+  slaStatus              QueueSlaStatus      @default(ON_TIME)
+  estimatedWaitMinutes   Int?
+  actualWaitMinutes      Int?
+  delayMinutes           Int?
+  // ─── No-show ─────────────────────────────────────────────────────────
+  noShowReason           NoShowReason?
   createdAt              DateTime            @default(now())
   tenant                 Tenant              @relation(fields: [tenantId], references: [id])
   patient                Patient             @relation(fields: [patientId], references: [id])
@@ -210,6 +228,9 @@ model OperationalQueue {
   @@index([patientId])
   @@index([confirmationStatus])
   @@index([healthcareLocationId])
+  @@index([status])
+  @@index([slaStatus])
+  @@index([priority])
 }
 
 enum QueueType {
@@ -251,9 +272,31 @@ enum QueuePriority {
 
 enum QueueStatus {
   WAITING
-  ASSIGNED
+  CALLED
   CONFIRMED
+  CHECKED_IN
+  BOARDING
+  IN_TRANSIT
+  ARRIVED
+  COMPLETED
   CANCELLED
+  NO_SHOW
+  ASSIGNED
+}
+
+enum QueueSlaStatus {
+  ON_TIME
+  WARNING
+  DELAYED
+  CRITICAL
+}
+
+enum NoShowReason {
+  NOT_FOUND
+  CANCELLED
+  REFUSED
+  LATE
+  UNKNOWN
 }
 
 model Route {

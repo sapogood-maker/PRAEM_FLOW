@@ -1,25 +1,69 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { OperationsGateway } from '../../gateways/operations.gateway';
+
+// SLA limits in minutes per priority
+const SLA_MINUTES: Record<string, number> = {
+  EMERGENCY: 15,
+  CRITICAL: 60,
+  HIGH: 60,
+  NORMAL: 120,
+  LOW: 240,
+  PENDING: 240,
+};
+
+function calcSlaStatus(createdAt: Date, slaMinutes: number): { slaStatus: string; delayMinutes: number; remainingMinutes: number } {
+  const now = Date.now();
+  const elapsedMs = now - new Date(createdAt).getTime();
+  const elapsedMin = elapsedMs / 60_000;
+  const remainingMinutes = Math.max(0, slaMinutes - elapsedMin);
+  const delayMinutes = Math.max(0, elapsedMin - slaMinutes);
+  const pct = elapsedMin / slaMinutes;
+  let slaStatus = 'ON_TIME';
+  if (delayMinutes > 0) slaStatus = 'CRITICAL';
+  else if (pct >= 0.9) slaStatus = 'DELAYED';
+  else if (pct >= 0.75) slaStatus = 'WARNING';
+  return { slaStatus, delayMinutes: Math.round(delayMinutes), remainingMinutes: Math.round(remainingMinutes) };
+}
+
+// Which timestamp field to set per status
+const STATUS_TIMESTAMP: Record<string, string> = {
+  CALLED: 'calledAt',
+  CONFIRMED: 'confirmedAt',
+  CHECKED_IN: 'checkedInAt',
+  BOARDING: 'boardedAt',
+  DEPARTED: 'departedAt',
+  IN_TRANSIT: 'departedAt',
+  ARRIVED: 'arrivedAt',
+  COMPLETED: 'arrivedAt',
+  CANCELLED: 'cancelledAt',
+  NO_SHOW: 'noShowAt',
+};
 
 @Injectable()
 export class QueuesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly opsGateway: OperationsGateway,
+  ) {}
 
   async findAll(tenantId: string, query: {
     queueType?: string;
     priority?: string;
     status?: string;
+    slaStatus?: string;
     confirmationStatus?: string;
     page?: number;
     limit?: number;
   }) {
-    const { queueType, priority, status, confirmationStatus, page = 1, limit = 20 } = query;
+    const { queueType, priority, status, slaStatus, confirmationStatus, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
     const where: any = {
       tenantId,
       ...(queueType && { queueType: queueType as any }),
       ...(priority && { priority: priority as any }),
       ...(status && { status: status as any }),
+      ...(slaStatus && { slaStatus: slaStatus as any }),
       ...(confirmationStatus && { confirmationStatus: confirmationStatus as any }),
     };
     const [items, total] = await Promise.all([
@@ -44,7 +88,6 @@ export class QueuesService {
         'healthcareLocationId é obrigatório. Selecione um destino médico cadastrado.',
       );
     }
-    // Validate the location exists and is active for this tenant
     const loc = await this.prisma.healthcareLocation.findFirst({
       where: { id: data.healthcareLocationId, tenantId, active: true },
     });
@@ -53,20 +96,74 @@ export class QueuesService {
         'Destino médico não encontrado ou inativo. Verifique o destino selecionado.',
       );
     }
-    // Auto-populate destination text and coordinates from the registered location
+    const slaMinutes = SLA_MINUTES[data.priority ?? 'NORMAL'] ?? 120;
+    const estimatedDepartureAt = new Date(Date.now() + slaMinutes * 60_000);
     const payload = {
       ...data,
       tenantId,
       destination: loc.name,
       lat: data.lat ?? loc.latitude ?? undefined,
       lng: data.lng ?? loc.longitude ?? undefined,
+      slaMinutes,
+      estimatedDepartureAt,
+      slaStatus: 'ON_TIME',
     };
-    return this.prisma.operationalQueue.create({ data: payload });
+    const created = await this.prisma.operationalQueue.create({ data: payload });
+    this.opsGateway.emitToTenant(tenantId, 'queue.updated', { id: created.id, action: 'CREATED', priority: created.priority });
+    return created;
   }
 
   async updatePriority(id: string, tenantId: string, priority: string) {
     await this.findOne(id, tenantId);
-    return this.prisma.operationalQueue.update({ where: { id }, data: { priority: priority as any } });
+    const slaMinutes = SLA_MINUTES[priority] ?? 120;
+    const updated = await this.prisma.operationalQueue.update({
+      where: { id },
+      data: { priority: priority as any, slaMinutes },
+    });
+    this.opsGateway.emitToTenant(tenantId, 'queue.priority_changed', { id, priority, slaMinutes });
+    return updated;
+  }
+
+  async updateStatus(id: string, tenantId: string, status: string, extra?: Record<string, unknown>) {
+    const q = await this.findOne(id, tenantId);
+    const now = new Date();
+    const tsField = STATUS_TIMESTAMP[status];
+    const actualWaitMinutes = q.createdAt
+      ? Math.round((Date.now() - new Date(q.createdAt).getTime()) / 60_000)
+      : undefined;
+    const updated = await this.prisma.operationalQueue.update({
+      where: { id },
+      data: {
+        status: status as any,
+        ...(tsField && { [tsField]: now }),
+        ...(actualWaitMinutes !== undefined && { actualWaitMinutes }),
+        ...(extra ?? {}),
+      },
+    });
+    // Emit domain event
+    const eventMap: Record<string, string> = {
+      CHECKED_IN: 'patient.checked_in',
+      BOARDING: 'patient.boarded',
+      ARRIVED: 'patient.arrived',
+    };
+    const event = eventMap[status] ?? 'queue.updated';
+    this.opsGateway.emitToTenant(tenantId, event, { id, status, timestamp: now.toISOString(), patientId: q.patientId });
+    return updated;
+  }
+
+  async markNoShow(id: string, tenantId: string, reason?: string) {
+    const q = await this.findOne(id, tenantId);
+    const updated = await this.prisma.operationalQueue.update({
+      where: { id },
+      data: {
+        status: 'NO_SHOW',
+        noShowAt: new Date(),
+        noShowReason: (reason ?? 'UNKNOWN') as any,
+      },
+    });
+    this.opsGateway.emitToTenant(tenantId, 'patient.missed', { id, reason, patientId: q.patientId });
+    this.opsGateway.emitAlert(tenantId, { type: 'NO_SHOW', message: `Paciente não encontrado — fila ${id}`, severity: 'warning', data: { id, reason } });
+    return updated;
   }
 
   async updateConfirmation(id: string, tenantId: string, confirmationStatus: string, channel?: string) {
@@ -81,6 +178,67 @@ export class QueuesService {
         lastContactAt: new Date(),
       },
     });
+  }
+
+  /** Refresh SLA status on a queue item — called periodically or on demand */
+  async refreshSla(id: string, tenantId: string) {
+    const q = await this.findOne(id, tenantId);
+    if (!q.slaMinutes) return q;
+    const { slaStatus, delayMinutes, remainingMinutes } = calcSlaStatus(q.createdAt, q.slaMinutes);
+    const updated = await this.prisma.operationalQueue.update({
+      where: { id },
+      data: { slaStatus: slaStatus as any, delayMinutes },
+    });
+    // Emit alerts when SLA status worsens
+    if (slaStatus === 'DELAYED' || slaStatus === 'CRITICAL') {
+      const event = slaStatus === 'CRITICAL' ? 'queue.critical' : 'queue.delayed';
+      this.opsGateway.emitToTenant(tenantId, event, { id, slaStatus, delayMinutes, remainingMinutes, patientId: q.patientId });
+      if (slaStatus === 'CRITICAL') {
+        this.opsGateway.emitAlert(tenantId, {
+          type: 'SLA_CRITICAL',
+          message: `SLA crítico — fila ${id} com ${delayMinutes}min de atraso`,
+          severity: 'critical',
+          data: { id, delayMinutes },
+        });
+      }
+    } else if (slaStatus === 'WARNING') {
+      this.opsGateway.emitToTenant(tenantId, 'queue.sla_warning', { id, slaStatus, remainingMinutes, patientId: q.patientId });
+    }
+    return { ...updated, remainingMinutes };
+  }
+
+  /** Operational metrics for dashboard */
+  async metrics(tenantId: string) {
+    const now = new Date();
+    const [
+      totalWaiting,
+      slaDelayed,
+      slaCritical,
+      noShowToday,
+      avgWait,
+    ] = await Promise.all([
+      this.prisma.operationalQueue.count({ where: { tenantId, status: 'WAITING' } }),
+      this.prisma.operationalQueue.count({ where: { tenantId, slaStatus: 'DELAYED' } }),
+      this.prisma.operationalQueue.count({ where: { tenantId, slaStatus: 'CRITICAL' } }),
+      this.prisma.operationalQueue.count({
+        where: {
+          tenantId,
+          status: 'NO_SHOW',
+          noShowAt: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) },
+        },
+      }),
+      this.prisma.operationalQueue.aggregate({
+        where: { tenantId, actualWaitMinutes: { not: null } },
+        _avg: { actualWaitMinutes: true },
+      }),
+    ]);
+    return {
+      totalWaiting,
+      slaDelayed,
+      slaCritical,
+      noShowToday,
+      avgWaitMinutes: Math.round(avgWait._avg.actualWaitMinutes ?? 0),
+    };
   }
 
   async findOne(id: string, tenantId: string) {
@@ -115,4 +273,5 @@ export class QueuesService {
     };
   }
 }
+
 

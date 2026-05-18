@@ -29,7 +29,14 @@ export const vehicleService = {
 export const driverService = {
   list: (params?: Record<string, string | number>) =>
     api.get('/drivers', { params }).then((r) => r.data),
+  get: (id: string) => api.get(`/drivers/${id}`).then((r) => r.data),
+  create: (data: any) => api.post('/drivers', data).then((r) => r.data),
   update: (id: string, data: any) => api.put(`/drivers/${id}`, data).then((r) => r.data),
+  resetPassword: (id: string, password: string) =>
+    api.put(`/drivers/${id}/reset-password`, { password }).then((r) => r.data),
+  setActive: (id: string, active: boolean) =>
+    api.put(`/drivers/${id}/active`, { active }).then((r) => r.data),
+  online: () => api.get('/drivers/online').then((r) => r.data),
 };
 
 export const routeService = {

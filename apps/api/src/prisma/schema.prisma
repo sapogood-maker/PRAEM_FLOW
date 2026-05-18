@@ -41,10 +41,11 @@ model User {
   password   String
   phone      String?
   role       Role
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  tenant     Tenant   @relation(fields: [tenantId], references: [id])
-  driver     Driver?
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  driver       Driver?
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -118,19 +119,21 @@ enum RiskLevel {
 }
 
 model Driver {
-  id         String       @id @default(uuid())
-  tenantId   String
-  userId     String       @unique
-  cnh        String
-  cnhExpiry  DateTime
-  active     Boolean      @default(true)
-  lat        Float?
-  lng        Float?
-  status     DriverStatus
-  tenant     Tenant       @relation(fields: [tenantId], references: [id])
-  user       User         @relation(fields: [userId], references: [id])
-  routes     Route[]
-  checkpoints Checkpoint[]
+  id               String       @id @default(uuid())
+  tenantId         String
+  userId           String       @unique
+  cnh              String
+  cnhExpiry        DateTime
+  active           Boolean      @default(true)
+  lat              Float?
+  lng              Float?
+  status           DriverStatus
+  defaultVehicleId String?
+  tenant           Tenant       @relation(fields: [tenantId], references: [id])
+  user             User         @relation(fields: [userId], references: [id])
+  routes           Route[]
+  checkpoints      Checkpoint[]
+  devices          Device[]
 
   @@index([tenantId])
 }
@@ -156,6 +159,7 @@ model Vehicle {
   tenant           Tenant          @relation(fields: [tenantId], references: [id])
   routes           Route[]
   trackings        VehicleTracking[]
+  devices          Device[]
 
   @@index([tenantId])
 }
@@ -644,6 +648,7 @@ model Device {
   name          String
   serialNumber  String?     @unique
   type          DeviceType
+  platform      String?     // android | ios | web
   vehicleId     String?
   driverId      String?
   active        Boolean     @default(true)
@@ -654,10 +659,13 @@ model Device {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  vehicle       Vehicle?    @relation(fields: [vehicleId], references: [id])
+  driver        Driver?     @relation(fields: [driverId], references: [id])
 
   @@index([tenantId])
   @@index([type])
   @@index([vehicleId])
+  @@index([driverId])
 }
 
 enum DeviceType {

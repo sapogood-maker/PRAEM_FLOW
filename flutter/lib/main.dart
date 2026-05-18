@@ -46,6 +46,34 @@ Future<void> main() async {
   final wsService = WsService();
   final gpsService = GpsTrackingService(wsService, offlineQueue);
 
+  // ─── Auto-connect WebSocket when auth state changes ────────────────────────
+  authService.addListener(() {
+    if (authService.isAuthenticated &&
+        authService.token != null &&
+        authService.tenantId != null) {
+      wsService.connect(
+        authService.token!,
+        authService.tenantId!,
+        driverId: authService.driverId,
+        deviceId: driverState.deviceId,
+      );
+    } else {
+      wsService.disconnect();
+    }
+  });
+
+  // If already authenticated on startup, connect immediately
+  if (authService.isAuthenticated &&
+      authService.token != null &&
+      authService.tenantId != null) {
+    wsService.connect(
+      authService.token!,
+      authService.tenantId!,
+      driverId: authService.driverId,
+      deviceId: driverState.deviceId,
+    );
+  }
+
   runApp(
     MultiProvider(
       providers: [
@@ -86,7 +114,7 @@ class PraemDriverApp extends StatelessWidget {
         ),
       ),
       onGenerateRoute: generateRoute,
-      initialRoute: auth.isAuthenticated ? AppRoutes.vehicleSelect : AppRoutes.login,
+      initialRoute: auth.isAuthenticated ? AppRoutes.home : AppRoutes.login,
     );
   }
 }

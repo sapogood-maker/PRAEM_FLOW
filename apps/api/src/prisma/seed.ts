@@ -94,8 +94,51 @@ async function main() {
   }
   console.log('✅ Turnos criados');
 
+  // ── Motoristas operacionais (para o Flutter terminal) ─────────────────────
+  const driverPassword = await bcrypt.hash('Motorista@123', 10);
+  const expiryDate = new Date('2027-12-31');
+
+  const driverConfigs = [
+    { name: 'João Motorista', email: 'motorista1@praem.local', vehicleIdx: 0 },
+    { name: 'Maria Motorista', email: 'motorista2@praem.local', vehicleIdx: 1 },
+  ];
+
+  for (const cfg of driverConfigs) {
+    const driverUser = await prisma.user.upsert({
+      where: { tenantId_email: { tenantId: tenant.id, email: cfg.email } },
+      update: {},
+      create: {
+        tenantId: tenant.id,
+        name: cfg.name,
+        email: cfg.email,
+        password: driverPassword,
+        role: 'DRIVER',
+        active: true,
+      },
+    });
+
+    // Only create Driver record if it doesn't already exist
+    const existingDriver = await prisma.driver.findUnique({ where: { userId: driverUser.id } });
+    if (!existingDriver) {
+      await prisma.driver.create({
+        data: {
+          tenantId: tenant.id,
+          userId: driverUser.id,
+          cnh: `CNH${Math.floor(Math.random() * 9000000) + 1000000}`,
+          cnhExpiry: expiryDate,
+          active: true,
+          status: 'OFFLINE',
+          defaultVehicleId: vehicles[cfg.vehicleIdx]?.id ?? null,
+        },
+      });
+    }
+    console.log(`✅ Driver user: ${cfg.email}`);
+  }
+
   console.log('\n🎉 Seed concluído!');
-  console.log('  Acesso: admin@praem.local / Admin@123');
+  console.log('  Admin:     admin@praem.local / Admin@123');
+  console.log('  Motorista1: motorista1@praem.local / Motorista@123');
+  console.log('  Motorista2: motorista2@praem.local / Motorista@123');
 }
 
 main()

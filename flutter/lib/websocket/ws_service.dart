@@ -1,7 +1,7 @@
 // lib/websocket/ws_service.dart
 // ─────────────────────────────────────────────────────────────────────────────
 // Socket.IO client — /operations namespace.
-// Auto-reconnects; forwards events to listeners.
+// Auto-reconnects; joins driver-specific room; forwards events to listeners.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/foundation.dart';
@@ -14,13 +14,24 @@ class WsService extends ChangeNotifier {
   io.Socket? _socket;
   bool _connected = false;
   String? _tenantId;
+  String? _driverId;
+  String? _deviceId;
 
   final Map<String, List<WsEventCallback>> _listeners = {};
 
   bool get connected => _connected;
 
-  void connect(String token, String tenantId) {
+  /// Connect to the /operations WS namespace with driver-level auth.
+  /// Joins both the tenant room and the driver-specific room.
+  void connect(
+    String token,
+    String tenantId, {
+    String? driverId,
+    String? deviceId,
+  }) {
     _tenantId = tenantId;
+    _driverId = driverId;
+    _deviceId = deviceId;
     _socket?.disconnect();
 
     _socket = io.io(
@@ -37,9 +48,18 @@ class WsService extends ChangeNotifier {
     _socket!
       ..onConnect((_) {
         _connected = true;
+        // Join tenant room (receives all operational events for the tenant)
         _socket!.emit('join:tenant', {'tenantId': tenantId});
+        // Join driver room (receives targeted dispatcher commands)
+        if (driverId != null) {
+          _socket!.emit('join:driver', {
+            'tenantId': tenantId,
+            'driverId': driverId,
+            if (deviceId != null) 'deviceId': deviceId,
+          });
+        }
         notifyListeners();
-        debugPrint('[WsService] connected to /operations');
+        debugPrint('[WsService] connected to /operations as driver:$driverId');
       })
       ..onDisconnect((_) {
         _connected = false;
@@ -79,12 +99,25 @@ class WsService extends ChangeNotifier {
     _socket!.emit('vehicle.heartbeat', {
       'vehicleId': vehicleId,
       'tenantId': _tenantId,
+      if (_driverId != null) 'driverId': _driverId,
       'lat': lat,
       'lng': lng,
       'speed': speed,
       'heading': heading,
       'battery': battery,
       'deviceId': deviceId,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+
+  // ─── Emit driver heartbeat (presence signal) ───────────────────────────────
+  void emitDriverHeartbeat({required double battery}) {
+    if (_socket == null || !_connected || _driverId == null) return;
+    _socket!.emit('driver.heartbeat', {
+      'driverId': _driverId,
+      'tenantId': _tenantId,
+      'deviceId': _deviceId,
+      'battery': battery,
       'timestamp': DateTime.now().toIso8601String(),
     });
   }
@@ -96,6 +129,19 @@ class WsService extends ChangeNotifier {
       'vehicleId': vehicleId,
       'tenantId': _tenantId,
       'operationalStatus': status,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+
+  // ─── Emit driver status change ─────────────────────────────────────────────
+  void emitDriverStatus(String status, {String? vehicleId, String? routeId}) {
+    if (_socket == null || !_connected || _driverId == null) return;
+    _socket!.emit('driver.status_changed', {
+      'driverId': _driverId,
+      'tenantId': _tenantId,
+      'status': status,
+      if (vehicleId != null) 'vehicleId': vehicleId,
+      if (routeId != null) 'routeId': routeId,
       'timestamp': DateTime.now().toIso8601String(),
     });
   }
@@ -127,6 +173,8 @@ class WsService extends ChangeNotifier {
     'patient.arrived',
     'queue.updated',
     'queue.delayed',
+    'driver.heartbeat',
+    'driver.status_changed',
     'operational.alert',
   ];
 

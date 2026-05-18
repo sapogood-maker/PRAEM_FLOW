@@ -54,6 +54,41 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     return { ok: true };
   }
 
+  /**
+   * join:driver — used by Flutter tablet terminals.
+   * Joins the tenant room AND a driver-specific room so the dispatcher
+   * can push targeted events to a single driver/tablet.
+   */
+  @SubscribeMessage('join:driver')
+  onJoinDriver(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const tenantId = safe['tenantId'];
+    const driverId = safe['driverId'];
+    const deviceId = safe['deviceId'];
+    if (typeof tenantId === 'string') client.join(`tenant:${tenantId}`);
+    if (typeof driverId === 'string') client.join(`driver:${driverId}`);
+    if (typeof deviceId === 'string') client.join(`device:${deviceId}`);
+    return { ok: true };
+  }
+
+  /** driver.heartbeat — sent by Flutter every 30 s to signal the tablet is alive. */
+  @SubscribeMessage('driver.heartbeat')
+  onDriverHeartbeat(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) this.server.to(room).emit('driver.heartbeat', safe);
+    return { ok: true };
+  }
+
+  /** driver.status_changed — motorista altera status (embarque, trânsito, etc.). */
+  @SubscribeMessage('driver.status_changed')
+  onDriverStatus(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) this.server.to(room).emit('driver.status_changed', safe);
+    return { ok: true };
+  }
+
   // ─── Vehicle domain ───────────────────────────────────────────────────────
 
   @SubscribeMessage('vehicle.location_updated')

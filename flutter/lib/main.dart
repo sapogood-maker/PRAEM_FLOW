@@ -1,0 +1,92 @@
+// lib/main.dart
+// ─────────────────────────────────────────────────────────────────────────────
+// PRAEM Driver App — entry point.
+// Sets up providers, initialises Hive offline queue, and starts the app.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:provider/provider.dart';
+
+import 'auth/auth_service.dart';
+import 'driver/driver_state.dart';
+import 'websocket/ws_service.dart';
+import 'tracking/gps_tracking_service.dart';
+import 'offline/offline_queue.dart';
+import 'core/constants.dart';
+import 'core/app_router.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // ─── Force landscape / portrait for tablets ────────────────────────────────
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
+
+  // ─── Load .env ─────────────────────────────────────────────────────────────
+  await dotenv.load();
+
+  // ─── Hive offline queue ────────────────────────────────────────────────────
+  await Hive.initFlutter();
+  final offlineQueue = OfflineQueue();
+  await offlineQueue.init();
+
+  // ─── Services ──────────────────────────────────────────────────────────────
+  final authService = AuthService();
+  await authService.init();
+
+  final driverState = DriverState();
+  await driverState.init();
+
+  final wsService = WsService();
+  final gpsService = GpsTrackingService(wsService, offlineQueue);
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: authService),
+        ChangeNotifierProvider.value(value: driverState),
+        ChangeNotifierProvider.value(value: wsService),
+        ChangeNotifierProvider.value(value: gpsService),
+        Provider.value(value: offlineQueue),
+      ],
+      child: const PraemDriverApp(),
+    ),
+  );
+}
+
+class PraemDriverApp extends StatelessWidget {
+  const PraemDriverApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
+
+    return MaterialApp(
+      title: 'PRAEM OPS',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: AppColors.background,
+        colorScheme: const ColorScheme.dark(
+          primary: AppColors.primary,
+          surface: AppColors.surface,
+          error: AppColors.danger,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: AppColors.surface,
+          elevation: 0,
+        ),
+        textTheme: const TextTheme(
+          bodyMedium: TextStyle(color: AppColors.textPrimary),
+        ),
+      ),
+      onGenerateRoute: generateRoute,
+      initialRoute: auth.isAuthenticated ? AppRoutes.vehicleSelect : AppRoutes.login,
+    );
+  }
+}

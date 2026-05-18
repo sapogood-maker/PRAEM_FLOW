@@ -9,6 +9,7 @@
     "lint": "echo \"Lint not configured for API\"",
     "test": "jest --passWithNoTests",
     "seed": "ts-node -r tsconfig-paths/register src/prisma/seed.ts",
+    "seed:homolog": "ts-node -r tsconfig-paths/register src/prisma/seed.homolog.ts",
     "db:migrate": "prisma migrate deploy",
     "db:generate": "prisma generate"
   },

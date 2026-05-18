@@ -11,8 +11,8 @@ export function useAuth() {
   return {
     login: async ({ email, password }: { email: string; password: string }) => {
       const response = await authService.login(email, password);
-      const { access_token, refresh_token, user } = response.data;
-      setSession(access_token, refresh_token, user);
+      const { access_token, refresh_token, user, tenantName } = response.data;
+      setSession(access_token, refresh_token, user, tenantName);
       return response.data;
     },
     logout: async () => {

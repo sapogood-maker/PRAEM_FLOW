@@ -3,6 +3,7 @@ import { api } from './api';
 export interface LoginResponse {
   access_token: string;
   refresh_token: string;
+  tenantName: string;
   user: { id: string; name: string; email: string; role: string; tenantId: string };
 }
 

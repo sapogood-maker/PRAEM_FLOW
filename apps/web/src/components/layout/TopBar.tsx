@@ -11,34 +11,42 @@ export function TopBar() {
   const connected = useRealtimeStore((s) => s.connected);
   const { logout } = useAuth();
   const now = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  const isHomolog = tenantName?.toUpperCase().includes('HOMOLOG');
 
   return (
-    <header className='flex items-center justify-between border-b border-border bg-panel px-6 py-3'>
-      <div className='flex items-center gap-4'>
-        <div>
-          <p className='text-xs text-slate-500 uppercase tracking-wider'>Prefeitura</p>
-          <p className='font-semibold text-slate-100'>{tenantName || '—'}</p>
+    <>
+      {isHomolog && (
+        <div className='flex items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-6 py-1.5'>
+          <span className='text-xs font-bold uppercase tracking-widest text-amber-400'>⚠ HOMOLOGAÇÃO OPERACIONAL — Dados fictícios · Ambiente de testes</span>
         </div>
-        <div className='h-6 w-px bg-border' />
-        <div>
-          <p className='text-xs text-slate-500 uppercase tracking-wider'>Turno</p>
-          <p className='text-sm font-medium text-cyan-400'>{now}</p>
+      )}
+      <header className='flex items-center justify-between border-b border-border bg-panel px-6 py-3'>
+        <div className='flex items-center gap-4'>
+          <div>
+            <p className='text-xs text-slate-500 uppercase tracking-wider'>Prefeitura</p>
+            <p className='font-semibold text-slate-100'>{tenantName || '—'}</p>
+          </div>
+          <div className='h-6 w-px bg-border' />
+          <div>
+            <p className='text-xs text-slate-500 uppercase tracking-wider'>Turno</p>
+            <p className='text-sm font-medium text-cyan-400'>{now}</p>
+          </div>
         </div>
-      </div>
-      <div className='flex items-center gap-4'>
-        <StatusBadge label={connected ? '● Conectado' : '○ Offline'} active={connected} />
-        <div className='text-right'>
-          <p className='text-xs text-slate-500'>Operador</p>
-          <p className='text-sm text-slate-300'>{userName || '—'}</p>
+        <div className='flex items-center gap-4'>
+          <StatusBadge label={connected ? '● Conectado' : '○ Offline'} active={connected} />
+          <div className='text-right'>
+            <p className='text-xs text-slate-500'>Operador</p>
+            <p className='text-sm text-slate-300'>{userName || '—'}</p>
+          </div>
+          <button
+            type='button'
+            onClick={logout}
+            className='rounded-lg border border-border px-3 py-1.5 text-xs text-slate-400 hover:border-red-800 hover:text-red-400 transition-colors'
+          >
+            Sair
+          </button>
         </div>
-        <button
-          type='button'
-          onClick={logout}
-          className='rounded-lg border border-border px-3 py-1.5 text-xs text-slate-400 hover:border-red-800 hover:text-red-400 transition-colors'
-        >
-          Sair
-        </button>
-      </div>
-    </header>
+      </header>
+    </>
   );
 }

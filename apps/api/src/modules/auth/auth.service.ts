@@ -44,6 +44,11 @@ export class AuthService {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) throw new UnauthorizedException('Invalid credentials');
 
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: user.tenantId },
+      select: { name: true },
+    });
+
     const payload: JwtPayload = {
       sub: user.id,
       tenantId: user.tenantId,
@@ -55,6 +60,7 @@ export class AuthService {
     return {
       ...this.issueTokens(payload),
       user: { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId },
+      tenantName: tenant?.name ?? '',
     };
   }
 

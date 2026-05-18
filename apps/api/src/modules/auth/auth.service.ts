@@ -20,20 +20,16 @@ export class AuthService {
     private readonly prisma: PrismaService,
   ) {}
 
-  private getRequiredEnv(name: 'JWT_SECRET' | 'JWT_REFRESH_SECRET') {
-    const value = process.env[name];
-    if (!value) throw new Error(`${name} is required`);
-    return value;
-  }
-
   private issueTokens(payload: JwtPayload) {
+    const jwtSecret = process.env.JWT_SECRET ?? 'change_me_jwt';
+    const refreshSecret = process.env.JWT_REFRESH_SECRET ?? 'change_me_refresh';
     return {
       access_token: this.jwtService.sign(payload, {
-        secret: this.getRequiredEnv('JWT_SECRET'),
+        secret: jwtSecret,
         expiresIn: process.env.JWT_EXPIRES_IN ?? '15m',
       }),
       refresh_token: this.jwtService.sign(payload, {
-        secret: this.getRequiredEnv('JWT_REFRESH_SECRET'),
+        secret: refreshSecret,
         expiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '7d',
       }),
     };
@@ -168,7 +164,7 @@ export class AuthService {
   async driverRefresh(refreshToken: string) {
     try {
       const decoded = this.jwtService.verify<JwtPayload>(refreshToken, {
-        secret: this.getRequiredEnv('JWT_REFRESH_SECRET'),
+        secret: process.env.JWT_REFRESH_SECRET ?? 'change_me_refresh',
       });
       if (decoded.role !== 'DRIVER') throw new UnauthorizedException('Not a driver token');
       return this.issueTokens({
@@ -187,7 +183,7 @@ export class AuthService {
   async refresh(refreshToken: string) {
     try {
       const decoded = this.jwtService.verify<JwtPayload>(refreshToken, {
-        secret: this.getRequiredEnv('JWT_REFRESH_SECRET'),
+        secret: process.env.JWT_REFRESH_SECRET ?? 'change_me_refresh',
       });
       return this.issueTokens({
         sub: decoded.sub,

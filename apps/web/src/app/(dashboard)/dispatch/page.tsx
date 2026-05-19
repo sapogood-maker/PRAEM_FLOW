@@ -76,7 +76,7 @@ export default function DispatchPage() {
     queryKey: ['dispatch-queue'],
     queryFn: () =>
       api
-        .get('/queues', { params: { status: 'WAITING', limit: 50 } })
+        .get('/queues', { params: { status: 'WAITING,CALLED,CONFIRMED', limit: 100 } })
         .then((r) => r.data),
     refetchInterval: 15_000,
   });
@@ -187,7 +187,7 @@ export default function DispatchPage() {
         {/* ── Patient queue ───────────────────────────────────────────────── */}
         <div className='rounded-xl border border-border bg-panel'>
           <div className='flex items-center justify-between border-b border-border px-4 py-3'>
-            <h3 className='font-semibold text-slate-100'>Fila de Espera</h3>
+            <h3 className='font-semibold text-slate-100'>Pacientes Aguardando Despacho</h3>
             <span className='rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400'>
               {selectedPatients.length} selecionado(s)
             </span>
@@ -199,7 +199,7 @@ export default function DispatchPage() {
             </div>
           ) : queueItems.length === 0 ? (
             <p className='p-6 text-center text-slate-500'>
-              Nenhum paciente aguardando despacho.
+              Nenhum paciente confirmado aguardando despacho.
             </p>
           ) : (
             <ul className='divide-y divide-border'>
@@ -237,6 +237,17 @@ export default function DispatchPage() {
                           }`}
                         >
                           {q.priority}
+                        </span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                            q.status === 'CONFIRMED'
+                              ? 'bg-emerald-900 text-emerald-300'
+                              : q.status === 'CALLED'
+                                ? 'bg-amber-900 text-amber-300'
+                                : 'bg-slate-700 text-slate-400'
+                          }`}
+                        >
+                          {q.status === 'CONFIRMED' ? '✓ Confirmado' : q.status === 'CALLED' ? 'Chamado' : 'Aguardando'}
                         </span>
                       </div>
                       <p className='mt-0.5 text-xs text-slate-400 truncate'>

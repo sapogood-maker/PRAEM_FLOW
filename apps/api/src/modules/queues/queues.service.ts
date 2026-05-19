@@ -58,11 +58,22 @@ export class QueuesService {
   }) {
     const { queueType, priority, status, slaStatus, confirmationStatus, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
+    // Normalise status: HTTP params can arrive as string or string[]; support
+    // comma-separated values like "WAITING,CONFIRMED" too.
+    const statusValues: string[] | null = status
+      ? (Array.isArray(status) ? status : status.split(','))
+          .map((s: string) => s.trim())
+          .filter(Boolean)
+      : null;
     const where: any = {
       tenantId,
       ...(queueType && { queueType: queueType as any }),
       ...(priority && { priority: priority as any }),
-      ...(status && { status: status as any }),
+      ...(statusValues && {
+        status: statusValues.length === 1
+          ? (statusValues[0] as any)
+          : { in: statusValues as any[] },
+      }),
       ...(slaStatus && { slaStatus: slaStatus as any }),
       ...(confirmationStatus && { confirmationStatus: confirmationStatus as any }),
     };
@@ -72,7 +83,7 @@ export class QueuesService {
         skip,
         take: limit,
         include: {
-          patient: { select: { id: true, name: true, requiresCompanion: true, clinicalRisk: true } },
+          patient: { select: { id: true, name: true, mobility: true, requiresCompanion: true, clinicalRisk: true } },
           healthcareLocation: { select: { id: true, name: true, type: true, city: true, address: true, latitude: true, longitude: true, specialties: { select: { specialty: true } } } },
         },
         orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],

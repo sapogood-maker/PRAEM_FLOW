@@ -82,11 +82,19 @@ export class PatientsService {
     });
     if (existing) throw new BadRequestException('CPF already registered for this tenant');
 
+    // Normalize birthDate: Prisma DateTime requires a full ISO-8601 string.
+    // The web form sends a date-only string like "1991-08-18"; append T00:00:00Z.
+    const normalizedData = { ...data };
+    if (normalizedData.birthDate && typeof normalizedData.birthDate === 'string') {
+      const d = normalizedData.birthDate.trim();
+      normalizedData.birthDate = d.length === 10 ? new Date(d + 'T00:00:00Z') : new Date(d);
+    }
+
     const rawToken = randomUUID();
     const tokenHash = hashToken(rawToken);
     const patient = await this.prisma.patient.create({
       data: {
-        ...data,
+        ...normalizedData,
         tenantId,
         operationalId: `OP-${randomUUID().slice(0, 8).toUpperCase()}`,
         qrToken: rawToken,        // kept for legacy lookup, will be phased out
@@ -102,7 +110,12 @@ export class PatientsService {
 
   async update(id: string, tenantId: string, data: any) {
     await this.findOne(id, tenantId);
-    return this.prisma.patient.update({ where: { id }, data });
+    const normalizedData = { ...data };
+    if (normalizedData.birthDate && typeof normalizedData.birthDate === 'string') {
+      const d = normalizedData.birthDate.trim();
+      normalizedData.birthDate = d.length === 10 ? new Date(d + 'T00:00:00Z') : new Date(d);
+    }
+    return this.prisma.patient.update({ where: { id }, data: normalizedData });
   }
 
   async remove(id: string, tenantId: string) {

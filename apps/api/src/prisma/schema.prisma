@@ -488,18 +488,19 @@ model GeoFenceEvent {
 // DailyOperation — operação do dia (prefeitura pensa em "operação diária")
 // ---------------------------------------------------------------------------
 model DailyOperation {
-  id              String          @id @default(uuid())
-  tenantId        String
-  date            DateTime
-  status          OperationStatus @default(PLANNING)
-  totalVehicles   Int             @default(0)
-  totalDrivers    Int             @default(0)
-  totalPatients   Int             @default(0)
-  totalRoutes     Int             @default(0)
-  notes           String?
-  createdAt       DateTime        @default(now())
-  tenant          Tenant          @relation(fields: [tenantId], references: [id])
-  shifts          OperationShift[]
+  id                   String          @id @default(uuid())
+  tenantId             String
+  date                 DateTime
+  status               OperationStatus @default(PLANNING)
+  totalVehicles        Int             @default(0)
+  totalDrivers         Int             @default(0)
+  totalPatients        Int             @default(0)
+  totalRoutes          Int             @default(0)
+  notes                String?
+  createdAutomatically Boolean         @default(false)
+  createdAt            DateTime        @default(now())
+  tenant               Tenant          @relation(fields: [tenantId], references: [id])
+  shifts               OperationShift[]
 
   @@unique([tenantId, date])
   @@index([tenantId])

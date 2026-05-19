@@ -90,7 +90,10 @@ export default function DailyOpPage() {
       <div>
         <h3 className='mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400'>Turnos</h3>
         {shifts.length === 0 ? (
-          <p className='text-sm text-slate-500 p-4 border border-border rounded-xl bg-panel'>Nenhum turno criado para hoje.</p>
+          <div className='p-4 border border-border rounded-xl bg-panel text-center space-y-3'>
+            <p className='text-sm text-slate-400'>Nenhum turno criado para hoje.</p>
+            <p className='text-xs text-slate-500'>O sistema cria os turnos automaticamente ao carregar a página. Tente recarregar.</p>
+          </div>
         ) : (
           <div className='grid gap-3 md:grid-cols-3'>
             {shifts.map((shift: any) => (
@@ -120,13 +123,13 @@ export default function DailyOpPage() {
 
       {/* Summary */}
       <div className='rounded-xl border border-border bg-panel p-4'>
-        <h3 className='mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400'>Resumo da Operação</h3>
+        <h3 className='mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400'>Resumo Operacional (Tempo Real)</h3>
         <div className='grid gap-4 grid-cols-2 md:grid-cols-4 text-center'>
           {[
-            { label: 'Veículos', value: operation?.totalVehicles ?? 0 },
-            { label: 'Motoristas', value: operation?.totalDrivers ?? 0 },
-            { label: 'Pacientes', value: operation?.totalPatients ?? 0 },
-            { label: 'Rotas', value: operation?.totalRoutes ?? 0 },
+            { label: 'Veículos Ativos', value: operation?.totalVehicles ?? 0 },
+            { label: 'Motoristas Ativos', value: operation?.totalDrivers ?? 0 },
+            { label: 'Pacientes na Fila', value: operation?.totalPatients ?? 0 },
+            { label: 'Rotas Ativas', value: operation?.totalRoutes ?? 0 },
           ].map((s) => (
             <div key={s.label}>
               <p className='text-2xl font-bold text-cyan-400'>{s.value}</p>
@@ -134,6 +137,9 @@ export default function DailyOpPage() {
             </div>
           ))}
         </div>
+        {operation?.createdAutomatically && (
+          <p className='mt-3 text-xs text-slate-500 text-center'>✦ Operação inicializada automaticamente pelo sistema</p>
+        )}
       </div>
     </section>
   );

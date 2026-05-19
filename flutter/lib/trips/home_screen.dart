@@ -39,10 +39,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final ws = context.read<WsService>();
     final gps = context.read<GpsTrackingService>();
 
-    // ─── Connect WS ──────────────────────────────────────────────────────────
-    ws.connect(auth.token!, auth.tenantId!);
+    // ─── Connect WS (join tenant + driver rooms) ──────────────────────────────
+    ws.connect(auth.token!, auth.tenantId!, driverId: auth.driverId, deviceId: driver.deviceId);
 
-    // ─── Listen for operational alerts ───────────────────────────────────────
+    // ─── Listen for new route dispatched to this driver ──────────────────────
+    ws.on('route:dispatched', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final driverId = event?['driverId'] as String?;
+      if (driverId != null && driverId == auth.driverId) {
+        // Re-load route to pick up the newly dispatched trip
+        _loadRoute(auth, driver);
+      }
+    });
     ws.on('operational.alert', (data) {
       if (!mounted) return;
       final alert = data as Map?;
@@ -96,25 +105,31 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     try {
       final today = DateTime.now().toIso8601String().substring(0, 10);
-      final params = <String, String>{
-        'date': today,
-        'status': 'ACTIVE',
-        if (driverId != null) 'driverId': driverId,
-        if (vehicleId != null && driverId == null) 'vehicleId': vehicleId as String,
-      };
-      final resp = await _dio.get(
-        '${AppConfig.apiBaseUrl}/routes',
-        queryParameters: params,
-        options:
-            Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-      );
-      final data = resp.data;
-      final items = (data is Map ? data['items'] : data) as List? ?? [];
-      if (items.isNotEmpty) {
-        final route =
-            Map<String, dynamic>.from(items.first as Map);
-        driver.setActiveRoute(route);
-        await _loadPatients(auth, driver, route['id'] as String);
+      // Accept PLANNED (not yet started) and ACTIVE (in progress)
+      final statuses = ['PLANNED', 'ACTIVE'];
+      Map<String, dynamic>? foundRoute;
+      for (final st in statuses) {
+        final params = <String, String>{
+          'date': today,
+          'status': st,
+          if (driverId != null) 'driverId': driverId,
+          if (vehicleId != null && driverId == null) 'vehicleId': vehicleId as String,
+        };
+        final resp = await _dio.get(
+          '${AppConfig.apiBaseUrl}/routes',
+          queryParameters: params,
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+        final data = resp.data;
+        final items = (data is Map ? data['items'] : data) as List? ?? [];
+        if (items.isNotEmpty) {
+          foundRoute = Map<String, dynamic>.from(items.first as Map);
+          break;
+        }
+      }
+      if (foundRoute != null) {
+        driver.setActiveRoute(foundRoute);
+        await _loadPatients(auth, driver, foundRoute['id'] as String);
       }
     } catch (e) {
       debugPrint('[HomeScreen] loadRoute error: $e');

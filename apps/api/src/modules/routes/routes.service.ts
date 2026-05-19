@@ -55,7 +55,19 @@ export class RoutesService {
   }
 
   async create(tenantId: string, data: any) {
-    return this.prisma.route.create({ data: { ...data, tenantId } });
+    const route = await this.prisma.route.create({ data: { ...data, tenantId } });
+    // Notify the assigned driver that a new route has been dispatched to them
+    if (route.driverId) {
+      this.gateway.emitToTenant(tenantId, 'route:dispatched', {
+        routeId: route.id,
+        driverId: route.driverId,
+        vehicleId: route.vehicleId,
+        date: route.date,
+        status: route.status,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    return route;
   }
 
   async update(id: string, tenantId: string, data: any) {

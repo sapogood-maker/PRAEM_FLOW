@@ -169,13 +169,18 @@ class WsService extends ChangeNotifier {
     'vehicle.status_changed',
     'trip.started',
     'trip.completed',
+    'trip:completed',
     'patient.boarded',
     'patient.arrived',
+    'patient:boarded',
     'queue.updated',
     'queue.delayed',
     'driver.heartbeat',
     'driver.status_changed',
     'operational.alert',
+    'route:started',
+    'route:completed',
+    'route:dispatched',
   ];
 
   @override

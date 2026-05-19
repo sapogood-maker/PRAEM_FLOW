@@ -52,6 +52,26 @@ class _HomeScreenState extends State<HomeScreen> {
       ));
     });
 
+    // ─── Listen for patient boarding events (emitted by API after QR scan) ──
+    ws.on('patient:boarded', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final patientId = event?['patientId'] as String?;
+      if (patientId != null) {
+        context.read<DriverState>().updatePatientStatus(patientId, 'BOARDING');
+      }
+    });
+
+    // ─── Listen for trip completed events ─────────────────────────────────
+    ws.on('trip:completed', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final patientId = event?['patientId'] as String?;
+      if (patientId != null) {
+        context.read<DriverState>().updatePatientStatus(patientId, 'COMPLETED');
+      }
+    });
+
     // ─── Load today's route ──────────────────────────────────────────────────
     await _loadRoute(auth, driver);
 
@@ -68,20 +88,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadRoute(AuthService auth, DriverState driver) async {
+    final driverId = auth.driverId;
     final vehicleId = driver.vehicle?['id'];
-    if (vehicleId == null) {
+    if (driverId == null && vehicleId == null) {
       setState(() => _loadingRoute = false);
       return;
     }
     try {
       final today = DateTime.now().toIso8601String().substring(0, 10);
+      final params = <String, String>{
+        'date': today,
+        'status': 'ACTIVE',
+        if (driverId != null) 'driverId': driverId,
+        if (vehicleId != null && driverId == null) 'vehicleId': vehicleId as String,
+      };
       final resp = await _dio.get(
         '${AppConfig.apiBaseUrl}/routes',
-        queryParameters: {
-          'vehicleId': vehicleId,
-          'date': today,
-          'status': 'ACTIVE',
-        },
+        queryParameters: params,
         options:
             Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
       );
@@ -123,19 +146,28 @@ class _HomeScreenState extends State<HomeScreen> {
     final driver = context.read<DriverState>();
     final ws = context.read<WsService>();
     final vehicleId = driver.vehicle?['id'] as String?;
+    final routeId = driver.activeRoute?['id'] as String?;
     if (vehicleId == null) return;
 
     driver.setOperationalStatus(status);
     ws.emitStatusChange(vehicleId, status);
 
-    // Persist via REST
+    // Persist route status transitions via REST
     try {
-      await _dio.post(
-        '${AppConfig.apiBaseUrl}/tracking/offline-check',
-        options:
-            Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-      );
-    } catch (_) {}
+      if (status == 'MOVING' && routeId != null && driver.activeRoute?['status'] == 'PLANNED') {
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/routes/$routeId/start',
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } else if (status == 'IDLE' && routeId != null) {
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/routes/$routeId/complete',
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      }
+    } catch (e) {
+      debugPrint('[HomeScreen] status change error: $e');
+    }
   }
 
   @override

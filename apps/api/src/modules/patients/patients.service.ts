@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException, ForbiddenException 
 import { createHash, randomUUID } from 'crypto';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../gateways/realtime.gateway';
 
 export interface ListPatientsQuery {
   tenantId: string;
@@ -43,7 +44,10 @@ function stripSensitive(patient: Record<string, unknown>) {
 
 @Injectable()
 export class PatientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: RealtimeGateway,
+  ) {}
 
   async list({ tenantId, search, clinicalRisk, page = 1, limit = 20 }: ListPatientsQuery) {
     const skip = (page - 1) * limit;
@@ -278,6 +282,35 @@ export class PatientsService {
       where: { id: patient.id },
       data: { qrLastReadAt: new Date(), qrLastUsedAt: new Date() },
     });
+
+    // If routeId or tripId was provided, update Trip to BOARDING and emit WS event
+    if (payload.routeId || payload.tripId) {
+      const tripWhere: any = { tenantId };
+      if (payload.tripId) {
+        tripWhere.id = payload.tripId;
+      } else {
+        tripWhere.routeId = payload.routeId;
+        tripWhere.patientId = patient.id;
+        tripWhere.status = { in: ['SCHEDULED', 'CONFIRMED'] };
+      }
+      const trip = await this.prisma.trip.findFirst({ where: tripWhere });
+      if (trip && ['SCHEDULED', 'CONFIRMED'].includes(trip.status)) {
+        const updated = await this.prisma.trip.update({
+          where: { id: trip.id },
+          data: { status: 'BOARDING', qrScanned: true, boardedAt: new Date() },
+        });
+        this.gateway.emitToTenant(tenantId, 'patient:boarded', {
+          tripId: trip.id,
+          patientId: patient.id,
+          patientName: patient.name,
+          operationalId: patient.operationalId,
+          routeId: trip.routeId,
+          boardedAt: updated.boardedAt,
+          vehicleId: payload.vehicleId ?? null,
+          status: 'BOARDING',
+        });
+      }
+    }
 
     const activeQueue = patient.queues[0] ?? null;
 

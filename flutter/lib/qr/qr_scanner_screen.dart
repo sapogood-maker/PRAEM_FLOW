@@ -61,7 +61,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
     try {
       final resp = await _dio.post(
-        '${AppConfig.apiBaseUrl}/patients/qr/scan',
+        '${AppConfig.apiBaseUrl}/patients/qr/validate',
         data: payload,
         options: Options(
           headers: {'Authorization': 'Bearer ${auth.token}'},

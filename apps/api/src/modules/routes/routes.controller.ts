@@ -15,9 +15,11 @@ export class RoutesController {
     @Request() req: AuthRequest,
     @Query('status') status?: string,
     @Query('date') date?: string,
+    @Query('driverId') driverId?: string,
+    @Query('vehicleId') vehicleId?: string,
     @Query('page') page?: string,
   ) {
-    return this.routesService.findAll(req.user.tenantId, { status, date, page: page ? Number(page) : 1 });
+    return this.routesService.findAll(req.user.tenantId, { status, date, driverId, vehicleId, page: page ? Number(page) : 1 });
   }
 
   @Get(':id')
@@ -43,6 +45,16 @@ export class RoutesController {
   @Post(':id/optimize')
   optimize(@Param('id') id: string) {
     return this.routesService.optimize(id);
+  }
+
+  @Post(':id/start')
+  startRoute(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.routesService.startRoute(id, req.user.tenantId);
+  }
+
+  @Post(':id/complete')
+  completeRoute(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.routesService.completeRoute(id, req.user.tenantId);
   }
 }
 

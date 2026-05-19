@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { useRealtimeStore } from '@/store/realtime.store';
 
 const STATUS_BADGE: Record<string, string> = {
   SCHEDULED: 'bg-slate-700 text-slate-300',
   CONFIRMED: 'bg-cyan-900 text-cyan-300',
+  BOARDING: 'bg-blue-900 text-blue-300',
   BOARDED: 'bg-blue-900 text-blue-300',
   IN_PROGRESS: 'bg-amber-900 text-amber-300',
   COMPLETED: 'bg-emerald-900 text-emerald-300',
@@ -18,11 +20,20 @@ const STATUS_BADGE: Record<string, string> = {
 export default function TripsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
+  const boardingEvents = useRealtimeStore((s) => s.boardingEvents);
+  const activityFeed = useRealtimeStore((s) => s.activityFeed);
+  const connected = useRealtimeStore((s) => s.connected);
+
+  // Auto-refresh when boarding events arrive
+  const boardingCount = boardingEvents.length;
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: ['trips'] });
+  }, [boardingCount, queryClient]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['trips', statusFilter],
     queryFn: () => api.get('/trips', { params: statusFilter ? { status: statusFilter } : {} }).then((r) => r.data),
-    refetchInterval: 15000,
+    refetchInterval: 10000,
   });
 
   const items = (data?.items ?? []) as any[];
@@ -41,13 +52,21 @@ export default function TripsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['trips'] }),
   });
 
-  const statuses = ['', 'SCHEDULED', 'CONFIRMED', 'BOARDED', 'IN_PROGRESS', 'COMPLETED', 'NO_SHOW', 'CANCELLED'];
+  const statuses = ['', 'SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS', 'COMPLETED', 'NO_SHOW', 'CANCELLED'];
+
+  // Recent boarding events from WebSocket
+  const recentBoardings = activityFeed.filter((e) => e.type === 'boarding').slice(0, 5);
 
   return (
     <section className='space-y-4'>
       <div className='flex items-center justify-between'>
         <div>
-          <h2 className='text-2xl font-bold text-slate-100'>Viagens do Dia</h2>
+          <div className='flex items-center gap-3'>
+            <h2 className='text-2xl font-bold text-slate-100'>Viagens do Dia</h2>
+            <span className={`rounded px-2 py-0.5 text-xs font-semibold ${connected ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300'}`}>
+              {connected ? '● AO VIVO' : '○ OFFLINE'}
+            </span>
+          </div>
           <p className='text-sm text-slate-400'>{total} viagem(ns) registrada(s)</p>
         </div>
         <select
@@ -58,6 +77,24 @@ export default function TripsPage() {
           {statuses.map((s) => <option key={s} value={s}>{s || 'Todos os status'}</option>)}
         </select>
       </div>
+
+      {/* Real-time boarding events feed */}
+      {recentBoardings.length > 0 && (
+        <div className='rounded-xl border border-blue-800 bg-blue-950/40 p-3'>
+          <h3 className='mb-2 text-xs font-semibold uppercase tracking-wider text-blue-400'>Embarques Recentes (Realtime)</h3>
+          <ul className='space-y-1'>
+            {recentBoardings.map((e) => (
+              <li key={e.id} className='flex items-center gap-2 text-sm text-blue-200'>
+                <span className='text-blue-400'>→</span>
+                <span>{e.message}</span>
+                <span className='ml-auto text-xs text-blue-500'>
+                  {new Date(e.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {isLoading ? (
         <LoadingSpinner />
@@ -78,30 +115,34 @@ export default function TripsPage() {
               {items.length === 0 && (
                 <tr><td colSpan={6} className='p-6 text-center text-slate-500'>Nenhuma viagem encontrada</td></tr>
               )}
-              {items.map((t: any) => (
-                <tr key={t.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
-                  <td className='p-3 font-medium'>{t.patient?.name ?? '—'}</td>
-                  <td className='p-3 text-xs text-slate-300'>{t.route?.origin ?? '—'} → {t.route?.destination ?? '—'}</td>
-                  <td className='p-3'>
-                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status] ?? 'text-slate-400'}`}>{t.status}</span>
-                  </td>
-                  <td className='p-3 text-xs text-slate-400'>
-                    {t.boardedAt ? new Date(t.boardedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                  </td>
-                  <td className='p-3 text-center'>{t.qrScanned ? '✅' : '⬜'}</td>
-                  <td className='p-3 flex gap-1 flex-wrap'>
-                    {t.status === 'SCHEDULED' && (
-                      <button type='button' onClick={() => board.mutate(t.id)} className='rounded bg-blue-900/50 px-2 py-1 text-xs text-blue-300 hover:bg-blue-800 transition-colors'>Embarcar</button>
-                    )}
-                    {(t.status === 'BOARDED' || t.status === 'IN_PROGRESS') && (
-                      <button type='button' onClick={() => complete.mutate(t.id)} className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>Concluir</button>
-                    )}
-                    {t.status === 'SCHEDULED' && (
-                      <button type='button' onClick={() => noShow.mutate(t.id)} className='rounded bg-red-900/50 px-2 py-1 text-xs text-red-300 hover:bg-red-800 transition-colors'>Falta</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {items.map((t: any) => {
+                // Highlight trips that had a recent boarding event
+                const hasRecentBoarding = boardingEvents.some((b) => b.tripId === t.id);
+                return (
+                  <tr key={t.id} className={`border-t border-border transition-colors ${hasRecentBoarding ? 'bg-blue-950/30 hover:bg-blue-950/50' : 'hover:bg-slate-900/40'}`}>
+                    <td className='p-3 font-medium'>{t.patient?.name ?? '—'}</td>
+                    <td className='p-3 text-xs text-slate-300'>{t.route?.origin ?? '—'} → {t.route?.destination ?? '—'}</td>
+                    <td className='p-3'>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status] ?? 'text-slate-400'}`}>{t.status}</span>
+                    </td>
+                    <td className='p-3 text-xs text-slate-400'>
+                      {t.boardedAt ? new Date(t.boardedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                    </td>
+                    <td className='p-3 text-center'>{t.qrScanned ? '✅' : '⬜'}</td>
+                    <td className='p-3 flex gap-1 flex-wrap'>
+                      {t.status === 'SCHEDULED' && (
+                        <button type='button' onClick={() => board.mutate(t.id)} className='rounded bg-blue-900/50 px-2 py-1 text-xs text-blue-300 hover:bg-blue-800 transition-colors'>Embarcar</button>
+                      )}
+                      {(t.status === 'BOARDING' || t.status === 'BOARDED' || t.status === 'IN_PROGRESS') && (
+                        <button type='button' onClick={() => complete.mutate(t.id)} className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>Concluir</button>
+                      )}
+                      {t.status === 'SCHEDULED' && (
+                        <button type='button' onClick={() => noShow.mutate(t.id)} className='rounded bg-red-900/50 px-2 py-1 text-xs text-red-300 hover:bg-red-800 transition-colors'>Falta</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -109,4 +150,3 @@ export default function TripsPage() {
     </section>
   );
 }
-

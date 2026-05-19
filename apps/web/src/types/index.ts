@@ -43,7 +43,7 @@ export interface VehiclePosition {
 export interface ActivityEvent {
   id: string;
   message: string;
-  type: 'route' | 'trip' | 'queue' | 'vehicle' | 'kpi' | 'alert';
+  type: 'route' | 'trip' | 'queue' | 'vehicle' | 'kpi' | 'alert' | 'boarding';
   timestamp: string;
 }
 

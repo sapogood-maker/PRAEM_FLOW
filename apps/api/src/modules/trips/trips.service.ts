@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../gateways/realtime.gateway';
 
 @Injectable()
 export class TripsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: RealtimeGateway,
+  ) {}
 
   async findAll(tenantId: string, query: { routeId?: string; status?: string; page?: number; limit?: number }) {
     const { routeId, status, page = 1, limit = 30 } = query;
@@ -36,21 +40,48 @@ export class TripsService {
   }
 
   async board(id: string, tenantId: string) {
-    const trip = await this.prisma.trip.findFirst({ where: { id, tenantId } });
+    const trip = await this.prisma.trip.findFirst({
+      where: { id, tenantId },
+      include: { patient: { select: { name: true, operationalId: true } }, route: { select: { driverId: true, vehicleId: true } } },
+    });
     if (!trip) throw new NotFoundException('Trip not found');
-    return this.prisma.trip.update({
+    const updated = await this.prisma.trip.update({
       where: { id },
       data: { status: 'BOARDING', qrScanned: true, boardedAt: new Date() },
     });
+    this.gateway.emitToTenant(tenantId, 'patient:boarded', {
+      tripId: id,
+      patientId: trip.patientId,
+      patientName: trip.patient?.name,
+      operationalId: trip.patient?.operationalId,
+      routeId: trip.routeId,
+      driverId: trip.route?.driverId,
+      vehicleId: trip.route?.vehicleId,
+      boardedAt: updated.boardedAt,
+      status: 'BOARDING',
+    });
+    return updated;
   }
 
   async complete(id: string, tenantId: string) {
-    const trip = await this.prisma.trip.findFirst({ where: { id, tenantId } });
+    const trip = await this.prisma.trip.findFirst({
+      where: { id, tenantId },
+      include: { route: { select: { driverId: true, vehicleId: true } } },
+    });
     if (!trip) throw new NotFoundException('Trip not found');
-    return this.prisma.trip.update({
+    const updated = await this.prisma.trip.update({
       where: { id },
       data: { status: 'COMPLETED', completedAt: new Date() },
     });
+    this.gateway.emitToTenant(tenantId, 'trip:completed', {
+      tripId: id,
+      patientId: trip.patientId,
+      routeId: trip.routeId,
+      driverId: trip.route?.driverId,
+      vehicleId: trip.route?.vehicleId,
+      completedAt: updated.completedAt,
+    });
+    return updated;
   }
 
   async noShow(id: string, tenantId: string) {

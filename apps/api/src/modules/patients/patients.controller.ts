@@ -83,8 +83,7 @@ export class PatientsController {
     return new StreamableFile(buffer);
   }
 
-  /**
-   * Validates a QR Code scan — operational endpoint used by drivers / totems.
+  /** Validates a QR Code scan — operational endpoint used by drivers / totems.
    * NEVER returns CPF or other sensitive PII.
    * Accepts extended audit fields: gpsLat, gpsLng, operatorId, tripId, routeId, source.
    */
@@ -108,6 +107,29 @@ export class PatientsController {
     return this.patientsService.validateQr(
       req.user.tenantId,
       sanitizePayload(body) as any,
+      ip,
+      userAgent,
+    );
+  }
+
+  /** Alias for QR validation — used by Flutter driver app (POST /patients/qr/scan) */
+  @Post('qr/scan')
+  scanQr(
+    @Request() req: AuthRequest,
+    @Body() body: {
+      qrToken: string;
+      vehicleId?: string;
+      routeId?: string;
+      deviceId?: string;
+      source?: string;
+      timestamp?: string;
+    },
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.patientsService.validateQr(
+      req.user.tenantId,
+      sanitizePayload({ ...body, checkpoint: 'BOARDING' }) as any,
       ip,
       userAgent,
     );

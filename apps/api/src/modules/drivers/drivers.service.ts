@@ -100,7 +100,11 @@ export class DriversService {
 
   async update(id: string, tenantId: string, data: any) {
     await this.findOne(id, tenantId);
-    return this.prisma.driver.update({ where: { id }, data });
+    const sanitized = { ...data };
+    if (sanitized.cnhExpiry && typeof sanitized.cnhExpiry === 'string') {
+      sanitized.cnhExpiry = new Date(sanitized.cnhExpiry);
+    }
+    return this.prisma.driver.update({ where: { id }, data: sanitized });
   }
 
   /** Admin resets driver password. */

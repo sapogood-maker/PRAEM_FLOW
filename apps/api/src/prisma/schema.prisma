@@ -129,6 +129,9 @@ model Driver {
   lng              Float?
   status           DriverStatus
   defaultVehicleId String?
+  // Operational tracking timestamps
+  wsLastSeenAt     DateTime?    // last time the tablet WebSocket joined/pinged
+  lastHeartbeatAt  DateTime?    // last GPS heartbeat received from the tablet
   tenant           Tenant       @relation(fields: [tenantId], references: [id])
   user             User         @relation(fields: [userId], references: [id])
   routes           Route[]
@@ -136,6 +139,8 @@ model Driver {
   devices          Device[]
 
   @@index([tenantId])
+  @@index([lastHeartbeatAt])
+  @@index([wsLastSeenAt])
 }
 
 enum DriverStatus {

@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Users, Wifi, WifiOff, Truck, Smartphone, Clock, Plus,
   Pencil, KeyRound, PowerOff, Power, X, RefreshCw, Search,
-  ShieldAlert, CircleDot,
+  ShieldAlert, CircleDot, MapPin, Radio,
 } from 'lucide-react';
 import { driverService, vehicleService } from '@/services/operational.service';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -13,6 +13,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type DriverStatus = 'AVAILABLE' | 'ON_ROUTE' | 'REST' | 'OFFLINE';
+type OperationalStatus = 'OPERATIONAL' | 'CONNECTED' | 'GPS_LOST' | 'WS_ONLY' | 'OFFLINE';
 
 interface DriverUser { id: string; name: string; email: string; active: boolean; lastLoginAt: string | null }
 interface DriverDevice { id: string; name: string; lastSeenAt: string | null; vehicleId: string | null; platform?: string }
@@ -26,7 +27,20 @@ interface Driver {
   user: DriverUser;
   devices: DriverDevice[];
 }
-interface OnlineDevice { driverId: string | null; lastSeenAt: string }
+
+/** Shape returned by GET /drivers/online */
+interface OnlineDriverInfo {
+  driverId: string;
+  driverStatus: DriverStatus;
+  wsConnected: boolean;
+  gpsActive: boolean;
+  operationalStatus: OperationalStatus;
+  wsLastSeenAt: string | null;
+  lastHeartbeatAt: string | null;
+  user: { name: string; email: string };
+  device: { id: string; vehicleId: string | null; lastSeenAt: string | null; appVersion?: string; platform?: string } | null;
+}
+
 interface Vehicle { id: string; plate: string; model: string }
 
 // ─── Status configs ────────────────────────────────────────────────────────────
@@ -38,6 +52,14 @@ const STATUS_CFG: Record<DriverStatus, { label: string; cls: string }> = {
   OFFLINE:    { label: 'Offline',     cls: 'bg-slate-800 text-slate-400' },
 };
 
+const OPS_CFG: Record<OperationalStatus, { label: string; cls: string; dot: string }> = {
+  OPERATIONAL: { label: 'Operacional', cls: 'bg-emerald-900/60 text-emerald-300', dot: 'bg-emerald-400' },
+  CONNECTED:   { label: 'WS Ativo',    cls: 'bg-cyan-900/60 text-cyan-300',       dot: 'bg-cyan-400' },
+  GPS_LOST:    { label: 'GPS Perdido', cls: 'bg-amber-900/60 text-amber-400',     dot: 'bg-amber-400' },
+  WS_ONLY:     { label: 'WS Apenas',   cls: 'bg-blue-900/60 text-blue-300',       dot: 'bg-blue-400' },
+  OFFLINE:     { label: 'Offline',     cls: 'bg-slate-800 text-slate-500',        dot: 'bg-slate-500' },
+};
+
 function StatusBadge({ status }: { status: DriverStatus }) {
   const cfg = STATUS_CFG[status] ?? STATUS_CFG.OFFLINE;
   return (
@@ -47,20 +69,33 @@ function StatusBadge({ status }: { status: DriverStatus }) {
   );
 }
 
-function OnlinePulse({ online }: { online: boolean }) {
-  return online ? (
-    <span className='inline-flex items-center gap-1 text-xs font-medium text-emerald-400'>
-      <span className='relative flex h-2 w-2'>
-        <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
-        <span className='relative inline-flex h-2 w-2 rounded-full bg-emerald-400' />
+function OperationalBadge({ status }: { status: OperationalStatus }) {
+  const cfg = OPS_CFG[status] ?? OPS_CFG.OFFLINE;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium ${cfg.cls}`}>
+      <span className={`relative flex h-2 w-2`}>
+        {status === 'OPERATIONAL' && (
+          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${cfg.dot} opacity-75`} />
+        )}
+        <span className={`relative inline-flex h-2 w-2 rounded-full ${cfg.dot}`} />
       </span>
-      Online
+      {cfg.label}
     </span>
-  ) : (
-    <span className='inline-flex items-center gap-1 text-xs text-slate-500'>
-      <CircleDot size={8} />
-      Offline
-    </span>
+  );
+}
+
+function WsGpsIcons({ wsConnected, gpsActive }: { wsConnected: boolean; gpsActive: boolean }) {
+  return (
+    <div className='flex items-center gap-2'>
+      <span title={wsConnected ? 'WebSocket conectado' : 'WebSocket desconectado'}
+        className={wsConnected ? 'text-cyan-400' : 'text-slate-600'}>
+        <Radio size={12} />
+      </span>
+      <span title={gpsActive ? 'GPS ativo' : 'GPS sem sinal'}
+        className={gpsActive ? 'text-emerald-400' : 'text-slate-600'}>
+        <MapPin size={12} />
+      </span>
+    </div>
   );
 }
 
@@ -322,7 +357,7 @@ export default function DriversPage() {
     queryFn: () => driverService.list({ search, limit: 100 }),
   });
 
-  const { data: onlineDevices = [] } = useQuery<OnlineDevice[]>({
+  const { data: onlineDriverData = [] } = useQuery<OnlineDriverInfo[]>({
     queryKey: ['drivers-online'],
     queryFn: () => driverService.online(),
     refetchInterval: 30_000,
@@ -335,9 +370,9 @@ export default function DriversPage() {
 
   const vehicles: Vehicle[] = vehiclesData?.items ?? [];
 
-  const onlineDriverIds = useMemo(
-    () => new Set((onlineDevices as OnlineDevice[]).map(d => d.driverId).filter(Boolean)),
-    [onlineDevices],
+  const onlineMap = useMemo(
+    () => new Map<string, OnlineDriverInfo>((onlineDriverData as OnlineDriverInfo[]).map(d => [d.driverId, d])),
+    [onlineDriverData],
   );
 
   const allDrivers: Driver[] = driversData?.items ?? [];
@@ -350,11 +385,11 @@ export default function DriversPage() {
     });
   }, [allDrivers, tab]);
 
-  // ── KPIs ───────────────────────────────────────────────────────────────────
-  const total       = allDrivers.length;
-  const onlineCount = onlineDriverIds.size;
-  const onRouteCount= allDrivers.filter(d => d.status === 'ON_ROUTE').length;
-  const inactiveCount = allDrivers.filter(d => !d.active).length;
+  const total           = allDrivers.length;
+  const onlineCount     = (onlineDriverData as OnlineDriverInfo[]).filter(d => d.operationalStatus === 'OPERATIONAL').length;
+  const wsCount         = (onlineDriverData as OnlineDriverInfo[]).filter(d => d.wsConnected).length;
+  const onRouteCount    = allDrivers.filter(d => d.status === 'ON_ROUTE').length;
+  const inactiveCount   = allDrivers.filter(d => !d.active).length;
 
   // ── mutations ──────────────────────────────────────────────────────────────
   const invalidate = () => { qc.invalidateQueries({ queryKey: ['drivers'] }); qc.invalidateQueries({ queryKey: ['drivers-online'] }); };
@@ -400,10 +435,10 @@ export default function DriversPage() {
 
       {/* KPI row */}
       <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
-        <KpiCard label='Total cadastrados' value={total}        icon={Users}    color='bg-slate-800 text-slate-300' />
-        <KpiCard label='Online agora'      value={onlineCount} icon={Wifi}     color='bg-emerald-900 text-emerald-400' />
-        <KpiCard label='Em rota'           value={onRouteCount}icon={Truck}    color='bg-cyan-900 text-cyan-400' />
-        <KpiCard label='Inativos'          value={inactiveCount}icon={WifiOff} color='bg-red-900 text-red-400' />
+        <KpiCard label='Total cadastrados'   value={total}        icon={Users}   color='bg-slate-800 text-slate-300' />
+        <KpiCard label='Operacionais (GPS)'  value={onlineCount}  icon={MapPin}  color='bg-emerald-900 text-emerald-400' />
+        <KpiCard label='WS conectados'       value={wsCount}      icon={Radio}   color='bg-cyan-900 text-cyan-400' />
+        <KpiCard label='Inativos'            value={inactiveCount}icon={WifiOff} color='bg-red-900 text-red-400' />
       </div>
 
       {/* Filters */}
@@ -445,10 +480,10 @@ export default function DriversPage() {
             <thead className='bg-slate-900 text-xs uppercase tracking-wider text-slate-400'>
               <tr>
                 <th className='p-3 text-left'>Motorista</th>
-                <th className='p-3 text-left'>Online</th>
+                <th className='p-3 text-left'>Operacional</th>
+                <th className='p-3 text-left'>WS / GPS</th>
                 <th className='p-3 text-left'>Status Op.</th>
                 <th className='p-3 text-left'>Veículo</th>
-                <th className='p-3 text-left'>Tablet</th>
                 <th className='p-3 text-left'>Último Login</th>
                 <th className='p-3 text-right'>Ações</th>
               </tr>
@@ -462,8 +497,11 @@ export default function DriversPage() {
                 </tr>
               )}
               {filtered.map((d) => {
-                const isOnline = onlineDriverIds.has(d.id);
-                const device   = d.devices?.[0];
+                const info       = onlineMap.get(d.id);
+                const wsConnected  = info?.wsConnected  ?? false;
+                const gpsActive    = info?.gpsActive    ?? false;
+                const opStatus     = (info?.operationalStatus ?? 'OFFLINE') as OperationalStatus;
+                const device       = d.devices?.[0];
                 const vehicleLabel = d.defaultVehicleId
                   ? vehicles.find(v => v.id === d.defaultVehicleId)?.plate ?? d.defaultVehicleId.slice(0, 8)
                   : '—';
@@ -477,10 +515,18 @@ export default function DriversPage() {
                       {!d.active && <span className='mt-0.5 inline-block rounded bg-red-900 px-1.5 py-0.5 text-xs text-red-300'>Inativo</span>}
                     </td>
 
-                    {/* Online status */}
-                    <td className='p-3'><OnlinePulse online={isOnline} /></td>
-
                     {/* Operational status */}
+                    <td className='p-3'><OperationalBadge status={opStatus} /></td>
+
+                    {/* WS + GPS indicators */}
+                    <td className='p-3'>
+                      <WsGpsIcons wsConnected={wsConnected} gpsActive={gpsActive} />
+                      {info?.lastHeartbeatAt && (
+                        <p className='mt-0.5 text-xs text-slate-600' title='Último heartbeat GPS'>{fmtDate(info.lastHeartbeatAt)}</p>
+                      )}
+                    </td>
+
+                    {/* Driver status badge */}
                     <td className='p-3'><StatusBadge status={d.status} /></td>
 
                     {/* Vehicle */}
@@ -489,21 +535,7 @@ export default function DriversPage() {
                         <Truck size={12} className='text-slate-500' />
                         {vehicleLabel}
                       </span>
-                    </td>
-
-                    {/* Tablet */}
-                    <td className='p-3'>
-                      {device ? (
-                        <div>
-                          <span className='flex items-center gap-1 text-xs text-slate-300'>
-                            <Smartphone size={12} className='text-slate-500' />
-                            {device.name ?? device.id.slice(0, 8)}
-                          </span>
-                          <p className='mt-0.5 text-xs text-slate-500'>{fmtDate(device.lastSeenAt)}</p>
-                        </div>
-                      ) : (
-                        <span className='text-xs text-slate-600'>—</span>
-                      )}
+                      {device && <p className='mt-0.5 text-xs text-slate-600'>{fmtDate(device.lastSeenAt)}</p>}
                     </td>
 
                     {/* Last login */}

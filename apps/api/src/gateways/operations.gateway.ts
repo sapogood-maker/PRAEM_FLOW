@@ -9,6 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { sanitizePayload } from '../common/sanitize';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * OperationsGateway — dedicated /operations namespace.
@@ -22,12 +23,30 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
 
   private connectedClients = new Set<string>();
 
+  /** socket.id → { driverId, tenantId } for disconnect tracking */
+  private driverSockets = new Map<string, { driverId: string; tenantId: string }>();
+
+  constructor(private readonly prisma: PrismaService) {}
+
   handleConnection(client: Socket) {
     this.connectedClients.add(client.id);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     this.connectedClients.delete(client.id);
+    const info = this.driverSockets.get(client.id);
+    if (info) {
+      this.driverSockets.delete(client.id);
+      // Emit driver.offline only if no other socket for the same driver remains
+      const stillConnected = [...this.driverSockets.values()].some(v => v.driverId === info.driverId);
+      if (!stillConnected) {
+        this.server.to(`tenant:${info.tenantId}`).emit('driver.offline', sanitizePayload({
+          driverId: info.driverId,
+          tenantId: info.tenantId,
+          timestamp: new Date().toISOString(),
+        }));
+      }
+    }
   }
 
   get clientCount() {
@@ -58,9 +77,10 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
    * join:driver — used by Flutter tablet terminals.
    * Joins the tenant room AND a driver-specific room so the dispatcher
    * can push targeted events to a single driver/tablet.
+   * Also records the WS connection time on the Driver record.
    */
   @SubscribeMessage('join:driver')
-  onJoinDriver(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+  async onJoinDriver(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     const safe = sanitizePayload(payload) as Record<string, unknown>;
     const tenantId = safe['tenantId'];
     const driverId = safe['driverId'];
@@ -68,15 +88,56 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     if (typeof tenantId === 'string') client.join(`tenant:${tenantId}`);
     if (typeof driverId === 'string') client.join(`driver:${driverId}`);
     if (typeof deviceId === 'string') client.join(`device:${deviceId}`);
+
+    // Record WS connection timestamp for operational status tracking
+    if (typeof driverId === 'string' && typeof tenantId === 'string') {
+      this.driverSockets.set(client.id, { driverId, tenantId });
+      const now = new Date();
+      await this.prisma.driver.updateMany({
+        where: { id: driverId, tenantId },
+        data: { wsLastSeenAt: now },
+      });
+      this.server.to(`tenant:${tenantId}`).emit('driver.connected', sanitizePayload({
+        driverId,
+        tenantId,
+        timestamp: now.toISOString(),
+      }));
+    }
+
     return { ok: true };
   }
 
-  /** driver.heartbeat — sent by Flutter every 30 s to signal the tablet is alive. */
+  /**
+   * driver.heartbeat — sent by Flutter every 30 s to signal the tablet is alive.
+   * Updates both wsLastSeenAt and lastHeartbeatAt on the Driver record and
+   * emits driver.gps.active to the tenant room.
+   */
   @SubscribeMessage('driver.heartbeat')
-  onDriverHeartbeat(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+  async onDriverHeartbeat(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('driver.heartbeat', safe);
+    const tenantId = typeof safe['tenantId'] === 'string' ? safe['tenantId'] : null;
+    const driverId = typeof safe['driverId'] === 'string' ? safe['driverId'] : null;
+
+    if (tenantId) {
+      this.server.to(`tenant:${tenantId}`).emit('driver.heartbeat', safe);
+    }
+
+    if (driverId && tenantId) {
+      const now = new Date();
+      await this.prisma.driver.updateMany({
+        where: { id: driverId, tenantId },
+        data: { lastHeartbeatAt: now, wsLastSeenAt: now },
+      });
+      this.server.to(`tenant:${tenantId}`).emit('driver.gps.active', sanitizePayload({
+        driverId,
+        tenantId,
+        timestamp: now.toISOString(),
+        lat: safe['lat'],
+        lng: safe['lng'],
+        batteryLevel: safe['batteryLevel'],
+      }));
+    }
+
     return { ok: true };
   }
 

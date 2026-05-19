@@ -121,34 +121,79 @@ export class DriversService {
     return { id, active };
   }
 
-  /** Returns online drivers — those with a Device seen within the last 90 seconds. */
+  /**
+   * Returns all active drivers with their real operational status.
+   * Derives wsConnected, gpsActive, and operationalStatus from timestamps —
+   * NOT from the JWT login session.
+   *
+   * Thresholds:
+   *   WS connected  : wsLastSeenAt within last 90 s
+   *   GPS active    : lastHeartbeatAt within last 60 s
+   *   OPERATIONAL   : wsConnected AND gpsActive
+   */
   async getOnlineDrivers(tenantId: string) {
-    const threshold = new Date(Date.now() - 90_000);
-    const devices = await this.prisma.device.findMany({
-      where: {
-        tenantId,
-        active: true,
-        type: 'TABLET',
-        driverId: { not: null },
-        lastSeenAt: { gte: threshold },
-      },
+    const now = Date.now();
+    const WS_THRESHOLD_MS  = 90_000;
+    const GPS_THRESHOLD_MS = 60_000;
+
+    const drivers = await this.prisma.driver.findMany({
+      where: { tenantId, active: true },
       select: {
         id: true,
-        driverId: true,
-        vehicleId: true,
-        lastSeenAt: true,
-        appVersion: true,
-        platform: true,
-        driver: {
-          select: {
-            id: true,
-            status: true,
-            user: { select: { name: true, email: true } },
-          },
+        status: true,
+        wsLastSeenAt: true,
+        lastHeartbeatAt: true,
+        user: { select: { name: true, email: true } },
+        devices: {
+          where: { active: true, type: 'TABLET' },
+          select: { id: true, vehicleId: true, lastSeenAt: true, appVersion: true, platform: true },
+          orderBy: { lastSeenAt: 'desc' },
+          take: 1,
         },
       },
     });
-    return devices;
+
+    return drivers.map(d => {
+      const wsConnected  = d.wsLastSeenAt    ? (now - new Date(d.wsLastSeenAt).getTime())    < WS_THRESHOLD_MS  : false;
+      const gpsActive    = d.lastHeartbeatAt ? (now - new Date(d.lastHeartbeatAt).getTime()) < GPS_THRESHOLD_MS : false;
+      const operational  = wsConnected && gpsActive;
+
+      const operationalStatus: string =
+        operational         ? 'OPERATIONAL'  :
+        wsConnected         ? 'CONNECTED'    :
+        d.lastHeartbeatAt   ? 'GPS_LOST'     :
+        d.wsLastSeenAt      ? 'WS_ONLY'      :
+                              'OFFLINE';
+
+      return {
+        driverId: d.id,
+        driverStatus: d.status,
+        wsConnected,
+        gpsActive,
+        operationalStatus,
+        wsLastSeenAt: d.wsLastSeenAt?.toISOString() ?? null,
+        lastHeartbeatAt: d.lastHeartbeatAt?.toISOString() ?? null,
+        user: d.user,
+        device: d.devices[0] ?? null,
+      };
+    });
+  }
+
+  /** Called when the tablet WebSocket connects/joins the driver room. */
+  async recordWsConnect(driverId: string, tenantId: string) {
+    const driver = await this.prisma.driver.findFirst({ where: { id: driverId, tenantId } });
+    if (!driver) return;
+    await this.prisma.driver.update({ where: { id: driverId }, data: { wsLastSeenAt: new Date() } });
+  }
+
+  /** Called when a GPS heartbeat arrives (via WS or HTTP). */
+  async recordHeartbeat(driverId: string, tenantId: string) {
+    const driver = await this.prisma.driver.findFirst({ where: { id: driverId, tenantId } });
+    if (!driver) return;
+    await this.prisma.driver.update({
+      where: { id: driverId },
+      data: { lastHeartbeatAt: new Date(), wsLastSeenAt: new Date() },
+    });
   }
 }
 

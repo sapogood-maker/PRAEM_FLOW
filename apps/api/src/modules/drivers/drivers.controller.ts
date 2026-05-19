@@ -50,5 +50,15 @@ export class DriversController {
   setActive(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { active: boolean }) {
     return this.service.setActive(id, req.user.tenantId, body.active);
   }
+
+  /**
+   * POST /drivers/:id/heartbeat
+   * Called by the Flutter tablet every ~30 s (HTTP fallback when WS is not available).
+   * Records GPS/operational heartbeat.
+   */
+  @Post(':id/heartbeat')
+  heartbeat(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.service.recordHeartbeat(id, req.user.tenantId).then(() => ({ ok: true, timestamp: new Date().toISOString() }));
+  }
 }
 

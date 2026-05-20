@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { useQueue } from '@/hooks/useQueue';
 import { queueService } from '@/services/queue.service';
 import { patientService, healthcareLocationService } from '@/services/operational.service';
 import type { QueueType } from '@/types';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { getPriorityLabel, getConfirmationStatusLabel } from '@/lib/i18n';
+import { useOperationalDispatchStore } from '@/store/operationalDispatch.store';
 
 const PRIORITY_BADGE: Record<string, string> = {
   EMERGENCY: 'bg-red-600 text-white animate-pulse',
@@ -50,6 +52,7 @@ const EMPTY_FORM: QueueForm = {
 };
 
 export default function QueuePage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<QueueType>('LOGISTICS');
   const [search, setSearch] = useState('');
@@ -57,6 +60,11 @@ export default function QueuePage() {
   const [form, setForm] = useState<QueueForm>(EMPTY_FORM);
   const [locationSearch, setLocationSearch] = useState('');
   const [error, setError] = useState('');
+  const [localSelected, setLocalSelected] = useState<Set<string>>(new Set());
+  const [dragOver, setDragOver] = useState(false);
+  const dragItemRef = useRef<any>(null);
+
+  const { addToDispatch, pendingDispatch } = useOperationalDispatchStore();
 
   const { data, isLoading } = useQueue({ type: activeTab, limit: 50 });
   const items = (data?.items ?? []) as any[];
@@ -118,6 +126,34 @@ export default function QueuePage() {
         q.destination?.toLowerCase().includes(search.toLowerCase()))
     : items;
 
+  function toggleLocal(id: string) {
+    setLocalSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function sendToDispatch(items: any[]) {
+    items.forEach((q: any) => addToDispatch({
+      id: q.id,
+      patientId: q.patientId,
+      priority: q.priority,
+      status: q.status,
+      destination: q.destination,
+      healthcareLocationId: q.healthcareLocationId,
+      appointmentDate: q.appointmentDate,
+      notes: q.notes,
+      patient: q.patient,
+      healthcareLocation: q.healthcareLocation,
+    }));
+    setLocalSelected(new Set());
+    router.push('/dispatch');
+  }
+
+  const selectedItems = filtered.filter((q: any) => localSelected.has(q.id));
+  const alreadyInDispatch = (id: string) => pendingDispatch.some((p) => p.id === id);
+
   return (
     <section className='space-y-4'>
       <div className='flex items-center justify-between'>
@@ -125,9 +161,41 @@ export default function QueuePage() {
           <h2 className='text-2xl font-bold text-slate-100'>Fila Operacional</h2>
           <p className='text-sm text-slate-400'>{total} paciente(s) na fila</p>
         </div>
-        <button type='button' onClick={() => setShowModal(true)} className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold hover:bg-cyan-600 transition-colors'>
-          + Adicionar à Fila
-        </button>
+        <div className='flex items-center gap-2'>
+          {localSelected.size > 0 && (
+            <button
+              type='button'
+              onClick={() => sendToDispatch(selectedItems)}
+              className='flex items-center gap-2 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold hover:bg-cyan-600 transition-colors'
+            >
+              🚐 Enviar para Despacho ({localSelected.size})
+            </button>
+          )}
+          <button type='button' onClick={() => setShowModal(true)} className='rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-600 transition-colors'>
+            + Adicionar à Fila
+          </button>
+        </div>
+      </div>
+
+      {/* Drag-and-drop drop zone for dispatch */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (dragItemRef.current) {
+            sendToDispatch([dragItemRef.current]);
+            dragItemRef.current = null;
+          }
+        }}
+        className={`rounded-xl border-2 border-dashed px-4 py-3 text-center text-sm transition-colors ${
+          dragOver
+            ? 'border-cyan-500 bg-cyan-950/30 text-cyan-300'
+            : 'border-slate-700 text-slate-500'
+        }`}
+      >
+        {dragOver ? '🚐 Soltar aqui para enviar para Despacho' : 'Arraste pacientes aqui → Despacho'}
       </div>
 
       <div className='flex gap-1 rounded-lg border border-border bg-panel p-1 w-fit'>
@@ -149,6 +217,17 @@ export default function QueuePage() {
           <table className='w-full text-sm'>
             <thead className='bg-slate-900 text-xs text-slate-400 uppercase tracking-wider'>
               <tr>
+                <th className='p-3 w-10'>
+                  <input
+                    type='checkbox'
+                    className='accent-cyan-500'
+                    checked={filtered.length > 0 && filtered.every((q: any) => localSelected.has(q.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) setLocalSelected(new Set(filtered.map((q: any) => q.id)));
+                      else setLocalSelected(new Set());
+                    }}
+                  />
+                </th>
                 <th className='p-3 text-left'>Paciente</th>
                 <th className='p-3 text-left'>Destino</th>
                 <th className='p-3 text-left'>Consulta</th>
@@ -159,13 +238,37 @@ export default function QueuePage() {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className='p-6 text-center text-slate-500'>Nenhum paciente nesta fila</td></tr>
+                <tr><td colSpan={7} className='p-6 text-center text-slate-500'>Nenhum paciente nesta fila</td></tr>
               )}
               {filtered.map((q: any) => {
                 const loc = q.healthcareLocation;
+                const isSelected = localSelected.has(q.id);
+                const inDispatch = alreadyInDispatch(q.id);
                 return (
-                  <tr key={q.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
-                    <td className='p-3 font-medium'>{q.patient?.name ?? '—'}</td>
+                  <tr
+                    key={q.id}
+                    draggable
+                    onDragStart={() => { dragItemRef.current = q; }}
+                    onDragEnd={() => { dragItemRef.current = null; }}
+                    className={`border-t border-border transition-colors cursor-grab active:cursor-grabbing ${
+                      isSelected ? 'bg-cyan-950/30 border-l-2 border-l-cyan-600' :
+                      inDispatch ? 'bg-slate-800/30 opacity-60' :
+                      'hover:bg-slate-900/40'
+                    }`}
+                  >
+                    <td className='p-3'>
+                      <input
+                        type='checkbox'
+                        className='accent-cyan-500'
+                        checked={isSelected}
+                        disabled={inDispatch}
+                        onChange={() => toggleLocal(q.id)}
+                      />
+                    </td>
+                    <td className='p-3 font-medium'>
+                      {q.patient?.name ?? '—'}
+                      {inDispatch && <span className='ml-2 text-xs text-cyan-400'>• Em despacho</span>}
+                    </td>
                     <td className='p-3 text-xs text-slate-300 max-w-[200px]'>
                       {loc ? (
                         <span className='flex flex-col gap-0.5'>
@@ -188,12 +291,23 @@ export default function QueuePage() {
                       </span>
                     </td>
                     <td className='p-3'>
-                      {q.confirmationStatus !== 'CONFIRMED' && (
-                        <button type='button' onClick={() => updateConfirmation.mutate({ id: q.id, status: 'CONFIRMED' })}
-                          className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>
-                          ✓ Confirmar
-                        </button>
-                      )}
+                      <div className='flex items-center gap-1'>
+                        {q.confirmationStatus !== 'CONFIRMED' && (
+                          <button type='button' onClick={() => updateConfirmation.mutate({ id: q.id, status: 'CONFIRMED' })}
+                            className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>
+                            ✓ Confirmar
+                          </button>
+                        )}
+                        {!inDispatch && (
+                          <button
+                            type='button'
+                            onClick={() => sendToDispatch([q])}
+                            className='rounded bg-cyan-900/50 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-800 transition-colors'
+                          >
+                            → Despacho
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

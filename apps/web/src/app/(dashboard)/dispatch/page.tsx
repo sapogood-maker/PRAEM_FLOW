@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { getPriorityLabel, getDriverStatusLabel } from '@/lib/i18n';
+import { useOperationalDispatchStore } from '@/store/operationalDispatch.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,7 +71,14 @@ const DRIVER_STATUS_BADGE: Record<string, string> = {
 
 export default function DispatchPage() {
   const qc = useQueryClient();
-  const [selectedPatients, setSelectedPatients] = useState<string[]>([]);
+  const {
+    pendingDispatch,
+    selectedPatients,
+    toggleSelectedPatient,
+    clearDispatch,
+    removeFromDispatch,
+  } = useOperationalDispatchStore();
+
   const [driverId, setDriverId] = useState('');
   const [vehicleId, setVehicleId] = useState('');
   const [locationId, setLocationId] = useState('');
@@ -112,6 +120,11 @@ export default function DispatchPage() {
   const vehicles: Vehicle[] = vehiclesData?.items ?? vehiclesData ?? [];
   const locations: HealthcareLocation[] = locationsData?.items ?? locationsData ?? [];
 
+  // Merge: store's pendingDispatch + live queue (deduped by id)
+  const storeIds = new Set(pendingDispatch.map((p) => p.id));
+  const liveQueueOnly = queueItems.filter((q) => !storeIds.has(q.id));
+  const allItems: QueueItem[] = [...(pendingDispatch as QueueItem[]), ...liveQueueOnly];
+
   // ── Selected vehicle capacity check ───────────────────────────────────────
   const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
   const overCapacity = selectedVehicle ? selectedPatients.length > selectedVehicle.capacity : false;
@@ -145,7 +158,7 @@ export default function DispatchPage() {
       const route = routeRes.data;
 
       // 2. Create a trip for each selected queue entry (queue item → patient)
-      const selectedQueueItems = queueItems.filter((q) => selectedPatients.includes(q.id));
+      const selectedQueueItems = allItems.filter((q) => selectedPatients.includes(q.id));
       await Promise.all(
         selectedQueueItems.map((q) =>
           api.post('/trips', { routeId: route.id, patientId: q.patientId }),
@@ -160,7 +173,7 @@ export default function DispatchPage() {
         `${label} (${routeId.slice(0, 8)}…) com ${patientCount} paciente(s).${dispatchType === 'IMMEDIATE' ? ' Motorista notificado via Flutter.' : ''}`,
       );
       setErrorMsg('');
-      setSelectedPatients([]);
+      clearDispatch();
       setDriverId('');
       setVehicleId('');
       setLocationId('');
@@ -169,6 +182,7 @@ export default function DispatchPage() {
       qc.invalidateQueries({ queryKey: ['dispatch-queue'] });
       qc.invalidateQueries({ queryKey: ['trips'] });
       qc.invalidateQueries({ queryKey: ['routes'] });
+      qc.invalidateQueries({ queryKey: ['queue'] });
     },
     onError: (err: any) => {
       setErrorMsg(err?.response?.data?.message ?? 'Erro ao despachar rota.');
@@ -184,9 +198,7 @@ export default function DispatchPage() {
     (dispatchType === 'IMMEDIATE' || !!scheduledDate);
 
   function togglePatient(queueId: string) {
-    setSelectedPatients((prev) =>
-      prev.includes(queueId) ? prev.filter((id) => id !== queueId) : [...prev, queueId],
-    );
+    toggleSelectedPatient(queueId);
   }
 
   const todayIso = new Date().toISOString().split('T')[0];
@@ -219,23 +231,66 @@ export default function DispatchPage() {
         <div className='rounded-xl border border-border bg-panel'>
           <div className='flex items-center justify-between border-b border-border px-4 py-3'>
             <h3 className='font-semibold text-slate-100'>Pacientes Aguardando Despacho</h3>
-            <span className='rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400'>
-              {selectedPatients.length} selecionado(s)
-            </span>
+            <div className='flex items-center gap-2'>
+              {pendingDispatch.length > 0 && (
+                <span className='rounded-full bg-cyan-900 px-2 py-0.5 text-xs text-cyan-300'>
+                  {pendingDispatch.length} da fila
+                </span>
+              )}
+              <span className='rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400'>
+                {selectedPatients.length} selecionado(s)
+              </span>
+            </div>
           </div>
+
+          {/* Staging area: items sent from Queue page */}
+          {pendingDispatch.length > 0 && (
+            <div className='border-b border-border bg-cyan-950/20 px-4 py-2'>
+              <p className='mb-2 text-xs font-semibold uppercase tracking-wider text-cyan-400'>
+                📋 Enviados da Fila Operacional
+              </p>
+              <div className='flex flex-wrap gap-2'>
+                {pendingDispatch.map((p) => (
+                  <div
+                    key={p.id}
+                    className='flex items-center gap-1.5 rounded-lg border border-cyan-800/50 bg-cyan-900/30 px-2 py-1 text-xs text-cyan-200'
+                  >
+                    <span>{p.patient?.name ?? p.patientId}</span>
+                    <span className={`rounded px-1 py-0.5 text-xs font-medium ${PRIORITY_COLOR[p.priority] ?? 'bg-slate-700 text-slate-300'}`}>
+                      {getPriorityLabel(p.priority)}
+                    </span>
+                    <button
+                      type='button'
+                      onClick={() => removeFromDispatch(p.id)}
+                      className='ml-1 text-slate-400 hover:text-red-400 transition-colors'
+                      title='Remover'
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {queueLoading ? (
             <div className='flex items-center justify-center p-8'>
               <LoadingSpinner />
             </div>
-          ) : queueItems.length === 0 ? (
-            <p className='p-6 text-center text-slate-500'>
-              Nenhum paciente aguardando despacho ou com agendamento futuro.
-            </p>
+          ) : allItems.length === 0 ? (
+            <div className='p-8 text-center space-y-2'>
+              <p className='text-slate-400'>Nenhum paciente aguardando despacho.</p>
+              <p className='text-xs text-slate-500'>
+                Vá para a{' '}
+                <a href='/queue' className='text-cyan-400 underline'>Fila Operacional</a>
+                {' '}e selecione pacientes para despacho.
+              </p>
+            </div>
           ) : (
             <ul className='divide-y divide-border'>
-              {queueItems.map((q) => {
+              {allItems.map((q) => {
                 const isSelected = selectedPatients.includes(q.id);
+                const fromStore = storeIds.has(q.id);
                 return (
                   <li
                     key={q.id}
@@ -269,6 +324,11 @@ export default function DispatchPage() {
                         >
                           {getPriorityLabel(q.priority)}
                         </span>
+                        {fromStore && (
+                          <span className='rounded px-1.5 py-0.5 text-xs font-medium bg-cyan-900 text-cyan-300'>
+                            📋 Da Fila
+                          </span>
+                        )}
                         <span
                           className={`rounded px-1.5 py-0.5 text-xs font-medium ${
                             q.status === 'CONFIRMED'
@@ -507,7 +567,8 @@ export default function DispatchPage() {
 
           {selectedPatients.length === 0 && (
             <p className='text-xs text-slate-500 text-center'>
-              Selecione ao menos 1 paciente da fila
+              Selecione ao menos 1 paciente da fila ou{' '}
+              <a href='/queue' className='text-cyan-400 underline'>vá para a Fila Operacional</a>
             </p>
           )}
         </div>

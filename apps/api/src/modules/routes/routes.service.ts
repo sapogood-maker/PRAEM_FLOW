@@ -9,18 +9,24 @@ export class RoutesService {
     private readonly gateway: RealtimeGateway,
   ) {}
 
-  async findAll(tenantId: string, query: { status?: string; date?: string; driverId?: string; vehicleId?: string; page?: number; limit?: number }) {
-    const { status, date, driverId, vehicleId, page = 1, limit = 20 } = query;
+  async findAll(tenantId: string, query: { status?: string; date?: string; startDate?: string; endDate?: string; driverId?: string; vehicleId?: string; page?: number; limit?: number }) {
+    const { status, date, startDate, endDate, driverId, vehicleId, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
     const where: any = {
       tenantId,
-      ...(status && { status: status as any }),
+      ...(status && { status: { in: status.split(',') as any[] } }),
       ...(driverId && { driverId }),
       ...(vehicleId && { vehicleId }),
       ...(date && {
         date: {
           gte: new Date(date + 'T00:00:00Z'),
           lte: new Date(date + 'T23:59:59Z'),
+        },
+      }),
+      ...(!date && startDate && endDate && {
+        date: {
+          gte: new Date(startDate + 'T00:00:00Z'),
+          lte: new Date(endDate + 'T23:59:59Z'),
         },
       }),
     };
@@ -55,7 +61,18 @@ export class RoutesService {
   }
 
   async create(tenantId: string, data: any) {
-    const route = await this.prisma.route.create({ data: { ...data, tenantId } });
+    const payload: any = { ...data, tenantId };
+    if (payload.scheduledAt && typeof payload.scheduledAt === 'string') {
+      payload.scheduledAt = new Date(payload.scheduledAt);
+    }
+    if (payload.date && typeof payload.date === 'string') {
+      payload.date = new Date(payload.date);
+    }
+    // Default status for scheduled (future) routes
+    if (!payload.status) {
+      payload.status = payload.dispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED';
+    }
+    const route = await this.prisma.route.create({ data: payload });
     // Notify the assigned driver that a new route has been dispatched to them
     if (route.driverId) {
       this.gateway.emitToTenant(tenantId, 'route:dispatched', {
@@ -72,7 +89,14 @@ export class RoutesService {
 
   async update(id: string, tenantId: string, data: any) {
     await this.findOne(id, tenantId);
-    return this.prisma.route.update({ where: { id }, data });
+    const payload: any = { ...data };
+    if (payload.scheduledAt && typeof payload.scheduledAt === 'string') {
+      payload.scheduledAt = new Date(payload.scheduledAt);
+    }
+    if (payload.date && typeof payload.date === 'string') {
+      payload.date = new Date(payload.date);
+    }
+    return this.prisma.route.update({ where: { id }, data: payload });
   }
 
   async remove(id: string, tenantId: string) {

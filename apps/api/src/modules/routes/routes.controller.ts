@@ -15,11 +15,13 @@ export class RoutesController {
     @Request() req: AuthRequest,
     @Query('status') status?: string,
     @Query('date') date?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
     @Query('driverId') driverId?: string,
     @Query('vehicleId') vehicleId?: string,
     @Query('page') page?: string,
   ) {
-    return this.routesService.findAll(req.user.tenantId, { status, date, driverId, vehicleId, page: page ? Number(page) : 1 });
+    return this.routesService.findAll(req.user.tenantId, { status, date, startDate, endDate, driverId, vehicleId, page: page ? Number(page) : 1 });
   }
 
   @Get(':id')

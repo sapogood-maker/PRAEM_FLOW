@@ -310,14 +310,16 @@ enum NoShowReason {
 }
 
 model Route {
-  id                      String      @id @default(uuid())
+  id                      String       @id @default(uuid())
   tenantId                String
-  driverId                String
-  vehicleId               String
+  driverId                String?      // optional — may be assigned later when scheduling
+  vehicleId               String?      // optional — may be assigned later when scheduling
   date                    DateTime
+  scheduledAt             DateTime?    // explicit dispatch/departure datetime for future routes
   origin                  String
   destination             String
-  status                  RouteStatus
+  status                  RouteStatus  @default(SCHEDULED)
+  dispatchType            DispatchType @default(IMMEDIATE)
   waypoints               Json?
   estimatedKm             Float?
   estimatedDuration       Int?
@@ -326,21 +328,31 @@ model Route {
   estimatedFuelCost       Float?
   routeOptimizationScore  Float?
   occupancyPrediction     Float?
-  createdAt               DateTime    @default(now())
-  tenant                  Tenant      @relation(fields: [tenantId], references: [id])
-  driver                  Driver      @relation(fields: [driverId], references: [id])
-  vehicle                 Vehicle     @relation(fields: [vehicleId], references: [id])
+  createdAt               DateTime     @default(now())
+  tenant                  Tenant       @relation(fields: [tenantId], references: [id])
+  driver                  Driver?      @relation(fields: [driverId], references: [id])
+  vehicle                 Vehicle?     @relation(fields: [vehicleId], references: [id])
   trips                   Trip[]
   checkpoints             Checkpoint[]
 
   @@index([tenantId])
+  @@index([scheduledAt])
 }
 
 enum RouteStatus {
+  SCHEDULED
+  PENDING
   PLANNED
+  PREPARING
+  DISPATCHED
   ACTIVE
   COMPLETED
   CANCELLED
+}
+
+enum DispatchType {
+  IMMEDIATE
+  SCHEDULED
 }
 
 model Trip {

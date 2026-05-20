@@ -28,6 +28,7 @@ import { HealthModule } from './modules/health/health.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { RealtimeGateway } from './gateways/realtime.gateway';
 import { DashboardService } from './modules/dashboard/dashboard.service';
+import { TripTokensModule } from './modules/trip-tokens/trip-tokens.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { DashboardService } from './modules/dashboard/dashboard.service';
     HealthcareLocationsModule,
     DevicesModule,
     HealthModule,
+    TripTokensModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

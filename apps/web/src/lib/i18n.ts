@@ -23,32 +23,66 @@ export function getTripStatusLabel(status: string): string {
 // ── Status de Rota (RouteStatus) ──────────────────────────────────────────────
 
 export const ROUTE_STATUS_LABEL: Record<string, string> = {
-  SCHEDULED:  'Agendado',
-  PENDING:    'Pendente',
-  PLANNED:    'Planejado',
-  PREPARING:  'Preparando',
-  DISPATCHED: 'Despachado',
-  ACTIVE:     'Ativo',
-  COMPLETED:  'Finalizado',
-  CANCELLED:  'Cancelado',
+  SCHEDULED:             'Agendado',
+  PENDING:               'Pendente',
+  PLANNED:               'Planejado',
+  PREPARING:             'Preparando',
+  DISPATCHED:            'Despachado',
+  ACTIVE:                'Em Viagem',
+  WAITING_CONSULTATION:  'Aguardando Consulta',
+  RETURNING:             'Retornando',
+  COMPLETED:             'Finalizado',
+  CANCELLED:             'Cancelado',
 };
 
 export function getRouteStatusLabel(status: string): string {
   return ROUTE_STATUS_LABEL[status] ?? status;
 }
 
+// ── Status de Despacho (DispatchStatus) ───────────────────────────────────────
+// Separado do QueueStatus e do ConnectionStatus.
+
+export const DISPATCH_STATUS_LABEL: Record<string, string> = {
+  PENDING_DISPATCH: 'Aguardando Despacho',
+  SCHEDULED:        'Agendado',
+  ASSIGNED:         'Atribuído',
+  DISPATCHED:       'Motorista a Caminho',
+  BOARDING:         'Embarcando',
+  ACTIVE:           'Em Viagem',
+  RETURNING:        'Retornando',
+  COMPLETED:        'Finalizado',
+  CANCELLED:        'Cancelado',
+};
+
+export function getDispatchStatusLabel(status: string): string {
+  return DISPATCH_STATUS_LABEL[status] ?? status;
+}
+
+// ── Status de Conexão (ConnectionStatus) ──────────────────────────────────────
+
+export const CONNECTION_STATUS_LABEL: Record<string, string> = {
+  ONLINE:  '● Online',
+  OFFLINE: '○ Offline',
+  IDLE:    '◌ Inativo',
+};
+
 // ── Status de Fila (QueueStatus) ─────────────────────────────────────────────
+// Fila hospitalar — separado do DispatchStatus e ConnectionStatus.
 
 export const QUEUE_STATUS_LABEL: Record<string, string> = {
-  WAITING:   'Aguardando',
-  CALLED:    'Chamado',
-  CONFIRMED: 'Confirmado',
-  ASSIGNED:  'Atribuído',
-  SCHEDULED: 'Agendado',
-  CANCELLED: 'Cancelado',
-  DISPATCHED:'Despachado',
-  ACTIVE:    'Ativo',
-  PLANNED:   'Planejado',
+  WAITING:    'Aguardando',
+  CALLED:     'Chamado',
+  CONFIRMED:  'Confirmado',
+  NO_SHOW:    'Não Compareceu',
+  CANCELLED:  'Cancelado',
+  // Valores legados mantidos para compatibilidade
+  ASSIGNED:   'Atribuído',
+  SCHEDULED:  'Agendado',
+  CHECKED_IN: 'Check-in Feito',
+  BOARDING:   'Embarcando',
+  IN_TRANSIT: 'Em Trânsito',
+  ARRIVED:    'Chegou',
+  COMPLETED:  'Finalizado',
 };
 
 export function getQueueStatusLabel(status: string): string {
@@ -113,8 +147,11 @@ export function getOperationalStatusLabel(status: string): string {
 
 // ── Status de Conexão ─────────────────────────────────────────────────────────
 
-export function getConnectionStatusLabel(connected: boolean): string {
-  return connected ? '● AO VIVO' : '○ OFFLINE';
+export function getConnectionStatusLabel(connected: boolean | string): string {
+  if (typeof connected === 'string') {
+    return CONNECTION_STATUS_LABEL[connected] ?? connected;
+  }
+  return connected ? CONNECTION_STATUS_LABEL.ONLINE : CONNECTION_STATUS_LABEL.OFFLINE;
 }
 
 // ── Tipo de Despacho ──────────────────────────────────────────────────────────
@@ -216,6 +253,7 @@ export function getStatusLabel(status: string): string {
   return (
     TRIP_STATUS_LABEL[status] ??
     ROUTE_STATUS_LABEL[status] ??
+    DISPATCH_STATUS_LABEL[status] ??
     QUEUE_STATUS_LABEL[status] ??
     DRIVER_STATUS_LABEL[status] ??
     VEHICLE_STATUS_LABEL[status] ??
@@ -224,7 +262,15 @@ export function getStatusLabel(status: string): string {
   );
 }
 
-// ── Alias para compatibilidade ─────────────────────────────────────────────────
+// ── Tipo de Token de Viagem ───────────────────────────────────────────────────
 
-/** @alias getRouteStatusLabel — status de despacho/rota */
-export const getDispatchStatusLabel = getRouteStatusLabel;
+export const TRIP_TOKEN_TYPE_LABEL: Record<string, string> = {
+  CONFIRMATION: 'Confirmação',
+  BOARDING:     'Embarque',
+  RETURN:       'Retorno',
+  REBOOK:       'Reagendamento',
+};
+
+export function getTripTokenTypeLabel(type: string): string {
+  return TRIP_TOKEN_TYPE_LABEL[type] ?? type;
+}

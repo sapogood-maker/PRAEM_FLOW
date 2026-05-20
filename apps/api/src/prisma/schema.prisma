@@ -98,6 +98,7 @@ model Patient {
   queues            OperationalQueue[]
   trips             Trip[]
   qrAccessLogs      PatientQrAccessLog[]
+  tripTokens        TripToken[]
 
   @@unique([tenantId, cpf])
   @@index([tenantId])
@@ -347,6 +348,21 @@ enum RouteStatus {
   PREPARING
   DISPATCHED
   ACTIVE
+  WAITING_CONSULTATION
+  RETURNING
+  COMPLETED
+  CANCELLED
+}
+
+// DispatchStatus — logística operacional (separado do QueueStatus e ConnectionStatus)
+enum DispatchStatus {
+  PENDING_DISPATCH
+  SCHEDULED
+  ASSIGNED
+  DISPATCHED
+  BOARDING
+  ACTIVE
+  RETURNING
   COMPLETED
   CANCELLED
 }
@@ -370,6 +386,7 @@ model Trip {
   route       Route      @relation(fields: [routeId], references: [id])
   patient     Patient    @relation(fields: [patientId], references: [id])
   checkpoints Checkpoint[]
+  tokens      TripToken[]
 
   @@index([tenantId])
 }
@@ -705,4 +722,47 @@ enum PatientTransportStatus {
   IN_TRANSIT
   ARRIVED
   MISSED
+}
+
+// ---------------------------------------------------------------------------
+// ConnectionStatus — presença online (WebSocket/dispositivo)
+// ---------------------------------------------------------------------------
+enum ConnectionStatus {
+  ONLINE
+  OFFLINE
+  IDLE
+}
+
+// ---------------------------------------------------------------------------
+// TripToken — tokens operacionais para confirmação, embarque, retorno, etc.
+// Utilizados via QR Code, Telegram, links públicos.
+// ---------------------------------------------------------------------------
+model TripToken {
+  id         String          @id @default(uuid())
+  tenantId   String
+  tripId     String
+  patientId  String
+  token      String          @unique @default(uuid())
+  type       TripTokenType
+  expiresAt  DateTime
+  usedAt     DateTime?
+  usedByIp   String?
+  usedByGps  String?         // "lat,lng" quando disponível
+  deviceInfo String?
+  createdAt  DateTime        @default(now())
+  trip       Trip            @relation(fields: [tripId], references: [id])
+  patient    Patient         @relation(fields: [patientId], references: [id])
+
+  @@index([token])
+  @@index([tripId])
+  @@index([patientId])
+  @@index([tenantId])
+  @@index([type])
+}
+
+enum TripTokenType {
+  CONFIRMATION
+  BOARDING
+  RETURN
+  REBOOK
 }

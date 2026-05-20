@@ -33,7 +33,7 @@ export default function DashboardPage() {
       {/* Header */}
       <div className='flex items-center justify-between'>
         <div>
-          <h2 className='text-2xl font-bold text-slate-100'>Command Center</h2>
+          <h2 className='text-2xl font-bold text-slate-100'>Central de Comando</h2>
           <p className='text-sm text-slate-400'>Central Operacional Logística · Transporte SUS</p>
         </div>
       </div>

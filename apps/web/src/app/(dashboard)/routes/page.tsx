@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { routeService } from '@/services/operational.service';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { getRouteStatusLabel } from '@/lib/i18n';
 
 const STATUS_BADGE: Record<string, string> = {
   SCHEDULED: 'bg-indigo-900 text-indigo-300',
@@ -83,7 +84,7 @@ export default function RoutesPage() {
                   </td>
                   <td className='p-3 text-center'>{r.trips?.length ?? 0}</td>
                   <td className='p-3'>
-                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[r.status] ?? 'text-slate-400'}`}>{r.status}</span>
+                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[r.status] ?? 'text-slate-400'}`}>{getRouteStatusLabel(r.status)}</span>
                   </td>
                 </tr>
               ))}

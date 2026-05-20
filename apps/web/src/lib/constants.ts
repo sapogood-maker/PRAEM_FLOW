@@ -1,7 +1,7 @@
 export const APP_NAME = 'PRAEM OPS';
 
 export const NAV_ITEMS = [
-  { href: '/', label: '⬛ Command Center' },
+  { href: '/', label: '⬛ Central de Comando' },
   { href: '/dispatch', label: '🚀 Central de Despacho' },
   { href: '/schedule', label: '📅 Agenda Operacional' },
   { href: '/queue', label: '📋 Fila Operacional' },

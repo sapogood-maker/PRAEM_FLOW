@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useRealtimeStore } from '@/store/realtime.store';
+import { getTripStatusLabel } from '@/lib/i18n';
 
 const STATUS_BADGE: Record<string, string> = {
   SCHEDULED: 'bg-slate-700 text-slate-300',
@@ -52,7 +53,16 @@ export default function TripsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['trips'] }),
   });
 
-  const statuses = ['', 'SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS', 'COMPLETED', 'NO_SHOW', 'CANCELLED'];
+  const statuses: { value: string; label: string }[] = [
+    { value: '', label: 'Todos os Status' },
+    { value: 'SCHEDULED',   label: 'Agendado' },
+    { value: 'CONFIRMED',   label: 'Confirmado' },
+    { value: 'BOARDING',    label: 'Embarcando' },
+    { value: 'IN_PROGRESS', label: 'Em Andamento' },
+    { value: 'COMPLETED',   label: 'Finalizado' },
+    { value: 'NO_SHOW',     label: 'Não Compareceu' },
+    { value: 'CANCELLED',   label: 'Cancelado' },
+  ];
 
   // Recent boarding events from WebSocket
   const recentBoardings = activityFeed.filter((e) => e.type === 'boarding').slice(0, 5);
@@ -74,7 +84,7 @@ export default function TripsPage() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
-          {statuses.map((s) => <option key={s} value={s}>{s || 'Todos os status'}</option>)}
+          {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
       </div>
 
@@ -123,7 +133,7 @@ export default function TripsPage() {
                     <td className='p-3 font-medium'>{t.patient?.name ?? '—'}</td>
                     <td className='p-3 text-xs text-slate-300'>{t.route?.origin ?? '—'} → {t.route?.destination ?? '—'}</td>
                     <td className='p-3'>
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status] ?? 'text-slate-400'}`}>{t.status}</span>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status] ?? 'text-slate-400'}`}>{getTripStatusLabel(t.status)}</span>
                     </td>
                     <td className='p-3 text-xs text-slate-400'>
                       {t.boardedAt ? new Date(t.boardedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}

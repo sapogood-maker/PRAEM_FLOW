@@ -7,6 +7,7 @@ import { queueService } from '@/services/queue.service';
 import { patientService, healthcareLocationService } from '@/services/operational.service';
 import type { QueueType } from '@/types';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { getPriorityLabel, getConfirmationStatusLabel } from '@/lib/i18n';
 
 const PRIORITY_BADGE: Record<string, string> = {
   EMERGENCY: 'bg-red-600 text-white animate-pulse',
@@ -179,11 +180,11 @@ export default function QueuePage() {
                       {q.appointmentDate ? new Date(q.appointmentDate).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                     </td>
                     <td className='p-3'>
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${PRIORITY_BADGE[q.priority] ?? 'text-slate-400'}`}>{q.priority}</span>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${PRIORITY_BADGE[q.priority] ?? 'text-slate-400'}`}>{getPriorityLabel(q.priority)}</span>
                     </td>
                     <td className='p-3'>
                       <span className={`rounded px-2 py-0.5 text-xs font-medium ${CONFIRMATION_BADGE[q.confirmationStatus] ?? 'text-slate-400'}`}>
-                        {q.confirmationStatus?.replace(/_/g, ' ')}
+                        {getConfirmationStatusLabel(q.confirmationStatus)}
                       </span>
                     </td>
                     <td className='p-3'>

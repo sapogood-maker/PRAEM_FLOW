@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { getPriorityLabel } from '@/lib/i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -266,7 +267,7 @@ export default function DispatchPage() {
                             PRIORITY_COLOR[q.priority] ?? 'bg-slate-700 text-slate-300'
                           }`}
                         >
-                          {q.priority}
+                          {getPriorityLabel(q.priority)}
                         </span>
                         <span
                           className={`rounded px-1.5 py-0.5 text-xs font-medium ${

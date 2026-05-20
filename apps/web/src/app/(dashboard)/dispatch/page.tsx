@@ -86,7 +86,7 @@ export default function DispatchPage() {
     queryKey: ['dispatch-queue'],
     queryFn: () =>
       api
-        .get('/queues', { params: { status: 'WAITING,CALLED,CONFIRMED', limit: 100 } })
+        .get('/queues', { params: { status: 'WAITING,CALLED,CONFIRMED,ASSIGNED,SCHEDULED', limit: 100 } })
         .then((r) => r.data),
     refetchInterval: 15_000,
   });
@@ -229,7 +229,7 @@ export default function DispatchPage() {
             </div>
           ) : queueItems.length === 0 ? (
             <p className='p-6 text-center text-slate-500'>
-              Nenhum paciente confirmado aguardando despacho.
+              Nenhum paciente aguardando despacho ou com agendamento futuro.
             </p>
           ) : (
             <ul className='divide-y divide-border'>
@@ -274,10 +274,22 @@ export default function DispatchPage() {
                               ? 'bg-emerald-900 text-emerald-300'
                               : q.status === 'CALLED'
                                 ? 'bg-amber-900 text-amber-300'
-                                : 'bg-slate-700 text-slate-400'
+                                : q.status === 'SCHEDULED'
+                                  ? 'bg-indigo-900 text-indigo-300'
+                                  : q.status === 'ASSIGNED'
+                                    ? 'bg-cyan-900 text-cyan-300'
+                                    : 'bg-slate-700 text-slate-400'
                           }`}
                         >
-                          {q.status === 'CONFIRMED' ? '✓ Confirmado' : q.status === 'CALLED' ? 'Chamado' : 'Aguardando'}
+                          {q.status === 'CONFIRMED'
+                            ? '✓ Confirmado'
+                            : q.status === 'CALLED'
+                              ? 'Chamado'
+                              : q.status === 'SCHEDULED'
+                                ? '📅 Agendado'
+                                : q.status === 'ASSIGNED'
+                                  ? '✓ Atribuído'
+                                  : 'Aguardando'}
                         </span>
                       </div>
                       <p className='mt-0.5 text-xs text-slate-400 truncate'>

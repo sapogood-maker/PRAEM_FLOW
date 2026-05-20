@@ -73,8 +73,9 @@ export class RoutesService {
       payload.status = payload.dispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED';
     }
     const route = await this.prisma.route.create({ data: payload });
-    // Notify the assigned driver that a new route has been dispatched to them
-    if (route.driverId) {
+    // Only notify via WebSocket for immediate dispatch — scheduled routes are
+    // saved for future execution and must not trigger realtime driver alerts.
+    if (route.driverId && route.dispatchType === 'IMMEDIATE') {
       this.gateway.emitToTenant(tenantId, 'route:dispatched', {
         routeId: route.id,
         driverId: route.driverId,

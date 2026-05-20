@@ -292,6 +292,7 @@ enum QueueStatus {
   CANCELLED
   NO_SHOW
   ASSIGNED
+  SCHEDULED
 }
 
 enum QueueSlaStatus {

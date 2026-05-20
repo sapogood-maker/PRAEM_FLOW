@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { vehicleService } from '@/services/operational.service';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { getVehicleStatusLabel, getVehicleTypeLabel } from '@/lib/i18n';
 
 const STATUS_BADGE: Record<string, string> = {
   AVAILABLE: 'bg-emerald-900 text-emerald-300',
@@ -66,10 +67,10 @@ export default function VehiclesPage() {
                 <tr key={v.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
                   <td className='p-3 font-mono font-bold'>{v.plate}</td>
                   <td className='p-3'>{v.model}</td>
-                  <td className='p-3 text-xs'>{v.type}</td>
+                  <td className='p-3 text-xs'>{getVehicleTypeLabel(v.type)}</td>
                   <td className='p-3 text-center'>{v.capacity}</td>
                   <td className='p-3'>
-                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[v.status] ?? 'text-slate-400'}`}>{v.status}</span>
+                    <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[v.status] ?? 'text-slate-400'}`}>{getVehicleStatusLabel(v.status)}</span>
                   </td>
                   <td className='p-3 text-xs'>
                     {[v.wheelchair && '♿', v.stretcher && '🛏'].filter(Boolean).join(' ') || '—'}

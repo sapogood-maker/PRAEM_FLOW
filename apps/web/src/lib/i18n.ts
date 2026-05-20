@@ -167,3 +167,64 @@ export const QUEUE_TYPE_LABEL: Record<string, string> = {
 export function getQueueTypeLabel(type: string): string {
   return QUEUE_TYPE_LABEL[type] ?? type;
 }
+
+// ── Status do Veículo (VehicleStatus) ─────────────────────────────────────────
+
+export const VEHICLE_STATUS_LABEL: Record<string, string> = {
+  AVAILABLE:   'Disponível',
+  ON_ROUTE:    'Em Rota',
+  MAINTENANCE: 'Em Manutenção',
+  INACTIVE:    'Inativo',
+};
+
+export function getVehicleStatusLabel(status: string): string {
+  return VEHICLE_STATUS_LABEL[status] ?? status;
+}
+
+// ── Tipo de Veículo (VehicleType) ─────────────────────────────────────────────
+
+export const VEHICLE_TYPE_LABEL: Record<string, string> = {
+  VAN:         'Van',
+  BUS:         'Ônibus',
+  CAR:         'Carro',
+  AMBULANCE:   'Ambulância',
+  MINIBUS:     'Micro-ônibus',
+  WHEELCHAIR_VAN: 'Van Adaptada',
+};
+
+export function getVehicleTypeLabel(type: string): string {
+  return VEHICLE_TYPE_LABEL[type] ?? type;
+}
+
+// ── Status da Operação Diária (DailyOperationStatus) ─────────────────────────
+
+export const OPERATION_STATUS_LABEL: Record<string, string> = {
+  PLANNING:  'Planejamento',
+  ACTIVE:    'Ativa',
+  CLOSED:    'Encerrada',
+  CANCELLED: 'Cancelada',
+};
+
+export function getOperationStatusLabel(status: string): string {
+  return OPERATION_STATUS_LABEL[status] ?? status;
+}
+
+// ── Helper genérico ───────────────────────────────────────────────────────────
+// Tenta encontrar o label em qualquer mapa conhecido; cai de volta ao enum bruto.
+
+export function getStatusLabel(status: string): string {
+  return (
+    TRIP_STATUS_LABEL[status] ??
+    ROUTE_STATUS_LABEL[status] ??
+    QUEUE_STATUS_LABEL[status] ??
+    DRIVER_STATUS_LABEL[status] ??
+    VEHICLE_STATUS_LABEL[status] ??
+    OPERATION_STATUS_LABEL[status] ??
+    status
+  );
+}
+
+// ── Alias para compatibilidade ─────────────────────────────────────────────────
+
+/** @alias getRouteStatusLabel — status de despacho/rota */
+export const getDispatchStatusLabel = getRouteStatusLabel;

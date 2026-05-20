@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { getOperationStatusLabel } from '@/lib/i18n';
 
 const STATUS_BADGE: Record<string, string> = {
   PLANNING: 'bg-cyan-900 text-cyan-300',
@@ -68,7 +69,7 @@ export default function DailyOpPage() {
           </div>
           <div className='flex items-center gap-3'>
             <span className={`rounded-full px-4 py-1 text-sm font-medium ${STATUS_BADGE[operation?.status ?? 'PLANNING'] ?? 'text-slate-400'}`}>
-              {operation?.status ?? 'PLANEJANDO'}
+              {getOperationStatusLabel(operation?.status ?? 'PLANNING')}
             </span>
             {operation?.status === 'PLANNING' && (
               <button type='button' onClick={() => operation?.id && activateOp.mutate(operation.id)}

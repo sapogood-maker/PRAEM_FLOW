@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
-import { getPriorityLabel } from '@/lib/i18n';
+import { getPriorityLabel, getDriverStatusLabel } from '@/lib/i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -418,7 +418,7 @@ export default function DispatchPage() {
                 <option key={d.id} value={d.id}>
                   {d.user?.name}
                   {d.status && (
-                    ` · ${d.status}`
+                    ` · ${getDriverStatusLabel(d.status)}`
                   )}
                 </option>
               ))}
@@ -429,7 +429,7 @@ export default function DispatchPage() {
               const cls = DRIVER_STATUS_BADGE[d.status] ?? 'bg-slate-800 text-slate-400';
               return (
                 <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${cls}`}>
-                  {d.status}
+                  {getDriverStatusLabel(d.status)}
                 </span>
               );
             })()}

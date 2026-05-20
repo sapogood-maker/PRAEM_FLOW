@@ -1,25 +1,14 @@
 'use client';
 
-import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
-import { getPriorityLabel, getDriverStatusLabel } from '@/lib/i18n';
-import { useOperationalDispatchStore } from '@/store/operationalDispatch.store';
+import { getPriorityLabel, getDriverStatusLabel, getConfirmationStatusLabel } from '@/lib/i18n';
+import {
+  useOperationalDispatchStore,
+  type DispatchQueueItem,
+} from '@/store/operationalDispatch.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface QueueItem {
-  id: string;
-  patientId: string;
-  priority: string;
-  status: string;
-  destination: string | null;
-  healthcareLocationId: string | null;
-  appointmentDate: string;
-  patient: { id: string; name: string; mobility: string; clinicalRisk: string };
-  healthcareLocation?: { id: string; name: string; latitude: number | null; longitude: number | null } | null;
-}
 
 interface Driver {
   id: string;
@@ -43,10 +32,10 @@ interface HealthcareLocation {
   type: string;
 }
 
-// ─── Priority helpers ─────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const PRIORITY_COLOR: Record<string, string> = {
-  EMERGENCY: 'bg-red-600 text-white',
+  EMERGENCY: 'bg-red-600 text-white animate-pulse',
   CRITICAL: 'bg-red-900 text-red-300',
   HIGH: 'bg-amber-900 text-amber-300',
   NORMAL: 'bg-slate-700 text-slate-300',
@@ -60,6 +49,14 @@ const MOBILITY_ICON: Record<string, string> = {
   OXYGEN: '💨',
 };
 
+const CONFIRMATION_BADGE: Record<string, string> = {
+  CONFIRMED: 'bg-emerald-900 text-emerald-300',
+  PENDING: 'bg-amber-900 text-amber-300',
+  CANCELED: 'bg-red-900 text-red-300',
+  UNREACHABLE: 'bg-slate-800 text-slate-400',
+  WAITING_MANUAL_CONFIRMATION: 'bg-cyan-900 text-cyan-300',
+};
+
 const DRIVER_STATUS_BADGE: Record<string, string> = {
   AVAILABLE: 'bg-emerald-900 text-emerald-300',
   ON_ROUTE: 'bg-amber-900 text-amber-300',
@@ -67,38 +64,116 @@ const DRIVER_STATUS_BADGE: Record<string, string> = {
   OFFLINE: 'bg-slate-800 text-slate-500',
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Helper: group staging items by destination ───────────────────────────────
+
+interface DestinationGroup {
+  key: string;
+  label: string;
+  city: string;
+  items: DispatchQueueItem[];
+}
+
+function groupByDestination(items: DispatchQueueItem[]): DestinationGroup[] {
+  const map = new Map<string, DestinationGroup>();
+  for (const item of items) {
+    const key =
+      item.healthcareLocation?.id ?? item.destination ?? 'sem-destino';
+    const label =
+      item.healthcareLocation?.name ?? item.destination ?? 'Destino não informado';
+    const city = item.healthcareLocation?.city ?? '';
+    if (!map.has(key)) {
+      map.set(key, { key, label, city, items: [] });
+    }
+    map.get(key)!.items.push(item);
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    const aHasEmergency = a.items.some((i) => i.priority === 'EMERGENCY');
+    const bHasEmergency = b.items.some((i) => i.priority === 'EMERGENCY');
+    if (aHasEmergency !== bHasEmergency) return aHasEmergency ? -1 : 1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+// ─── Patient Card ─────────────────────────────────────────────────────────────
+
+function PatientCard({
+  item,
+  onRemove,
+}: {
+  item: DispatchQueueItem;
+  onRemove: () => void;
+}) {
+  const apptDate = item.appointmentDate ? new Date(item.appointmentDate) : null;
+
+  return (
+    <div className='flex items-start gap-3 rounded-lg border border-slate-700/60 bg-slate-800/60 p-3 transition-colors hover:bg-slate-800'>
+      <div className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-700 text-base'>
+        {MOBILITY_ICON[item.patient?.mobility] ?? '🚶'}
+      </div>
+      <div className='min-w-0 flex-1 space-y-1'>
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <span className='font-medium text-slate-100 truncate'>
+            👤 {item.patient?.name ?? item.patientId}
+          </span>
+          <span
+            className={`rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_COLOR[item.priority] ?? 'bg-slate-700 text-slate-300'}`}
+          >
+            ⚠️ {getPriorityLabel(item.priority)}
+          </span>
+        </div>
+        <div className='flex flex-wrap items-center gap-2 text-xs text-slate-400'>
+          {apptDate && (
+            <span>
+              📅{' '}
+              {apptDate.toLocaleString('pt-BR', {
+                dateStyle: 'short',
+                timeStyle: 'short',
+              })}
+            </span>
+          )}
+          {item.healthcareLocation?.city && (
+            <span>📍 {item.healthcareLocation.city}</span>
+          )}
+          {item.confirmationStatus && (
+            <span
+              className={`rounded px-1.5 py-0.5 font-medium ${CONFIRMATION_BADGE[item.confirmationStatus] ?? 'text-slate-400'}`}
+            >
+              {item.confirmationStatus === 'CONFIRMED' ? '✅ ' : ''}
+              {getConfirmationStatusLabel(item.confirmationStatus)}
+            </span>
+          )}
+        </div>
+      </div>
+      <button
+        type='button'
+        onClick={onRemove}
+        title='Remover do despacho — volta para fila'
+        className='shrink-0 rounded p-1 text-slate-500 transition-colors hover:bg-red-950/50 hover:text-red-400'
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function DispatchPage() {
   const qc = useQueryClient();
+
   const {
     pendingDispatch,
-    selectedPatients,
-    toggleSelectedPatient,
-    clearDispatch,
     removeFromDispatch,
+    clearDispatch,
+    currentRouteDraft,
+    updateRouteDraft,
+    clearRouteDraft,
   } = useOperationalDispatchStore();
 
-  const [driverId, setDriverId] = useState('');
-  const [vehicleId, setVehicleId] = useState('');
-  const [locationId, setLocationId] = useState('');
-  const [origin, setOrigin] = useState('Prefeitura Municipal');
-  const [dispatchType, setDispatchType] = useState<'IMMEDIATE' | 'SCHEDULED'>('IMMEDIATE');
-  const [scheduledDate, setScheduledDate] = useState('');
-  const [scheduledTime, setScheduledTime] = useState('08:00');
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  // selectedPatients is always derived from pendingDispatch — no independent state
+  const selectedPatients = pendingDispatch.map((p) => p.id);
 
   // ── Queries ────────────────────────────────────────────────────────────────
-
-  const { data: queueData, isLoading: queueLoading } = useQuery({
-    queryKey: ['dispatch-queue'],
-    queryFn: () =>
-      api
-        .get('/queues', { params: { status: 'WAITING,CALLED,CONFIRMED,ASSIGNED,SCHEDULED', limit: 100 } })
-        .then((r) => r.data),
-    refetchInterval: 15_000,
-  });
 
   const { data: driversData } = useQuery({
     queryKey: ['dispatch-drivers'],
@@ -115,30 +190,34 @@ export default function DispatchPage() {
     queryFn: () => api.get('/healthcare-locations', { params: { limit: 100 } }).then((r) => r.data),
   });
 
-  const queueItems: QueueItem[] = queueData?.items ?? queueData ?? [];
   const drivers: Driver[] = driversData?.items ?? driversData ?? [];
   const vehicles: Vehicle[] = vehiclesData?.items ?? vehiclesData ?? [];
   const locations: HealthcareLocation[] = locationsData?.items ?? locationsData ?? [];
 
-  // Merge: store's pendingDispatch + live queue (deduped by id)
-  const storeIds = new Set(pendingDispatch.map((p) => p.id));
-  const liveQueueOnly = queueItems.filter((q) => !storeIds.has(q.id));
-  const allItems: QueueItem[] = [...(pendingDispatch as QueueItem[]), ...liveQueueOnly];
+  const { driverId, vehicleId, locationId, origin, dispatchType, scheduledDate, scheduledTime } =
+    currentRouteDraft;
 
-  // ── Selected vehicle capacity check ───────────────────────────────────────
+  // ── Computed ───────────────────────────────────────────────────────────────
+
   const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
   const overCapacity = selectedVehicle ? selectedPatients.length > selectedVehicle.capacity : false;
-
-  // ── Computed scheduledAt ───────────────────────────────────────────────────
   const scheduledAt =
     dispatchType === 'SCHEDULED' && scheduledDate
       ? new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString()
       : null;
+  const todayIso = new Date().toISOString().split('T')[0];
+  const groups = groupByDestination(pendingDispatch);
+  const canDispatch =
+    selectedPatients.length > 0 &&
+    !!locationId &&
+    !overCapacity &&
+    (dispatchType === 'IMMEDIATE' || !!scheduledDate);
 
   // ── Dispatch mutation ──────────────────────────────────────────────────────
 
   const dispatch = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (patientIds?: string[]) => {
+      const idsToDispatch = patientIds ?? selectedPatients;
       const loc = locations.find((l) => l.id === locationId);
       const destinationName = loc?.name ?? 'Destino não informado';
 
@@ -153,12 +232,10 @@ export default function DispatchPage() {
         ...(vehicleId && { vehicleId }),
       };
 
-      // 1. Create route
       const routeRes = await api.post('/routes', routePayload);
       const route = routeRes.data;
 
-      // 2. Create a trip for each selected queue entry (queue item → patient)
-      const selectedQueueItems = allItems.filter((q) => selectedPatients.includes(q.id));
+      const selectedQueueItems = pendingDispatch.filter((q) => idsToDispatch.includes(q.id));
       await Promise.all(
         selectedQueueItems.map((q) =>
           api.post('/trips', { routeId: route.id, patientId: q.patientId }),
@@ -167,219 +244,160 @@ export default function DispatchPage() {
 
       return { routeId: route.id, patientCount: selectedQueueItems.length };
     },
-    onSuccess: ({ routeId, patientCount }) => {
-      const label = dispatchType === 'SCHEDULED' ? '📅 Rota agendada' : '✅ Rota despachada';
-      setSuccessMsg(
-        `${label} (${routeId.slice(0, 8)}…) com ${patientCount} paciente(s).${dispatchType === 'IMMEDIATE' ? ' Motorista notificado via Flutter.' : ''}`,
-      );
-      setErrorMsg('');
+    onSuccess: ({ patientCount }) => {
       clearDispatch();
-      setDriverId('');
-      setVehicleId('');
-      setLocationId('');
-      setScheduledDate('');
-      setScheduledTime('08:00');
+      clearRouteDraft();
       qc.invalidateQueries({ queryKey: ['dispatch-queue'] });
       qc.invalidateQueries({ queryKey: ['trips'] });
       qc.invalidateQueries({ queryKey: ['routes'] });
       qc.invalidateQueries({ queryKey: ['queue'] });
+      const label = dispatchType === 'SCHEDULED' ? '📅 Rota agendada' : '✅ Rota despachada';
+      alert(`${label} com ${patientCount} paciente(s).${dispatchType === 'IMMEDIATE' ? ' Motorista notificado via Flutter.' : ''}`);
     },
     onError: (err: any) => {
-      setErrorMsg(err?.response?.data?.message ?? 'Erro ao despachar rota.');
+      alert(err?.response?.data?.message ?? 'Erro ao despachar rota.');
     },
   });
 
-  // Dispatch is allowed as long as origin + destination + ≥1 patient are set.
-  // Driver and vehicle are OPTIONAL for scheduled routes (assigned later by operations).
-  const canDispatch =
-    selectedPatients.length > 0 &&
-    !!locationId &&
-    !overCapacity &&
-    (dispatchType === 'IMMEDIATE' || !!scheduledDate);
-
-  function togglePatient(queueId: string) {
-    toggleSelectedPatient(queueId);
+  function dispatchGroup(group: DestinationGroup) {
+    const loc = locations.find((l) => l.name === group.label || l.id === group.key);
+    const activeLocationId = loc ? loc.id : locationId;
+    updateRouteDraft({ locationId: activeLocationId });
+    const ids = group.items.map((i) => i.id);
+    // Temporarily set locationId for this dispatch
+    if (!locationId && !loc) {
+      alert('Selecione o destino médico no formulário antes de despachar o grupo.');
+      return;
+    }
+    dispatch.mutate(ids);
   }
-
-  const todayIso = new Date().toISOString().split('T')[0];
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <section className='space-y-6'>
       {/* Header */}
-      <div>
-        <h2 className='text-2xl font-bold text-slate-100'>Central de Despacho</h2>
-        <p className='text-sm text-slate-400'>
-          Despacho imediato ou agendamento futuro — motorista e veículo são opcionais para rotas agendadas
-        </p>
+      <div className='flex items-center justify-between'>
+        <div>
+          <h2 className='text-2xl font-bold text-slate-100'>⚡ Central de Despacho</h2>
+          <p className='text-sm text-slate-400'>
+            Torre logística TFD — selecione pacientes na{' '}
+            <a href='/queue' className='text-cyan-400 underline'>
+              Fila Operacional
+            </a>{' '}
+            e configure a rota aqui
+          </p>
+        </div>
+        {pendingDispatch.length > 0 && (
+          <button
+            type='button'
+            onClick={() => {
+              if (confirm('Limpar todos os pacientes do staging de despacho?')) clearDispatch();
+            }}
+            className='rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-400 transition-colors hover:border-red-800 hover:text-red-400'
+          >
+            🗑 Limpar Staging
+          </button>
+        )}
       </div>
 
-      {successMsg && (
-        <div className='rounded-lg border border-emerald-700 bg-emerald-950/50 px-4 py-3 text-sm text-emerald-300'>
-          {successMsg}
-        </div>
-      )}
-      {errorMsg && (
-        <div className='rounded-lg border border-red-800 bg-red-950/50 px-4 py-3 text-sm text-red-300'>
-          {errorMsg}
-        </div>
-      )}
-
-      <div className='grid gap-6 xl:grid-cols-[1fr_380px]'>
-        {/* ── Patient queue ───────────────────────────────────────────────── */}
-        <div className='rounded-xl border border-border bg-panel'>
-          <div className='flex items-center justify-between border-b border-border px-4 py-3'>
-            <h3 className='font-semibold text-slate-100'>Pacientes Aguardando Despacho</h3>
-            <div className='flex items-center gap-2'>
-              {pendingDispatch.length > 0 && (
-                <span className='rounded-full bg-cyan-900 px-2 py-0.5 text-xs text-cyan-300'>
-                  {pendingDispatch.length} da fila
-                </span>
-              )}
-              <span className='rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400'>
-                {selectedPatients.length} selecionado(s)
+      <div className='grid gap-6 xl:grid-cols-[1fr_400px]'>
+        {/* ── Staging area ────────────────────────────────────────────────── */}
+        <div className='space-y-4'>
+          {/* Status bar */}
+          <div className='flex items-center gap-3 rounded-xl border border-border bg-panel px-4 py-3'>
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${pendingDispatch.length > 0 ? 'animate-pulse bg-cyan-400' : 'bg-slate-600'}`}
+            />
+            <span className='text-sm font-semibold text-slate-200'>
+              {pendingDispatch.length > 0
+                ? `${pendingDispatch.length} paciente(s) aguardando despacho`
+                : 'Nenhum paciente em staging'}
+            </span>
+            {pendingDispatch.length > 0 && (
+              <span className='ml-auto text-xs text-slate-500'>
+                {groups.length} grupo(s) por destino
               </span>
-            </div>
+            )}
           </div>
 
-          {/* Staging area: items sent from Queue page */}
-          {pendingDispatch.length > 0 && (
-            <div className='border-b border-border bg-cyan-950/20 px-4 py-2'>
-              <p className='mb-2 text-xs font-semibold uppercase tracking-wider text-cyan-400'>
-                📋 Enviados da Fila Operacional
+          {/* Empty state */}
+          {pendingDispatch.length === 0 && (
+            <div className='rounded-xl border-2 border-dashed border-slate-700 p-10 text-center space-y-3'>
+              <p className='text-3xl'>🚐</p>
+              <p className='font-medium text-slate-300'>Pacientes aguardando despacho</p>
+              <p className='text-sm text-slate-500'>
+                Vá para a{' '}
+                <a href='/queue' className='font-medium text-cyan-400 underline'>
+                  Fila Operacional
+                </a>{' '}
+                e clique em{' '}
+                <span className='font-medium text-cyan-300'>→ Despacho</span> ou arraste
+                pacientes para iniciar o workflow.
               </p>
-              <div className='flex flex-wrap gap-2'>
-                {pendingDispatch.map((p) => (
-                  <div
-                    key={p.id}
-                    className='flex items-center gap-1.5 rounded-lg border border-cyan-800/50 bg-cyan-900/30 px-2 py-1 text-xs text-cyan-200'
-                  >
-                    <span>{p.patient?.name ?? p.patientId}</span>
-                    <span className={`rounded px-1 py-0.5 text-xs font-medium ${PRIORITY_COLOR[p.priority] ?? 'bg-slate-700 text-slate-300'}`}>
-                      {getPriorityLabel(p.priority)}
-                    </span>
-                    <button
-                      type='button'
-                      onClick={() => removeFromDispatch(p.id)}
-                      className='ml-1 text-slate-400 hover:text-red-400 transition-colors'
-                      title='Remover'
-                    >
-                      ✕
-                    </button>
+            </div>
+          )}
+
+          {/* Destination groups */}
+          {groups.map((group) => (
+            <div
+              key={group.key}
+              className='overflow-hidden rounded-xl border border-border bg-panel'
+            >
+              {/* Group header */}
+              <div className='flex items-center justify-between border-b border-border bg-slate-900/60 px-4 py-3'>
+                <div className='flex items-center gap-2'>
+                  <span className='text-base'>🏥</span>
+                  <div>
+                    <p className='font-semibold text-slate-100'>{group.label}</p>
+                    {group.city && <p className='text-xs text-slate-500'>📍 {group.city}</p>}
+                  </div>
+                  <span className='rounded-full bg-cyan-900/60 px-2 py-0.5 text-xs text-cyan-300'>
+                    {group.items.length} paciente(s)
+                  </span>
+                </div>
+                <button
+                  type='button'
+                  onClick={() => dispatchGroup(group)}
+                  disabled={dispatch.isPending}
+                  className='rounded-lg bg-cyan-800/60 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition-colors hover:bg-cyan-700 disabled:opacity-40'
+                >
+                  🚐 Despachar grupo
+                </button>
+              </div>
+
+              {/* Patient cards */}
+              <div className='divide-y divide-border/50'>
+                {group.items.map((item) => (
+                  <div key={item.id} className='px-4 py-2'>
+                    <PatientCard item={item} onRemove={() => removeFromDispatch(item.id)} />
                   </div>
                 ))}
               </div>
             </div>
-          )}
-
-          {queueLoading ? (
-            <div className='flex items-center justify-center p-8'>
-              <LoadingSpinner />
-            </div>
-          ) : allItems.length === 0 ? (
-            <div className='p-8 text-center space-y-2'>
-              <p className='text-slate-400'>Nenhum paciente aguardando despacho.</p>
-              <p className='text-xs text-slate-500'>
-                Vá para a{' '}
-                <a href='/queue' className='text-cyan-400 underline'>Fila Operacional</a>
-                {' '}e selecione pacientes para despacho.
-              </p>
-            </div>
-          ) : (
-            <ul className='divide-y divide-border'>
-              {allItems.map((q) => {
-                const isSelected = selectedPatients.includes(q.id);
-                const fromStore = storeIds.has(q.id);
-                return (
-                  <li
-                    key={q.id}
-                    onClick={() => togglePatient(q.id)}
-                    className={`flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors ${
-                      isSelected
-                        ? 'bg-cyan-950/40 border-l-2 border-l-cyan-600'
-                        : 'hover:bg-slate-900/40'
-                    }`}
-                  >
-                    <input
-                      type='checkbox'
-                      readOnly
-                      checked={isSelected}
-                      className='mt-1 accent-cyan-500'
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => togglePatient(q.id)}
-                    />
-                    <div className='flex-1 min-w-0'>
-                      <div className='flex items-center gap-2 flex-wrap'>
-                        <span className='font-medium text-slate-100 truncate'>
-                          {q.patient?.name}
-                        </span>
-                        <span className='text-base'>
-                          {MOBILITY_ICON[q.patient?.mobility] ?? '🚶'}
-                        </span>
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                            PRIORITY_COLOR[q.priority] ?? 'bg-slate-700 text-slate-300'
-                          }`}
-                        >
-                          {getPriorityLabel(q.priority)}
-                        </span>
-                        {fromStore && (
-                          <span className='rounded px-1.5 py-0.5 text-xs font-medium bg-cyan-900 text-cyan-300'>
-                            📋 Da Fila
-                          </span>
-                        )}
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                            q.status === 'CONFIRMED'
-                              ? 'bg-emerald-900 text-emerald-300'
-                              : q.status === 'CALLED'
-                                ? 'bg-amber-900 text-amber-300'
-                                : q.status === 'SCHEDULED'
-                                  ? 'bg-indigo-900 text-indigo-300'
-                                  : q.status === 'ASSIGNED'
-                                    ? 'bg-cyan-900 text-cyan-300'
-                                    : 'bg-slate-700 text-slate-400'
-                          }`}
-                        >
-                          {q.status === 'CONFIRMED'
-                            ? '✓ Confirmado'
-                            : q.status === 'CALLED'
-                              ? 'Chamado'
-                              : q.status === 'SCHEDULED'
-                                ? '📅 Agendado'
-                                : q.status === 'ASSIGNED'
-                                  ? '✓ Atribuído'
-                                  : 'Aguardando'}
-                        </span>
-                      </div>
-                      <p className='mt-0.5 text-xs text-slate-400 truncate'>
-                        {q.healthcareLocation?.name ?? q.destination ?? '—'}
-                        {' · '}
-                        {new Date(q.appointmentDate).toLocaleTimeString('pt-BR', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          ))}
         </div>
 
-        {/* ── Dispatch form ───────────────────────────────────────────────── */}
-        <div className='rounded-xl border border-border bg-panel p-4 space-y-4 self-start'>
-          <h3 className='font-semibold text-slate-100 border-b border-border pb-2'>
-            Configurar Rota
-          </h3>
+        {/* ── Dispatch form ────────────────────────────────────────────────── */}
+        <div className='space-y-4 self-start rounded-xl border border-border bg-panel p-4'>
+          <div className='flex items-center justify-between border-b border-border pb-2'>
+            <h3 className='font-semibold text-slate-100'>⚙️ Configurar Rota</h3>
+            {(driverId || vehicleId || locationId) && (
+              <button
+                type='button'
+                onClick={clearRouteDraft}
+                className='text-xs text-slate-500 transition-colors hover:text-slate-300'
+              >
+                Limpar
+              </button>
+            )}
+          </div>
 
-          {/* Dispatch type toggle */}
-          <div className='flex rounded-lg overflow-hidden border border-border text-sm font-medium'>
+          {/* Dispatch type */}
+          <div className='flex overflow-hidden rounded-lg border border-border text-sm font-medium'>
             <button
               type='button'
-              onClick={() => setDispatchType('IMMEDIATE')}
+              onClick={() => updateRouteDraft({ dispatchType: 'IMMEDIATE' })}
               className={`flex-1 py-2 transition-colors ${
                 dispatchType === 'IMMEDIATE'
                   ? 'bg-cyan-700 text-white'
@@ -390,7 +408,7 @@ export default function DispatchPage() {
             </button>
             <button
               type='button'
-              onClick={() => setDispatchType('SCHEDULED')}
+              onClick={() => updateRouteDraft({ dispatchType: 'SCHEDULED' })}
               className={`flex-1 py-2 transition-colors ${
                 dispatchType === 'SCHEDULED'
                   ? 'bg-indigo-700 text-white'
@@ -401,10 +419,9 @@ export default function DispatchPage() {
             </button>
           </div>
 
-          {/* Scheduled date + time */}
           {dispatchType === 'SCHEDULED' && (
             <div className='space-y-2 rounded-lg border border-indigo-900/50 bg-indigo-950/20 p-3'>
-              <p className='text-xs text-indigo-300 font-semibold uppercase tracking-wider'>
+              <p className='text-xs font-semibold uppercase tracking-wider text-indigo-300'>
                 Data e Hora do Despacho
               </p>
               <div className='grid grid-cols-2 gap-2'>
@@ -414,7 +431,7 @@ export default function DispatchPage() {
                     type='date'
                     value={scheduledDate}
                     min={todayIso}
-                    onChange={(e) => setScheduledDate(e.target.value)}
+                    onChange={(e) => updateRouteDraft({ scheduledDate: e.target.value })}
                     className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm focus:border-indigo-600 focus:outline-none'
                   />
                 </div>
@@ -423,7 +440,7 @@ export default function DispatchPage() {
                   <input
                     type='time'
                     value={scheduledTime}
-                    onChange={(e) => setScheduledTime(e.target.value)}
+                    onChange={(e) => updateRouteDraft({ scheduledTime: e.target.value })}
                     className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm focus:border-indigo-600 focus:outline-none'
                   />
                 </div>
@@ -431,24 +448,24 @@ export default function DispatchPage() {
             </div>
           )}
 
-          {/* Origin */}
           <div className='space-y-1'>
             <label className='text-xs uppercase tracking-wider text-slate-400'>Origem</label>
             <input
               type='text'
               value={origin}
-              onChange={(e) => setOrigin(e.target.value)}
+              onChange={(e) => updateRouteDraft({ origin: e.target.value })}
               className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none'
               placeholder='Ex: Prefeitura Municipal'
             />
           </div>
 
-          {/* Destination */}
           <div className='space-y-1'>
-            <label className='text-xs uppercase tracking-wider text-slate-400'>Destino Médico</label>
+            <label className='text-xs uppercase tracking-wider text-slate-400'>
+              Destino Médico *
+            </label>
             <select
               value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
+              onChange={(e) => updateRouteDraft({ locationId: e.target.value })}
               className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none'
             >
               <option value=''>— Selecionar destino —</option>
@@ -460,52 +477,50 @@ export default function DispatchPage() {
             </select>
           </div>
 
-          {/* Driver — optional for scheduled routes */}
           <div className='space-y-1'>
             <label className='text-xs uppercase tracking-wider text-slate-400'>
               Motorista{' '}
               {dispatchType === 'SCHEDULED' && (
-                <span className='text-slate-500 normal-case'>(opcional para agendamento)</span>
+                <span className='normal-case text-slate-500'>(opcional)</span>
               )}
             </label>
             <select
               value={driverId}
-              onChange={(e) => setDriverId(e.target.value)}
+              onChange={(e) => updateRouteDraft({ driverId: e.target.value })}
               className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none'
             >
               <option value=''>— Selecionar motorista —</option>
               {drivers.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.user?.name}
-                  {d.status && (
-                    ` · ${getDriverStatusLabel(d.status)}`
-                  )}
+                  {d.status && ` · ${getDriverStatusLabel(d.status)}`}
                 </option>
               ))}
             </select>
-            {driverId && (() => {
-              const d = drivers.find((dr) => dr.id === driverId);
-              if (!d) return null;
-              const cls = DRIVER_STATUS_BADGE[d.status] ?? 'bg-slate-800 text-slate-400';
-              return (
-                <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${cls}`}>
-                  {getDriverStatusLabel(d.status)}
-                </span>
-              );
-            })()}
+            {driverId &&
+              (() => {
+                const d = drivers.find((dr) => dr.id === driverId);
+                if (!d) return null;
+                return (
+                  <span
+                    className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${DRIVER_STATUS_BADGE[d.status] ?? 'bg-slate-800 text-slate-400'}`}
+                  >
+                    {getDriverStatusLabel(d.status)}
+                  </span>
+                );
+              })()}
           </div>
 
-          {/* Vehicle — optional for scheduled routes */}
           <div className='space-y-1'>
             <label className='text-xs uppercase tracking-wider text-slate-400'>
               Veículo{' '}
               {dispatchType === 'SCHEDULED' && (
-                <span className='text-slate-500 normal-case'>(opcional para agendamento)</span>
+                <span className='normal-case text-slate-500'>(opcional)</span>
               )}
             </label>
             <select
               value={vehicleId}
-              onChange={(e) => setVehicleId(e.target.value)}
+              onChange={(e) => updateRouteDraft({ vehicleId: e.target.value })}
               className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none'
             >
               <option value=''>— Selecionar veículo —</option>
@@ -517,7 +532,7 @@ export default function DispatchPage() {
             </select>
             {overCapacity && (
               <p className='text-xs text-red-400'>
-                ⚠ Pacientes selecionados ({selectedPatients.length}) excedem capacidade (
+                ⚠ Pacientes ({selectedPatients.length}) excedem a capacidade (
                 {selectedVehicle?.capacity}).
               </p>
             )}
@@ -525,33 +540,33 @@ export default function DispatchPage() {
 
           {/* Summary */}
           {selectedPatients.length > 0 && (
-            <div className='rounded-lg border border-cyan-900/50 bg-cyan-950/20 p-3 text-xs text-cyan-300 space-y-1'>
-              <p className='font-semibold'>Resumo</p>
-              <p>Pacientes: {selectedPatients.length}</p>
+            <div className='space-y-1 rounded-lg border border-cyan-900/50 bg-cyan-950/20 p-3 text-xs text-cyan-300'>
+              <p className='font-semibold uppercase tracking-wider'>Resumo da Rota</p>
+              <p>👥 Pacientes: {selectedPatients.length}</p>
               {dispatchType === 'SCHEDULED' && scheduledDate && (
                 <p>
-                  Agendado: {new Date(`${scheduledDate}T${scheduledTime}:00`).toLocaleString('pt-BR')}
+                  📅 Agendado:{' '}
+                  {new Date(`${scheduledDate}T${scheduledTime}:00`).toLocaleString('pt-BR')}
                 </p>
               )}
               {selectedVehicle && (
                 <p>
-                  Veículo: {selectedVehicle.plate} ({selectedVehicle.capacity} lugares)
+                  🚐 Veículo: {selectedVehicle.plate} ({selectedVehicle.capacity} lugares)
                 </p>
               )}
               {locationId && (
-                <p>Destino: {locations.find((l) => l.id === locationId)?.name}</p>
+                <p>🏥 Destino: {locations.find((l) => l.id === locationId)?.name}</p>
               )}
               {!driverId && dispatchType === 'SCHEDULED' && (
-                <p className='text-slate-400'>Motorista: a atribuir</p>
+                <p className='text-slate-400'>🚗 Motorista: a atribuir</p>
               )}
             </div>
           )}
 
-          {/* Dispatch button */}
           <button
             type='button'
             disabled={!canDispatch || dispatch.isPending}
-            onClick={() => dispatch.mutate()}
+            onClick={() => dispatch.mutate(undefined)}
             className={`w-full rounded-lg px-4 py-3 font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
               dispatchType === 'SCHEDULED'
                 ? 'bg-indigo-700 hover:bg-indigo-600'
@@ -559,16 +574,23 @@ export default function DispatchPage() {
             }`}
           >
             {dispatch.isPending
-              ? 'Processando…'
+              ? '⏳ Processando…'
               : dispatchType === 'SCHEDULED'
-              ? `📅 Agendar Rota (${selectedPatients.length} paciente(s))`
-              : `🚐 Despachar Rota (${selectedPatients.length} paciente(s))`}
+                ? `📅 Agendar Rota (${selectedPatients.length} paciente(s))`
+                : `🚐 Despachar Rota (${selectedPatients.length} paciente(s))`}
           </button>
 
           {selectedPatients.length === 0 && (
-            <p className='text-xs text-slate-500 text-center'>
-              Selecione ao menos 1 paciente da fila ou{' '}
-              <a href='/queue' className='text-cyan-400 underline'>vá para a Fila Operacional</a>
+            <p className='text-center text-xs text-slate-500'>
+              Selecione ao menos 1 paciente na{' '}
+              <a href='/queue' className='text-cyan-400 underline'>
+                Fila Operacional
+              </a>
+            </p>
+          )}
+          {!locationId && selectedPatients.length > 0 && (
+            <p className='text-center text-xs text-amber-400'>
+              ⚠ Selecione o destino médico para liberar o despacho
             </p>
           )}
         </div>
@@ -576,4 +598,3 @@ export default function DispatchPage() {
     </section>
   );
 }
-

@@ -143,6 +143,7 @@ export default function QueuePage() {
       destination: q.destination,
       healthcareLocationId: q.healthcareLocationId,
       appointmentDate: q.appointmentDate,
+      confirmationStatus: q.confirmationStatus,
       notes: q.notes,
       patient: q.patient,
       healthcareLocation: q.healthcareLocation,
@@ -266,8 +267,14 @@ export default function QueuePage() {
                       />
                     </td>
                     <td className='p-3 font-medium'>
-                      {q.patient?.name ?? '—'}
-                      {inDispatch && <span className='ml-2 text-xs text-cyan-400'>• Em despacho</span>}
+                      <span className='flex items-center gap-1.5 flex-wrap'>
+                        {q.patient?.name ?? '—'}
+                        {inDispatch && (
+                          <span className='inline-flex items-center gap-1 rounded-full bg-cyan-900/70 px-2 py-0.5 text-xs font-semibold text-cyan-300 border border-cyan-800/60'>
+                            🚐 EM DESPACHO
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className='p-3 text-xs text-slate-300 max-w-[200px]'>
                       {loc ? (

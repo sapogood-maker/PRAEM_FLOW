@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class DriversService {
+  private readonly logger = new Logger(DriversService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(tenantId: string, query: { search?: string; status?: string; page?: number; limit?: number }) {
@@ -101,9 +103,14 @@ export class DriversService {
   async update(id: string, tenantId: string, data: any) {
     await this.findOne(id, tenantId);
     const sanitized = { ...data };
+    // Convert date-only strings to Date objects for Prisma DateTime fields
     if (sanitized.cnhExpiry && typeof sanitized.cnhExpiry === 'string') {
       sanitized.cnhExpiry = new Date(sanitized.cnhExpiry);
     }
+    // Strip operational fields — these must only be updated via heartbeat / WS events
+    delete sanitized.wsLastSeenAt;
+    delete sanitized.lastHeartbeatAt;
+    delete sanitized.status;
     return this.prisma.driver.update({ where: { id }, data: sanitized });
   }
 
@@ -187,17 +194,27 @@ export class DriversService {
   async recordWsConnect(driverId: string, tenantId: string) {
     const driver = await this.prisma.driver.findFirst({ where: { id: driverId, tenantId } });
     if (!driver) return;
-    await this.prisma.driver.update({ where: { id: driverId }, data: { wsLastSeenAt: new Date() } });
+    try {
+      await this.prisma.driver.update({ where: { id: driverId }, data: { wsLastSeenAt: new Date() } });
+      this.logger.log(`[WS CONNECTED] driverId=${driverId} tenantId=${tenantId}`);
+    } catch (err) {
+      this.logger.error(`[WS CONNECTED] DB update failed for driverId=${driverId}: ${(err as Error).message}`);
+    }
   }
 
   /** Called when a GPS heartbeat arrives (via WS or HTTP). */
   async recordHeartbeat(driverId: string, tenantId: string) {
     const driver = await this.prisma.driver.findFirst({ where: { id: driverId, tenantId } });
     if (!driver) return;
-    await this.prisma.driver.update({
-      where: { id: driverId },
-      data: { lastHeartbeatAt: new Date(), wsLastSeenAt: new Date() },
-    });
+    try {
+      await this.prisma.driver.update({
+        where: { id: driverId },
+        data: { lastHeartbeatAt: new Date(), wsLastSeenAt: new Date() },
+      });
+      this.logger.log(`[GPS HEARTBEAT] driverId=${driverId} tenantId=${tenantId}`);
+    } catch (err) {
+      this.logger.error(`[GPS HEARTBEAT] DB update failed for driverId=${driverId}: ${(err as Error).message}`);
+    }
   }
 }
 

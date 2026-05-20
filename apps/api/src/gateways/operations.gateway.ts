@@ -7,6 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { sanitizePayload } from '../common/sanitize';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +21,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
+
+  private readonly logger = new Logger(OperationsGateway.name);
 
   private connectedClients = new Set<string>();
 
@@ -40,6 +43,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       // Emit driver.offline only if no other socket for the same driver remains
       const stillConnected = [...this.driverSockets.values()].some(v => v.driverId === info.driverId);
       if (!stillConnected) {
+        this.logger.log(`[DRIVER OFFLINE] driverId=${info.driverId} tenantId=${info.tenantId}`);
         this.server.to(`tenant:${info.tenantId}`).emit('driver.offline', sanitizePayload({
           driverId: info.driverId,
           tenantId: info.tenantId,
@@ -93,10 +97,15 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     if (typeof driverId === 'string' && typeof tenantId === 'string') {
       this.driverSockets.set(client.id, { driverId, tenantId });
       const now = new Date();
-      await this.prisma.driver.updateMany({
-        where: { id: driverId, tenantId },
-        data: { wsLastSeenAt: now },
-      });
+      try {
+        await this.prisma.driver.updateMany({
+          where: { id: driverId, tenantId },
+          data: { wsLastSeenAt: now },
+        });
+        this.logger.log(`[WS CONNECTED] driverId=${driverId} tenantId=${tenantId}`);
+      } catch (err) {
+        this.logger.error(`[WS CONNECTED] DB update failed for driverId=${driverId}: ${(err as Error).message}`);
+      }
       this.server.to(`tenant:${tenantId}`).emit('driver.connected', sanitizePayload({
         driverId,
         tenantId,
@@ -124,10 +133,15 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     if (driverId && tenantId) {
       const now = new Date();
-      await this.prisma.driver.updateMany({
-        where: { id: driverId, tenantId },
-        data: { lastHeartbeatAt: now, wsLastSeenAt: now },
-      });
+      try {
+        await this.prisma.driver.updateMany({
+          where: { id: driverId, tenantId },
+          data: { lastHeartbeatAt: now, wsLastSeenAt: now },
+        });
+        this.logger.log(`[GPS HEARTBEAT] driverId=${driverId} tenantId=${tenantId} lat=${safe['lat']} lng=${safe['lng']}`);
+      } catch (err) {
+        this.logger.error(`[GPS HEARTBEAT] DB update failed for driverId=${driverId}: ${(err as Error).message}`);
+      }
       this.server.to(`tenant:${tenantId}`).emit('driver.gps.active', sanitizePayload({
         driverId,
         tenantId,

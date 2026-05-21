@@ -9,12 +9,13 @@ export class RoutesService {
     private readonly gateway: OperationsGateway,
   ) {}
 
-  async findAll(tenantId: string, query: { status?: string; date?: string; startDate?: string; endDate?: string; driverId?: string; vehicleId?: string; page?: number; limit?: number }) {
+  async findAll(tenantId: string, query: { status?: string | string[]; date?: string; startDate?: string; endDate?: string; driverId?: string; vehicleId?: string; page?: number; limit?: number }) {
     const { status, date, startDate, endDate, driverId, vehicleId, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
+    const statuses = Array.isArray(status) ? status : (typeof status === 'string' ? status.split(',') : undefined);
     const where: any = {
       tenantId,
-      ...(status && { status: { in: status.split(',') as any[] } }),
+      ...(statuses && { status: { in: statuses as any[] } }),
       ...(driverId && { driverId }),
       ...(vehicleId && { vehicleId }),
       ...(date && {

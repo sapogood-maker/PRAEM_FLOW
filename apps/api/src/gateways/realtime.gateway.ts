@@ -122,6 +122,11 @@ export class RealtimeGateway {
     this.server.to(`tenant:${tenantId}`).emit(event, sanitizePayload(payload));
   }
 
+  /** Emit directly to a driver's tablet using driver:{driverId} room */
+  emitToDriver(driverId: string, event: string, payload: unknown) {
+    this.server.to(`driver:${driverId}`).emit(event, sanitizePayload(payload));
+  }
+
   /** Emit an operational event scoped to a specific tenant */
   emitOperational(tenantId: string, event: string, payload: Record<string, unknown>) {
     this.server.to(`tenant:${tenantId}`).emit(event, sanitizePayload(payload));

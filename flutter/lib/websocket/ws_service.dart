@@ -15,6 +15,7 @@ class WsService extends ChangeNotifier {
   bool _connected = false;
   String? _tenantId;
   String? _driverId;
+  String? _vehicleId;
   String? _deviceId;
 
   final Map<String, List<WsEventCallback>> _listeners = {};
@@ -27,10 +28,12 @@ class WsService extends ChangeNotifier {
     String token,
     String tenantId, {
     String? driverId,
+    String? vehicleId,
     String? deviceId,
   }) {
     _tenantId = tenantId;
     _driverId = driverId;
+    _vehicleId = vehicleId;
     _deviceId = deviceId;
     _socket?.disconnect();
 
@@ -55,6 +58,7 @@ class WsService extends ChangeNotifier {
           _socket!.emit('join:driver', {
             'tenantId': tenantId,
             'driverId': driverId,
+            if (vehicleId != null) 'vehicleId': vehicleId,
             if (deviceId != null) 'deviceId': deviceId,
           });
         }
@@ -94,6 +98,8 @@ class WsService extends ChangeNotifier {
     required double heading,
     required double battery,
     required String deviceId,
+    String? routeId,
+    String? operationalStatus,
   }) {
     if (_socket == null || !_connected) return;
     _socket!.emit('vehicle.heartbeat', {
@@ -106,6 +112,8 @@ class WsService extends ChangeNotifier {
       'heading': heading,
       'battery': battery,
       'deviceId': deviceId,
+      if (routeId != null) 'routeId': routeId,
+      if (operationalStatus != null) 'operationalStatus': operationalStatus,
       'timestamp': DateTime.now().toIso8601String(),
     });
   }
@@ -146,6 +154,19 @@ class WsService extends ChangeNotifier {
     });
   }
 
+  // ─── Acknowledge a route event ────────────────────────────────────────────
+  /// Call after receiving route:dispatched so the central knows the driver got it.
+  void emitAck(String event, {required String routeId, String? status}) {
+    if (_socket == null || !_connected || _driverId == null) return;
+    _socket!.emit(event, {
+      'driverId': _driverId,
+      'tenantId': _tenantId,
+      'routeId': routeId,
+      if (status != null) 'status': status,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+
   // ─── Pub/sub helpers ──────────────────────────────────────────────────────
   void on(String event, WsEventCallback cb) {
     _listeners.putIfAbsent(event, () => []).add(cb);
@@ -167,6 +188,7 @@ class WsService extends ChangeNotifier {
     'vehicle.offline',
     'vehicle.idle',
     'vehicle.status_changed',
+    'vehicle.heartbeat',
     'trip.started',
     'trip.completed',
     'trip:completed',
@@ -177,10 +199,18 @@ class WsService extends ChangeNotifier {
     'queue.delayed',
     'driver.heartbeat',
     'driver.status_changed',
+    'driver.connected',
+    'driver.offline',
     'operational.alert',
     'route:started',
     'route:completed',
     'route:dispatched',
+    'route.dispatched',
+    'route.updated',
+    'route.cancelled',
+    'route.started',
+    'route.completed',
+    'return.requested',
   ];
 
   @override

@@ -38,9 +38,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final driver = context.read<DriverState>();
     final ws = context.read<WsService>();
     final gps = context.read<GpsTrackingService>();
+    final vehicleId = driver.vehicle?['id'] as String?;
 
     // ─── Connect WS (join tenant + driver rooms) ──────────────────────────────
-    ws.connect(auth.token!, auth.tenantId!, driverId: auth.driverId, deviceId: driver.deviceId);
+    ws.connect(
+      auth.token!,
+      auth.tenantId!,
+      driverId: auth.driverId,
+      vehicleId: vehicleId,
+      deviceId: driver.deviceId,
+    );
 
     // ─── Listen for new route dispatched to this driver ──────────────────────
     ws.on('route:dispatched', (data) {
@@ -48,10 +55,34 @@ class _HomeScreenState extends State<HomeScreen> {
       final event = data as Map?;
       final driverId = event?['driverId'] as String?;
       if (driverId != null && driverId == auth.driverId) {
-        // Re-load route to pick up the newly dispatched trip
-        _loadRoute(auth, driver);
+        final routeId = event?['routeId'] as String?;
+        // Acknowledge receipt
+        if (routeId != null) {
+          ws.emitAck('route.received', routeId: routeId, status: 'RECEIVED');
+        }
+        // Reload route and auto-open trip screen
+        _loadRoute(auth, driver).then((_) {
+          if (!mounted) return;
+          if (driver.activeRoute != null) {
+            Navigator.pushNamed(context, AppRoutes.tripDetails);
+          }
+        });
       }
     });
+
+    ws.on('route.cancelled', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final driverId = event?['driverId'] as String?;
+      if (driverId == null || driverId == auth.driverId) {
+        driver.clearActiveRoute();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('⚠️ Rota cancelada pela central'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    });
+
     ws.on('operational.alert', (data) {
       if (!mounted) return;
       final alert = data as Map?;
@@ -105,8 +136,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     try {
       final today = DateTime.now().toIso8601String().substring(0, 10);
-      // Accept PLANNED (not yet started) and ACTIVE (in progress)
-      final statuses = ['PLANNED', 'ACTIVE'];
+      // Search all non-terminal statuses — DISPATCHED covers new realtime dispatch
+      final statuses = ['DISPATCHED', 'PLANNED', 'PREPARING', 'ACTIVE', 'SCHEDULED', 'PENDING'];
       Map<String, dynamic>? foundRoute;
       for (final st in statuses) {
         final params = <String, String>{
@@ -130,6 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (foundRoute != null) {
         driver.setActiveRoute(foundRoute);
         await _loadPatients(auth, driver, foundRoute['id'] as String);
+        await _loadStops(auth, driver, foundRoute['id'] as String);
       }
     } catch (e) {
       debugPrint('[HomeScreen] loadRoute error: $e');
@@ -156,6 +188,42 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _loadStops(
+      AuthService auth, DriverState driver, String routeId) async {
+    try {
+      // Fetch stops for all trips of this route
+      final tripsResp = await _dio.get(
+        '${AppConfig.apiBaseUrl}/trips',
+        queryParameters: {'routeId': routeId},
+        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+      );
+      final tripsData = tripsResp.data;
+      final trips = (tripsData is Map ? tripsData['items'] : tripsData) as List? ?? [];
+
+      final allStops = <Map<String, dynamic>>[];
+      for (final trip in trips) {
+        final tripId = (trip as Map)['id'] as String?;
+        if (tripId == null) continue;
+        try {
+          final stopsResp = await _dio.get(
+            '${AppConfig.apiBaseUrl}/trips/$tripId/stops',
+            options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+          );
+          final stopsData = stopsResp.data;
+          final stops = (stopsData is List ? stopsData : (stopsData as Map?)?.values.first) as List? ?? [];
+          allStops.addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
+        } catch (_) {}
+      }
+
+      // Sort by sequence
+      allStops.sort((a, b) =>
+          ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
+      driver.setStops(allStops);
+    } catch (e) {
+      debugPrint('[HomeScreen] loadStops error: $e');
+    }
+  }
+
   Future<void> _changeStatus(String status) async {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
@@ -166,14 +234,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     driver.setOperationalStatus(status);
     ws.emitStatusChange(vehicleId, status);
+    ws.emitDriverStatus(status, vehicleId: vehicleId, routeId: routeId);
 
     // Persist route status transitions via REST
     try {
-      if (status == 'MOVING' && routeId != null && driver.activeRoute?['status'] == 'PLANNED') {
-        await _dio.post(
-          '${AppConfig.apiBaseUrl}/routes/$routeId/start',
-          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-        );
+      if (status == 'MOVING' && routeId != null) {
+        final routeStatus = driver.activeRoute?['status'] as String?;
+        if (routeStatus == 'PLANNED' || routeStatus == 'DISPATCHED' || routeStatus == 'PREPARING') {
+          await _dio.post(
+            '${AppConfig.apiBaseUrl}/routes/$routeId/start',
+            options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+          );
+        }
       } else if (status == 'IDLE' && routeId != null) {
         await _dio.post(
           '${AppConfig.apiBaseUrl}/routes/$routeId/complete',
@@ -245,7 +317,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 12),
 
                   // ─── Route card ────────────────────────────────────────────
-                  _RouteCard(route: driver.activeRoute),
+                  _RouteCard(
+                    route: driver.activeRoute,
+                    currentStop: driver.currentStop,
+                    nextStop: driver.nextStop,
+                  ),
                   const SizedBox(height: 12),
 
                   // ─── Operational status buttons ────────────────────────────
@@ -321,7 +397,9 @@ class _VehicleCard extends StatelessWidget {
 // ─── Route card ───────────────────────────────────────────────────────────────
 class _RouteCard extends StatelessWidget {
   final Map<String, dynamic>? route;
-  const _RouteCard({required this.route});
+  final Map<String, dynamic>? currentStop;
+  final Map<String, dynamic>? nextStop;
+  const _RouteCard({required this.route, this.currentStop, this.nextStop});
 
   @override
   Widget build(BuildContext context) {
@@ -347,6 +425,15 @@ class _RouteCard extends StatelessWidget {
                           color: AppColors.info,
                           fontSize: 12,
                           letterSpacing: 1)),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pushNamed(context, AppRoutes.tripDetails),
+                    child: const Text('VER DETALHES →',
+                        style: TextStyle(
+                            color: AppColors.primary,
+                            fontSize: 11,
+                            letterSpacing: 0.5)),
+                  ),
                 ]),
                 const SizedBox(height: 8),
                 Text(route!['origin'] as String? ?? '—',
@@ -359,9 +446,82 @@ class _RouteCard extends StatelessWidget {
                         color: AppColors.textPrimary,
                         fontSize: 15,
                         fontWeight: FontWeight.bold)),
+
+                // ─── Current / next stop summary ───────────────────────────
+                if (currentStop != null) ...[
+                  const Divider(height: 20, color: AppColors.border),
+                  Row(children: [
+                    const Text('📍 ', style: TextStyle(fontSize: 14)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('PARADA ATUAL',
+                              style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 10,
+                                  letterSpacing: 1)),
+                          Text(
+                            currentStop!['name'] as String? ?? '—',
+                            style: const TextStyle(
+                                color: AppColors.textPrimary,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                    StatusBadge(
+                      label: _stopStatusPt(currentStop!['status'] as String? ?? 'PENDING'),
+                      color: AppColors.warning,
+                    ),
+                  ]),
+                ],
+                if (nextStop != null) ...[
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    const Text('⏭️ ', style: TextStyle(fontSize: 13)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('PRÓXIMA PARADA',
+                              style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 10,
+                                  letterSpacing: 1)),
+                          Text(
+                            nextStop!['name'] as String? ?? '—',
+                            style: const TextStyle(
+                                color: AppColors.textSecondary, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ]),
+                ],
               ],
             ),
     );
+  }
+
+  String _stopStatusPt(String status) {
+    switch (status) {
+      case 'PENDING':
+        return 'Pendente';
+      case 'EN_ROUTE':
+        return 'Em rota';
+      case 'ARRIVED':
+        return 'Chegou';
+      case 'BOARDING':
+        return 'Embarcando';
+      case 'COMPLETED':
+        return 'Concluída';
+      case 'SKIPPED':
+        return 'Pulada';
+      default:
+        return status;
+    }
   }
 }
 

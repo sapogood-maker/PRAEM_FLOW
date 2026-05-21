@@ -326,6 +326,11 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     this.server.to(`tenant:${tenantId}`).emit(event, sanitizePayload(payload));
   }
 
+  /** Emit directly to a driver's tablet — bypasses tenant broadcast for targeted delivery. */
+  emitToDriver(driverId: string, event: string, payload: Record<string, unknown>) {
+    this.server.to(`driver:${driverId}`).emit(event, sanitizePayload(payload));
+  }
+
   emitAlert(tenantId: string, alert: { type: string; message: string; severity: string; data?: unknown }) {
     this.server.to(`tenant:${tenantId}`).emit('operational.alert', sanitizePayload(alert));
   }

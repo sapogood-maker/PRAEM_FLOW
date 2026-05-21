@@ -76,14 +76,18 @@ export class RoutesService {
     // Only notify via WebSocket for immediate dispatch — scheduled routes are
     // saved for future execution and must not trigger realtime driver alerts.
     if (route.driverId && route.dispatchType === 'IMMEDIATE') {
-      this.gateway.emitToTenant(tenantId, 'route:dispatched', {
+      const dispatchPayload = {
         routeId: route.id,
         driverId: route.driverId,
         vehicleId: route.vehicleId,
         date: route.date,
         status: route.status,
         timestamp: new Date().toISOString(),
-      });
+      };
+      // Broadcast to entire tenant room (web central panel)
+      this.gateway.emitToTenant(tenantId, 'route:dispatched', dispatchPayload);
+      // Also push directly to the driver's tablet room for reliable delivery
+      this.gateway.emitToDriver(route.driverId, 'route:dispatched', dispatchPayload);
     }
     return route;
   }

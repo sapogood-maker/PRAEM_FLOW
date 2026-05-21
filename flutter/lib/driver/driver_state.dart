@@ -17,13 +17,43 @@ class DriverState extends ChangeNotifier {
   Map<String, dynamic>? _vehicle;
   Map<String, dynamic>? _activeRoute;
   List<Map<String, dynamic>> _patients = [];
+  List<Map<String, dynamic>> _stops = [];
   String _operationalStatus = 'OFFLINE'; // MOVING | IDLE | BOARDING | ARRIVED
 
   String? get deviceId => _deviceId;
   Map<String, dynamic>? get vehicle => _vehicle;
   Map<String, dynamic>? get activeRoute => _activeRoute;
   List<Map<String, dynamic>> get patients => List.unmodifiable(_patients);
+  List<Map<String, dynamic>> get stops => List.unmodifiable(_stops);
   String get operationalStatus => _operationalStatus;
+
+  /// First stop not yet COMPLETED or SKIPPED, sorted by sequence.
+  Map<String, dynamic>? get currentStop {
+    final pending = _stops.where((s) {
+      final st = s['status'] as String?;
+      return st != 'COMPLETED' && st != 'SKIPPED';
+    }).toList();
+    if (pending.isEmpty) return null;
+    pending.sort((a, b) =>
+        ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
+    return pending.first;
+  }
+
+  /// The stop after currentStop, also not COMPLETED/SKIPPED.
+  Map<String, dynamic>? get nextStop {
+    final current = currentStop;
+    if (current == null) return null;
+    final currentSeq = (current['sequence'] as num?) ?? 0;
+    final remaining = _stops.where((s) {
+      final st = s['status'] as String?;
+      final seq = (s['sequence'] as num?) ?? 0;
+      return st != 'COMPLETED' && st != 'SKIPPED' && seq > currentSeq;
+    }).toList();
+    if (remaining.isEmpty) return null;
+    remaining.sort((a, b) =>
+        ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
+    return remaining.first;
+  }
 
   Future<void> init() async {
     _deviceId = await _storage.read(key: _deviceIdKey);
@@ -53,8 +83,20 @@ class DriverState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearActiveRoute() {
+    _activeRoute = null;
+    _stops = [];
+    _patients = [];
+    notifyListeners();
+  }
+
   void setPatients(List<Map<String, dynamic>> patients) {
     _patients = patients;
+    notifyListeners();
+  }
+
+  void setStops(List<Map<String, dynamic>> stops) {
+    _stops = stops;
     notifyListeners();
   }
 
@@ -62,6 +104,14 @@ class DriverState extends ChangeNotifier {
     final idx = _patients.indexWhere((p) => p['id'] == patientId);
     if (idx != -1) {
       _patients[idx] = {..._patients[idx], 'status': status};
+      notifyListeners();
+    }
+  }
+
+  void updateStopStatus(String stopId, String status) {
+    final idx = _stops.indexWhere((s) => s['id'] == stopId);
+    if (idx != -1) {
+      _stops[idx] = {..._stops[idx], 'status': status};
       notifyListeners();
     }
   }

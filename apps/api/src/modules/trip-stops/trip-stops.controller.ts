@@ -51,6 +51,17 @@ export class TripStopsController {
     return this.service.create(req.user.tenantId, tripId, body);
   }
 
+  /** PATCH /trip-stops/:id/status — generic status update (used by Flutter app) */
+  @Patch('trip-stops/:id/status')
+  @HttpCode(HttpStatus.OK)
+  updateStatus(
+    @Param('id') id: string,
+    @Body() body: { status: 'EN_ROUTE' | 'ARRIVED' | 'BOARDING' | 'COMPLETED' | 'SKIPPED' },
+    @Request() req: any,
+  ) {
+    return this.service.updateStatus(req.user.tenantId, id, body.status);
+  }
+
   /** PATCH /trip-stops/:id/arrive — driver confirms arrival */
   @Patch('trip-stops/:id/arrive')
   @HttpCode(HttpStatus.OK)

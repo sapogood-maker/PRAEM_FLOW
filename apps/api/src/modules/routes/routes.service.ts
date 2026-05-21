@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RealtimeGateway } from '../../gateways/realtime.gateway';
+import { OperationsGateway } from '../../gateways/operations.gateway';
 
 @Injectable()
 export class RoutesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gateway: RealtimeGateway,
+    private readonly gateway: OperationsGateway,
   ) {}
 
   async findAll(tenantId: string, query: { status?: string; date?: string; startDate?: string; endDate?: string; driverId?: string; vehicleId?: string; page?: number; limit?: number }) {

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Logger, Param, Post, Put, Query, Request, UseGuards } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RoutesService } from './routes.service';
@@ -8,6 +8,7 @@ interface AuthRequest { user: { tenantId: string } }
 @UseGuards(JwtAuthGuard)
 @Controller('routes')
 export class RoutesController {
+  private readonly logger = new Logger(RoutesController.name);
   constructor(private readonly routesService: RoutesService) {}
 
   @Get()
@@ -51,12 +52,13 @@ export class RoutesController {
 
   @Post(':id/start')
   startRoute(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[ROUTE] REST start request tenantId=${req.user.tenantId} routeId=${id}`);
     return this.routesService.startRoute(id, req.user.tenantId);
   }
 
   @Post(':id/complete')
   completeRoute(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[ROUTE] REST complete request tenantId=${req.user.tenantId} routeId=${id}`);
     return this.routesService.completeRoute(id, req.user.tenantId);
   }
 }
-

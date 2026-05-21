@@ -46,12 +46,14 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   handleConnection(client: Socket) {
     const authUser = this.authenticateSocket(client);
     if (!authUser) {
+      this.logger.warn('[SOCKET] unauthorized connection rejected');
       client.disconnect(true);
       return;
     }
     this.socketUsers.set(client.id, authUser);
     this.connectedClients.add(client.id);
     client.join(`tenant:${authUser.tenantId}`);
+    this.logger.log(`[SOCKET] connected socketId=${client.id} tenantId=${authUser.tenantId} role=${authUser.role} driverId=${authUser.driverId ?? '-'}`);
   }
 
   async handleDisconnect(client: Socket) {
@@ -63,7 +65,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       // Emit driver.offline only if no other socket for the same driver remains
       const stillConnected = [...this.driverSockets.values()].some(v => v.driverId === info.driverId);
       if (!stillConnected) {
-        this.logger.log(`[DRIVER OFFLINE] driverId=${info.driverId} tenantId=${info.tenantId}`);
+        this.logger.log(`[SOCKET] driver offline driverId=${info.driverId} tenantId=${info.tenantId}`);
         this.server.to(`tenant:${info.tenantId}`).emit('driver.offline', sanitizePayload({
           driverId: info.driverId,
           tenantId: info.tenantId,
@@ -118,8 +120,10 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       : (user.driverId ?? null);
     const deviceId = safe['deviceId'];
     if (user.role === 'DRIVER' && user.driverId && driverId !== user.driverId) {
+      this.logger.warn(`[SOCKET] join:driver forbidden socketId=${client.id} userDriverId=${user.driverId} requestedDriverId=${driverId ?? '-'}`);
       return { ok: false, error: 'forbidden' };
     }
+    this.logger.log(`[SOCKET] join:driver socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} deviceId=${typeof deviceId === 'string' ? deviceId : '-'}`);
 
     client.join(`tenant:${tenantId}`);
     if (typeof driverId === 'string') client.join(`driver:${driverId}`);
@@ -156,8 +160,10 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     const safe = sanitizePayload(payload) as Record<string, unknown>;
     const requestedDriverId = typeof safe['driverId'] === 'string' ? safe['driverId'] : user.driverId ?? null;
     if (user.role === 'DRIVER' && requestedDriverId && requestedDriverId !== user.driverId) {
+      this.logger.warn(`[SOCKET] ops:state:request forbidden socketId=${client.id} userDriverId=${user.driverId ?? '-'} requestedDriverId=${requestedDriverId}`);
       return { ok: false, error: 'forbidden' };
     }
+    this.logger.log(`[SOCKET] ops:state:request socketId=${client.id} tenantId=${user.tenantId} driverId=${requestedDriverId ?? '-'}`);
     await this.emitStateReplay(client, user.tenantId, requestedDriverId);
     return { ok: true };
   }
@@ -165,6 +171,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   @SubscribeMessage('ops:ping')
   onOpsPing(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     const safe = sanitizePayload(payload) as Record<string, unknown>;
+    this.logger.debug(`[SOCKET] ops:ping socketId=${client.id} pingId=${safe['pingId'] ?? '-'}`);
     client.emit('ops:pong', sanitizePayload({
       at: new Date().toISOString(),
       pingId: safe['pingId'] ?? null,
@@ -237,6 +244,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
     if (!this.canEmitDriverEvent(user, safe)) return { ok: false, error: 'forbidden' };
+    this.logger.log(`[SOCKET] driver.status_changed received tenantId=${user.tenantId} driverId=${safe['driverId'] ?? '-'} routeId=${safe['routeId'] ?? '-'} status=${safe['status'] ?? '-'}`);
     const room = `tenant:${user.tenantId}`;
     if (room) this.server.to(room).emit('driver.status_changed', safe);
     return { ok: true };
@@ -378,10 +386,12 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   // ─── Server-side emit helpers ─────────────────────────────────────────────
 
   emitToTenant(tenantId: string, event: string, payload: Record<string, unknown>) {
+    this.logger.log(`[SOCKET] emit tenant event=${event} tenantId=${tenantId}`);
     this.server.to(`tenant:${tenantId}`).emit(event, sanitizePayload(payload));
   }
 
   emitToDriver(driverId: string, event: string, payload: Record<string, unknown>) {
+    this.logger.log(`[SOCKET] emit driver event=${event} driverId=${driverId}`);
     this.server.to(`driver:${driverId}`).emit(event, sanitizePayload(payload));
   }
 
@@ -470,5 +480,6 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       latestPosition,
       replayedAt: new Date().toISOString(),
     }));
+    this.logger.log(`[SOCKET] replay sent socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} routeId=${activeRoute?.id ?? '-'} vehicleId=${latestPosition?.vehicleId ?? '-'}`);
   }
 }

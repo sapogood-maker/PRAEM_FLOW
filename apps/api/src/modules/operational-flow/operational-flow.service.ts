@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { AuditService } from '../audit/audit.service';
@@ -60,6 +60,7 @@ type FlowTrip = {
 
 @Injectable()
 export class OperationalFlowService {
+  private readonly logger = new Logger(OperationalFlowService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: OperationsGateway,
@@ -111,8 +112,10 @@ export class OperationalFlowService {
     context: FlowContext = {},
     allowNoop = false,
   ) {
+    this.logger.log(`[OPS] transition request tenantId=${tenantId} target=${targetState} routeId=${scope.routeId ?? '-'} tripId=${scope.tripId ?? '-'} patientId=${scope.patientId ?? '-'} source=${context.source ?? 'api'}`);
     const entity = await this.loadEntity(tenantId, scope);
     const currentState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
+    this.logger.log(`[OPS] current state tenantId=${tenantId} current=${currentState} target=${targetState} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'}`);
     if (!allowNoop && currentState === targetState) {
       throw new BadRequestException(`Transition ${currentState} -> ${targetState} is already applied`);
     }
@@ -128,9 +131,11 @@ export class OperationalFlowService {
 
     if (targetState === 'DISPATCHED') {
       route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'DISPATCHED' } });
+      this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
     if (targetState === 'DRIVER_ACCEPTED') {
       route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
     if (targetState === 'BOARDING' && trip) {
       trip = await this.prisma.trip.update({
@@ -139,6 +144,8 @@ export class OperationalFlowService {
         include: { route: true },
       });
       route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
+      this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       queueUpdate.status = 'BOARDING';
       queueUpdate.boardedAt = now;
       queueUpdate.confirmationStatus = 'CONFIRMED';
@@ -152,6 +159,7 @@ export class OperationalFlowService {
       });
       queueUpdate.status = 'IN_TRANSIT';
       queueUpdate.departedAt = now;
+      this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
     }
     if (targetState === 'ARRIVED' && trip) {
       trip = await this.prisma.trip.update({
@@ -161,6 +169,7 @@ export class OperationalFlowService {
       });
       queueUpdate.status = 'ARRIVED';
       queueUpdate.arrivedAt = now;
+      this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
     }
     if (targetState === 'COMPLETED') {
       if (trip) {
@@ -170,6 +179,7 @@ export class OperationalFlowService {
           include: { route: true },
         });
         queueUpdate.status = 'COMPLETED';
+        this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       }
       const remaining = await this.prisma.trip.count({
         where: {
@@ -180,6 +190,7 @@ export class OperationalFlowService {
       });
       if (remaining === 0) {
         route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'COMPLETED' } });
+        this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       }
     }
     if (targetState === 'CANCELLED') {
@@ -190,8 +201,10 @@ export class OperationalFlowService {
           include: { route: true },
         });
         queueUpdate.status = 'CANCELLED';
+        this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       } else {
         route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'CANCELLED' } });
+        this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       }
     }
 
@@ -212,6 +225,7 @@ export class OperationalFlowService {
       operationalId: patient?.operationalId,
       operationalState: targetState,
     });
+    this.logger.log(`[OPS] broadcasting transition state=${targetState} routeId=${payload.routeId} tripId=${payload.tripId} tenantId=${routeWithRelations.tenantId} driverId=${routeWithRelations.driverId ?? '-'}`);
 
     this.emitTransitionEvents(targetState, routeWithRelations.tenantId, routeWithRelations.driverId, payload);
     await this.logTransitionAudit(tenantId, scope, currentState, targetState, payload, context);

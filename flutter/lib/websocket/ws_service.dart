@@ -74,17 +74,20 @@ class WsService extends ChangeNotifier {
         });
         _dispatch('ws:connected', {'tenantId': tenantId, 'driverId': driverId});
         notifyListeners();
-        debugPrint('[WsService] connected to /operations as driver:$driverId');
+        debugPrint('[FLUTTER][SOCKET] connected namespace=/operations tenantId=$tenantId driverId=$driverId');
       })
       ..onDisconnect((_) {
         _connected = false;
         _pingTimer?.cancel();
         _dispatch('ws:disconnected', {'tenantId': tenantId, 'driverId': driverId});
         notifyListeners();
-        debugPrint('[WsService] disconnected');
+        debugPrint('[FLUTTER][SOCKET] disconnected tenantId=$tenantId driverId=$driverId');
       })
       ..onConnectError((err) {
-        debugPrint('[WsService] connect error: $err');
+        debugPrint('[FLUTTER][SOCKET] connect error: $err');
+      })
+      ..onReconnect((attempt) {
+        debugPrint('[FLUTTER][SOCKET] reconnect attempt=$attempt');
       });
 
     // ─── Register operational event listeners ─────────────────────────────
@@ -116,7 +119,7 @@ class WsService extends ChangeNotifier {
     String? operationalStatus,
   }) {
     if (_socket == null || !_connected) return;
-    _socket!.emit('vehicle.heartbeat', {
+    final payload = {
       'vehicleId': vehicleId,
       'tenantId': _tenantId,
       if (_driverId != null) 'driverId': _driverId,
@@ -129,7 +132,9 @@ class WsService extends ChangeNotifier {
       if (routeId != null) 'routeId': routeId,
       if (operationalStatus != null) 'operationalStatus': operationalStatus,
       'timestamp': DateTime.now().toIso8601String(),
-    });
+    };
+    debugPrint('[FLUTTER][SOCKET] emit vehicle.heartbeat payload=$payload');
+    _socket!.emit('vehicle.heartbeat', payload);
   }
 
   void emitLocationUpdate({
@@ -143,7 +148,7 @@ class WsService extends ChangeNotifier {
     String? routeId,
   }) {
     if (_socket == null || !_connected) return;
-    _socket!.emit('driver:location:update', {
+    final payload = {
       'vehicleId': vehicleId,
       'tenantId': _tenantId,
       if (_driverId != null) 'driverId': _driverId,
@@ -155,56 +160,66 @@ class WsService extends ChangeNotifier {
       'deviceId': deviceId,
       if (routeId != null) 'routeId': routeId,
       'timestamp': DateTime.now().toIso8601String(),
-    });
+    };
+    debugPrint('[FLUTTER][SOCKET] emit driver:location:update payload=$payload');
+    _socket!.emit('driver:location:update', payload);
   }
 
   // ─── Emit driver heartbeat (presence signal) ───────────────────────────────
   void emitDriverHeartbeat({required double battery}) {
     if (_socket == null || !_connected || _driverId == null) return;
-    _socket!.emit('driver.heartbeat', {
+    final payload = {
       'driverId': _driverId,
       'tenantId': _tenantId,
       'deviceId': _deviceId,
       'battery': battery,
       'timestamp': DateTime.now().toIso8601String(),
-    });
+    };
+    debugPrint('[FLUTTER][SOCKET] emit driver.heartbeat payload=$payload');
+    _socket!.emit('driver.heartbeat', payload);
   }
 
   // ─── Emit an operational status change ────────────────────────────────────
   void emitStatusChange(String vehicleId, String status) {
     if (_socket == null || !_connected) return;
-    _socket!.emit('vehicle.status_changed', {
+    final payload = {
       'vehicleId': vehicleId,
       'tenantId': _tenantId,
       'operationalStatus': status,
       'timestamp': DateTime.now().toIso8601String(),
-    });
+    };
+    debugPrint('[FLUTTER][SOCKET] emit vehicle.status_changed payload=$payload');
+    _socket!.emit('vehicle.status_changed', payload);
   }
 
   // ─── Emit driver status change ─────────────────────────────────────────────
   void emitDriverStatus(String status, {String? vehicleId, String? routeId}) {
     if (_socket == null || !_connected || _driverId == null) return;
-    _socket!.emit('driver.status_changed', {
+    final payload = {
       'driverId': _driverId,
       'tenantId': _tenantId,
       'status': status,
       if (vehicleId != null) 'vehicleId': vehicleId,
       if (routeId != null) 'routeId': routeId,
       'timestamp': DateTime.now().toIso8601String(),
-    });
+    };
+    debugPrint('[FLUTTER][SOCKET] emit driver.status_changed payload=$payload');
+    _socket!.emit('driver.status_changed', payload);
   }
 
   // ─── Acknowledge a route event ────────────────────────────────────────────
   /// Call after receiving route:dispatched so the central knows the driver got it.
   void emitAck(String event, {required String routeId, String? status}) {
     if (_socket == null || !_connected || _driverId == null) return;
-    _socket!.emit(event, {
+    final payload = {
       'driverId': _driverId,
       'tenantId': _tenantId,
       'routeId': routeId,
       if (status != null) 'status': status,
       'timestamp': DateTime.now().toIso8601String(),
-    });
+    };
+    debugPrint('[FLUTTER][SOCKET] emit $event payload=$payload');
+    _socket!.emit(event, payload);
   }
 
   // ─── Pub/sub helpers ──────────────────────────────────────────────────────
@@ -217,6 +232,7 @@ class WsService extends ChangeNotifier {
   }
 
   void _dispatch(String event, dynamic data) {
+    debugPrint('[FLUTTER][SOCKET] event=$event data=$data');
     for (final cb in List.of(_listeners[event] ?? [])) {
       cb(data);
     }

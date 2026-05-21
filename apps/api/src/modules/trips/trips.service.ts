@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
 
 @Injectable()
 export class TripsService {
+  private readonly logger = new Logger(TripsService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
@@ -40,21 +41,25 @@ export class TripsService {
   }
 
   async board(id: string, tenantId: string) {
+    this.logger.log(`[TRIP] board tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.confirmBoarding(tenantId, { tripId: id });
     return result.trip;
   }
 
   async inTransit(id: string, tenantId: string) {
+    this.logger.log(`[TRIP] inTransit tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.startInTransit(tenantId, { tripId: id });
     return result.trip;
   }
 
   async arrived(id: string, tenantId: string) {
+    this.logger.log(`[TRIP] arrived tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.markArrived(tenantId, { tripId: id });
     return result.trip;
   }
 
   async complete(id: string, tenantId: string) {
+    this.logger.log(`[TRIP] complete tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.completeTrip(tenantId, { tripId: id });
     return result.trip;
   }

@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _dio = Dio();
   bool _loadingRoute = true;
   Timer? _offlineSyncTimer;
+  bool _dioLoggingConfigured = false;
 
   Map<String, dynamic>? _activeTrip(DriverState driver) {
     for (final trip in driver.patients) {
@@ -52,8 +53,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final ws = context.read<WsService>();
     final gps = context.read<GpsTrackingService>();
     final vehicleId = driver.vehicle?['id'] as String?;
+    _configureDioLogging();
 
     // ─── Connect WS (join tenant + driver rooms) ──────────────────────────────
+    debugPrint('[FLUTTER] WS connect tokenPresent=${auth.token != null} tenantId=${auth.tenantId} driverId=${auth.driverId} vehicleId=$vehicleId');
     ws.connect(
       auth.token!,
       auth.tenantId!,
@@ -65,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // ─── Listen for new route dispatched to this driver ──────────────────────
     ws.on('route:dispatched', (data) {
       if (!mounted) return;
+      debugPrint('[FLUTTER] socket response route:dispatched data=$data');
       final event = data as Map?;
       final driverId = event?['driverId'] as String?;
       if (driverId != null && driverId == auth.driverId) {
@@ -80,30 +84,36 @@ class _HomeScreenState extends State<HomeScreen> {
             Navigator.pushNamed(context, AppRoutes.trip);
           }
         });
+      }
+    });
 
-        ws.on('ws:connected', (_) async {
-          await _loadRoute(auth, driver);
-          await _syncOfflineQueues();
-        });
+    ws.on('ws:connected', (_) async {
+      debugPrint('[FLUTTER] socket reconnect callback');
+      await _loadRoute(auth, driver);
+      await _syncOfflineQueues();
+    });
 
-        ws.on('ops:state:replay', (data) {
-          if (!mounted) return;
-          final replay = (data as Map?) ?? const {};
-          final route = replay['route'];
-          if (route is Map) {
-            driver.setActiveRoute(Map<String, dynamic>.from(route));
-            final trips = (route['trips'] as List?) ?? [];
-            driver.setPatients(trips.map((t) => Map<String, dynamic>.from(t as Map)).toList());
-            final allStops = <Map<String, dynamic>>[];
-            for (final trip in trips) {
-              final stops = (trip as Map)['stops'] as List? ?? [];
-              allStops.addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
-            }
-            allStops.sort((a, b) =>
-                ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
-            driver.setStops(allStops);
-          }
-        });
+    ws.on('ws:disconnected', (_) {
+      debugPrint('[FLUTTER] socket disconnected callback');
+    });
+
+    ws.on('ops:state:replay', (data) {
+      if (!mounted) return;
+      debugPrint('[FLUTTER] socket response ops:state:replay data=$data');
+      final replay = (data as Map?) ?? const {};
+      final route = replay['route'];
+      if (route is Map) {
+        driver.setActiveRoute(Map<String, dynamic>.from(route));
+        final trips = (route['trips'] as List?) ?? [];
+        driver.setPatients(trips.map((t) => Map<String, dynamic>.from(t as Map)).toList());
+        final allStops = <Map<String, dynamic>>[];
+        for (final trip in trips) {
+          final stops = (trip as Map)['stops'] as List? ?? [];
+          allStops.addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
+        }
+        allStops.sort((a, b) =>
+            ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
+        driver.setStops(allStops);
       }
     });
 
@@ -329,18 +339,22 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         final data = resp.data;
         final items = (data is Map ? data['items'] : data) as List? ?? [];
+        debugPrint('[FLUTTER] route lookup status=$st items=${items.length}');
         if (items.isNotEmpty) {
           foundRoute = Map<String, dynamic>.from(items.first as Map);
           break;
         }
       }
       if (foundRoute != null) {
+        debugPrint('[FLUTTER] active route loaded routeId=${foundRoute['id']} status=${foundRoute['status']}');
         driver.setActiveRoute(foundRoute);
         await _loadPatients(auth, driver, foundRoute['id'] as String);
         await _loadStops(auth, driver, foundRoute['id'] as String);
+      } else {
+        debugPrint('[FLUTTER] no active route found driverId=$driverId vehicleId=$vehicleId');
       }
     } catch (e) {
-      debugPrint('[HomeScreen] loadRoute error: $e');
+      debugPrint('[FLUTTER] loadRoute error: $e');
     } finally {
       if (mounted) setState(() => _loadingRoute = false);
     }
@@ -360,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
       driver.setPatients(
           items.map((t) => Map<String, dynamic>.from(t as Map)).toList());
     } catch (e) {
-      debugPrint('[HomeScreen] loadPatients error: $e');
+      debugPrint('[FLUTTER] loadPatients error: $e');
     }
   }
 
@@ -388,7 +402,9 @@ class _HomeScreenState extends State<HomeScreen> {
           final stopsData = stopsResp.data;
           final stops = (stopsData is List ? stopsData : (stopsData as Map?)?.values.first) as List? ?? [];
           allStops.addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[FLUTTER] loadStops tripId=$tripId error: $e');
+        }
       }
 
       // Sort by sequence
@@ -396,58 +412,80 @@ class _HomeScreenState extends State<HomeScreen> {
           ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
       driver.setStops(allStops);
     } catch (e) {
-      debugPrint('[HomeScreen] loadStops error: $e');
+      debugPrint('[FLUTTER] loadStops error: $e');
     }
   }
 
   Future<void> _changeStatus(String status) async {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
+    final ws = context.read<WsService>();
     final offlineQueue = context.read<OfflineQueue>();
-    final routeId = driver.activeRoute?['id'] as String?;
-    final trip = _activeTrip(driver);
+    String? routeId = driver.activeRoute?['id'] as String?;
+    Map<String, dynamic>? trip = _activeTrip(driver);
+    debugPrint('[FLUTTER] button pressed status=$status routeId=$routeId tripId=${trip?['id']} wsConnected=${ws.connected}');
 
     try {
       await _syncOfflineQueues();
+      if (routeId == null) {
+        await _loadRoute(auth, driver);
+        routeId = driver.activeRoute?['id'] as String?;
+        trip = _activeTrip(driver);
+      }
+
+      if (status == 'START_ROUTE' && routeId == null) {
+        debugPrint('[FLUTTER] cannot START_ROUTE because routeId is null');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Nenhuma rota ativa para iniciar'),
+            backgroundColor: AppColors.warning,
+          ));
+        }
+        return;
+      }
+
       String? actionUrl;
       if (status == 'START_ROUTE') {
-        if (routeId == null) return;
         actionUrl = '/routes/$routeId/start';
-        await _dio.post(
-          '${AppConfig.apiBaseUrl}$actionUrl',
-          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-        );
       } else if (status == 'BOARDING') {
         if (trip == null) return;
         actionUrl = '/trips/${trip['id']}/board';
-        await _dio.post(
-          '${AppConfig.apiBaseUrl}$actionUrl',
-          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-        );
       } else if (status == 'IN_TRANSIT') {
         if (trip == null) return;
         actionUrl = '/trips/${trip['id']}/in-transit';
-        await _dio.post(
-          '${AppConfig.apiBaseUrl}$actionUrl',
-          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-        );
       } else if (status == 'ARRIVED') {
         if (trip == null) return;
         actionUrl = '/trips/${trip['id']}/arrived';
-        await _dio.post(
-          '${AppConfig.apiBaseUrl}$actionUrl',
-          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-        );
       } else if (status == 'COMPLETED') {
         if (trip == null) return;
         actionUrl = '/trips/${trip['id']}/complete';
-        await _dio.post(
-          '${AppConfig.apiBaseUrl}$actionUrl',
-          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-        );
       }
+      if (actionUrl == null) return;
+
+      ws.emitDriverStatus(
+        status,
+        vehicleId: driver.vehicle?['id'] as String?,
+        routeId: routeId,
+      );
+      debugPrint('[FLUTTER] websocket emit driver.status_changed status=$status routeId=$routeId tripId=${trip?['id']}');
+
+      final payload = {
+        'routeId': routeId,
+        'tripId': trip?['id'],
+        'status': status,
+        'source': 'FLUTTER_BUTTON',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      debugPrint('[FLUTTER] REST request POST $actionUrl payload=$payload');
+      final resp = await _dio.post(
+        '${AppConfig.apiBaseUrl}$actionUrl',
+        data: payload,
+        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+      );
+      debugPrint('[FLUTTER] REST response POST $actionUrl status=${resp.statusCode} data=${resp.data}');
       driver.setOperationalStatus(status);
     } on DioException catch (e) {
+      debugPrint('[FLUTTER] REST error status=${e.response?.statusCode} data=${e.response?.data} message=${e.message}');
       if (e.response == null) {
         final routeIdToUse = routeId ?? '';
         final tripIdToUse = trip?['id'] as String?;
@@ -465,13 +503,41 @@ class _HomeScreenState extends State<HomeScreen> {
             'tripId': tripIdToUse,
             'timestamp': DateTime.now().toIso8601String(),
           });
+          debugPrint('[FLUTTER] offline queue enqueue status=$status url=$fallbackUrl');
           driver.setOperationalStatus(status);
         }
       }
-      debugPrint('[HomeScreen] status change error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Falha operacional: ${e.response?.statusCode ?? 'sem conexão'}'),
+          backgroundColor: AppColors.warning,
+        ));
+      }
+      debugPrint('[FLUTTER] status change error: $e');
     } catch (e) {
-      debugPrint('[HomeScreen] status change error: $e');
+      debugPrint('[FLUTTER] status change error: $e');
     }
+  }
+
+  void _configureDioLogging() {
+    if (_dioLoggingConfigured) return;
+    _dioLoggingConfigured = true;
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          debugPrint('[FLUTTER] REST request ${options.method} ${options.uri} payload=${options.data}');
+          handler.next(options);
+        },
+        onResponse: (response, handler) {
+          debugPrint('[FLUTTER] REST response ${response.requestOptions.method} ${response.requestOptions.uri} status=${response.statusCode} data=${response.data}');
+          handler.next(response);
+        },
+        onError: (error, handler) {
+          debugPrint('[FLUTTER] REST error ${error.requestOptions.method} ${error.requestOptions.uri} status=${error.response?.statusCode} data=${error.response?.data}');
+          handler.next(error);
+        },
+      ),
+    );
   }
 
   @override

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Param, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TripsService } from './trips.service';
@@ -8,6 +8,7 @@ interface AuthRequest { user: { tenantId: string } }
 @UseGuards(JwtAuthGuard)
 @Controller('trips')
 export class TripsController {
+  private readonly logger = new Logger(TripsController.name);
   constructor(private readonly tripsService: TripsService) {}
 
   @Get()
@@ -27,21 +28,25 @@ export class TripsController {
 
   @Post(':id/board')
   board(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[TRIP] REST board request tenantId=${req.user.tenantId} tripId=${id}`);
     return this.tripsService.board(id, req.user.tenantId);
   }
 
   @Post(':id/in-transit')
   inTransit(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[TRIP] REST in-transit request tenantId=${req.user.tenantId} tripId=${id}`);
     return this.tripsService.inTransit(id, req.user.tenantId);
   }
 
   @Post(':id/arrived')
   arrived(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[TRIP] REST arrived request tenantId=${req.user.tenantId} tripId=${id}`);
     return this.tripsService.arrived(id, req.user.tenantId);
   }
 
   @Post(':id/complete')
   complete(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[TRIP] REST complete request tenantId=${req.user.tenantId} tripId=${id}`);
     return this.tripsService.complete(id, req.user.tenantId);
   }
 

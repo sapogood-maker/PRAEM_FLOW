@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
 
 @Injectable()
 export class RoutesService {
+  private readonly logger = new Logger(RoutesService.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
@@ -104,11 +105,13 @@ export class RoutesService {
 
   /** Driver starts the route — status PLANNED → ACTIVE */
   async startRoute(id: string, tenantId: string) {
+    this.logger.log(`[ROUTE] startRoute tenantId=${tenantId} routeId=${id}`);
     return this.flow.startRoute(tenantId, id);
   }
 
   /** Route fully complete — status ACTIVE → COMPLETED */
   async completeRoute(id: string, tenantId: string) {
+    this.logger.log(`[ROUTE] completeRoute tenantId=${tenantId} routeId=${id}`);
     return this.flow.completeRoute(tenantId, id);
   }
 

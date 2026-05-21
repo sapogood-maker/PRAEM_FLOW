@@ -6,10 +6,10 @@ import { RealtimeGateway } from '../../gateways/realtime.gateway';
 export type TokenType = 'CONFIRMATION' | 'BOARDING' | 'RETURN' | 'REBOOK';
 
 const TOKEN_TTL_MINUTES: Record<TokenType, number> = {
-  CONFIRMATION: 48 * 60, // 48h
-  BOARDING: 4 * 60,      // 4h
-  RETURN: 8 * 60,        // 8h
-  REBOOK: 24 * 60,       // 24h
+  CONFIRMATION: 48 * 60,   // 48h
+  BOARDING: 30 * 24 * 60,  // 30 days — operational tokens remain valid throughout trip lifecycle
+  RETURN: 8 * 60,          // 8h
+  REBOOK: 24 * 60,         // 24h
 };
 
 @Injectable()
@@ -86,7 +86,26 @@ export class TripTokensService {
 
     if (!record) throw new NotFoundException('Token não encontrado');
     if (record.usedAt) throw new BadRequestException('Token já utilizado');
-    if (record.expiresAt < new Date()) throw new BadRequestException('Token expirado');
+
+    // [QR] Validate token based on trip status and token type
+    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS', 'ARRIVED'];
+    const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
+
+    if (record.type === 'BOARDING') {
+      // Boarding tokens valid while trip is active
+      if (terminalStatuses.includes(record.trip.status)) {
+        console.log(`[QR] Token ${token.substring(0, 8)}… rejected: trip in terminal status ${record.trip.status}`);
+        throw new BadRequestException('Viagem finalizada — QR inválido');
+      }
+      console.log(`[QR] Token ${token.substring(0, 8)}… validated: trip status=${record.trip.status}, type=BOARDING`);
+    } else {
+      // Other tokens use time-based expiration
+      if (record.expiresAt < new Date()) {
+        console.log(`[QR] Token ${token.substring(0, 8)}… expired: ${record.expiresAt.toISOString()}, type=${record.type}`);
+        throw new BadRequestException('Token expirado');
+      }
+      console.log(`[QR] Token ${token.substring(0, 8)}… validated: expires=${record.expiresAt.toISOString()}, type=${record.type}`);
+    }
 
     return {
       id: record.id,
@@ -112,14 +131,33 @@ export class TripTokensService {
 
     if (!record) throw new NotFoundException('Token não encontrado');
     if (record.usedAt) throw new BadRequestException('Token já utilizado');
-    if (record.expiresAt < new Date()) throw new BadRequestException('Token expirado');
+
+    // [QR] Validate token based on trip status and token type
+    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS', 'ARRIVED'];
+    const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
+
+    if (record.type === 'BOARDING') {
+      // Boarding tokens valid while trip is active
+      if (terminalStatuses.includes(record.trip.status)) {
+        console.log(`[QR] Use rejected: trip in terminal status ${record.trip.status}, token=${token.substring(0, 8)}…`);
+        throw new BadRequestException('Viagem finalizada — QR inválido');
+      }
+      console.log(`[QR] Use accepted: trip status=${record.trip.status}, type=BOARDING, token=${token.substring(0, 8)}…`);
+    } else {
+      // Other tokens use time-based expiration
+      if (record.expiresAt < new Date()) {
+        console.log(`[QR] Use rejected: token expired (${record.expiresAt.toISOString()}), type=${record.type}, token=${token.substring(0, 8)}…`);
+        throw new BadRequestException('Token expirado');
+      }
+      console.log(`[QR] Use accepted: token valid (expires ${record.expiresAt.toISOString()}), type=${record.type}, token=${token.substring(0, 8)}…`);
+    }
 
     const now = new Date();
     const gpsStr = action.gpsLat != null && action.gpsLng != null
       ? `${action.gpsLat},${action.gpsLng}`
       : null;
 
-    // Marcar como utilizado
+    // Mark as used
     await this.prisma.tripToken.update({
       where: { token },
       data: {
@@ -133,7 +171,7 @@ export class TripTokensService {
     const tenantId = record.trip.tenantId;
     const tripId = record.trip.id;
 
-    // Aplicar ação operacional de acordo com o tipo do token
+    // Apply operational action based on token type
     switch (record.type) {
       case 'CONFIRMATION':
         await this.prisma.trip.update({

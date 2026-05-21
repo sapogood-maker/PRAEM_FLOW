@@ -387,6 +387,7 @@ model Trip {
   patient     Patient    @relation(fields: [patientId], references: [id])
   checkpoints Checkpoint[]
   tokens      TripToken[]
+  stops       TripStop[]
 
   @@index([tenantId])
 }
@@ -604,6 +605,7 @@ model HealthcareLocation {
   tenant                Tenant                       @relation(fields: [tenantId], references: [id])
   specialties           HealthcareLocationSpecialty[]
   queues                OperationalQueue[]
+  tripStops             TripStop[]
 
   @@index([tenantId])
   @@index([type])
@@ -765,4 +767,51 @@ enum TripTokenType {
   BOARDING
   RETURN
   REBOOK
+}
+
+// ---------------------------------------------------------------------------
+// TripStop — paradas individuais de uma viagem (multi-stop route)
+// ---------------------------------------------------------------------------
+
+model TripStop {
+  id             String         @id @default(uuid())
+  tenantId       String
+  tripId         String
+  sequence       Int
+  type           TripStopType
+  locationId     String?
+  name           String
+  lat            Float?
+  lng            Float?
+  plannedArrival DateTime?
+  actualArrival  DateTime?
+  status         TripStopStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  trip           Trip           @relation(fields: [tripId], references: [id])
+  location       HealthcareLocation? @relation(fields: [locationId], references: [id])
+
+  @@index([tenantId])
+  @@index([tripId])
+  @@index([status])
+  @@index([sequence])
+}
+
+enum TripStopType {
+  PICKUP
+  CLINIC
+  HOSPITAL
+  EXAM
+  PHARMACY
+  RETURN
+  DROPOFF
+}
+
+enum TripStopStatus {
+  PENDING
+  EN_ROUTE
+  ARRIVED
+  BOARDING
+  COMPLETED
+  SKIPPED
 }

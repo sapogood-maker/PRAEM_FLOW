@@ -51,6 +51,9 @@ dependencies:
   # Battery info
   battery_plus: ^6.0.1
 
+  # Maps / Navigation — open Google Maps or Waze for turn-by-turn navigation
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

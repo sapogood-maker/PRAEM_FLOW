@@ -81,7 +81,7 @@ export class HealthcareLocationsService {
     await this.findOne(id, tenantId);
     const { specialties, ...rest } = data;
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: any) => {
       if (Array.isArray(specialties)) {
         await tx.healthcareLocationSpecialty.deleteMany({ where: { healthcareLocationId: id } });
         await tx.healthcareLocationSpecialty.createMany({

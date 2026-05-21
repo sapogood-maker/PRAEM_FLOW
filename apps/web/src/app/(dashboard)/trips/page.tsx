@@ -13,6 +13,7 @@ const STATUS_BADGE: Record<string, string> = {
   BOARDING: 'bg-blue-900 text-blue-300',
   BOARDED: 'bg-blue-900 text-blue-300',
   IN_PROGRESS: 'bg-amber-900 text-amber-300',
+  ARRIVED: 'bg-cyan-900 text-cyan-300',
   COMPLETED: 'bg-emerald-900 text-emerald-300',
   NO_SHOW: 'bg-red-900 text-red-300',
   CANCELLED: 'bg-slate-800 text-slate-500',
@@ -24,12 +25,11 @@ export default function TripsPage() {
   const boardingEvents = useRealtimeStore((s) => s.boardingEvents);
   const activityFeed = useRealtimeStore((s) => s.activityFeed);
   const connected = useRealtimeStore((s) => s.connected);
+  const revision = useRealtimeStore((s) => s.revision);
 
-  // Auto-refresh when boarding events arrive
-  const boardingCount = boardingEvents.length;
   useEffect(() => {
     queryClient.invalidateQueries({ queryKey: ['trips'] });
-  }, [boardingCount, queryClient]);
+  }, [revision, queryClient]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['trips', statusFilter],
@@ -59,6 +59,7 @@ export default function TripsPage() {
     { value: 'CONFIRMED',   label: 'Confirmado' },
     { value: 'BOARDING',    label: 'Embarcando' },
     { value: 'IN_PROGRESS', label: 'Em Andamento' },
+    { value: 'ARRIVED',     label: 'Chegou' },
     { value: 'COMPLETED',   label: 'Finalizado' },
     { value: 'NO_SHOW',     label: 'Não Compareceu' },
     { value: 'CANCELLED',   label: 'Cancelado' },
@@ -143,7 +144,7 @@ export default function TripsPage() {
                       {t.status === 'SCHEDULED' && (
                         <button type='button' onClick={() => board.mutate(t.id)} className='rounded bg-blue-900/50 px-2 py-1 text-xs text-blue-300 hover:bg-blue-800 transition-colors'>Embarcar</button>
                       )}
-                      {(t.status === 'BOARDING' || t.status === 'BOARDED' || t.status === 'IN_PROGRESS') && (
+                      {(t.status === 'BOARDING' || t.status === 'BOARDED' || t.status === 'IN_PROGRESS' || t.status === 'ARRIVED') && (
                         <button type='button' onClick={() => complete.mutate(t.id)} className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>Concluir</button>
                       )}
                       {t.status === 'SCHEDULED' && (

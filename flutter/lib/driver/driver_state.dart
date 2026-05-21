@@ -18,7 +18,7 @@ class DriverState extends ChangeNotifier {
   Map<String, dynamic>? _activeRoute;
   List<Map<String, dynamic>> _patients = [];
   List<Map<String, dynamic>> _stops = [];
-  String _operationalStatus = 'OFFLINE'; // MOVING | IDLE | BOARDING | ARRIVED
+  String _operationalStatus = 'OFFLINE'; // START_ROUTE | BOARDING | IN_TRANSIT | ARRIVED | COMPLETED
 
   String? get deviceId => _deviceId;
   Map<String, dynamic>? get vehicle => _vehicle;
@@ -100,10 +100,21 @@ class DriverState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updatePatientStatus(String patientId, String status) {
-    final idx = _patients.indexWhere((p) => p['id'] == patientId);
+  void updateTripStatus(String tripId, String status) {
+    final idx = _patients.indexWhere((p) => p['id'] == tripId);
     if (idx != -1) {
       _patients[idx] = {..._patients[idx], 'status': status};
+      notifyListeners();
+    }
+  }
+
+  void updatePatientStatus(String patientId, String status) {
+    updateTripStatus(patientId, status);
+  }
+
+  void updateRouteStatus(String routeId, String status) {
+    if (_activeRoute != null && _activeRoute?['id'] == routeId) {
+      _activeRoute = {..._activeRoute!, 'status': status};
       notifyListeners();
     }
   }

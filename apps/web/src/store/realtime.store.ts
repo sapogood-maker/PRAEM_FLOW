@@ -10,10 +10,12 @@ type BoardingEvent = {
 
 type RealtimeState = {
   connected: boolean;
+  revision: number;
   vehiclePositions: VehiclePosition[];
   activityFeed: ActivityEvent[];
   boardingEvents: BoardingEvent[];
   setConnected: (connected: boolean) => void;
+  bumpRevision: () => void;
   updateVehiclePosition: (pos: VehiclePosition) => void;
   pushActivity: (event: Omit<ActivityEvent, 'id'>) => void;
   pushBoardingEvent: (event: BoardingEvent) => void;
@@ -21,11 +23,13 @@ type RealtimeState = {
 
 export const useRealtimeStore = create<RealtimeState>((set) => ({
   connected: false,
+  revision: 0,
   vehiclePositions: [],
   activityFeed: [],
   boardingEvents: [],
 
   setConnected: (connected) => set({ connected }),
+  bumpRevision: () => set((state) => ({ revision: state.revision + 1 })),
 
   updateVehiclePosition: (pos) =>
     set((state) => {

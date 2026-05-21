@@ -27,6 +27,16 @@ class _HomeScreenState extends State<HomeScreen> {
   final _dio = Dio();
   bool _loadingRoute = true;
 
+  Map<String, dynamic>? _activeTrip(DriverState driver) {
+    for (final trip in driver.patients) {
+      final status = trip['status'] as String? ?? 'SCHEDULED';
+      if (status != 'COMPLETED' && status != 'CANCELLED' && status != 'NO_SHOW') {
+        return trip;
+      }
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -83,6 +93,39 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
+    ws.on('route:started', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final routeId = event?['routeId'] as String?;
+      if (routeId != null) {
+        context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
+        context.read<DriverState>().setOperationalStatus('START_ROUTE');
+      }
+    });
+
+    ws.on('route.status_changed', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final routeId = event?['routeId'] as String?;
+      final status = event?['status'] as String?;
+      if (routeId != null && status != null) {
+        context.read<DriverState>().updateRouteStatus(routeId, status);
+        if (status == 'COMPLETED') {
+          context.read<DriverState>().setOperationalStatus('COMPLETED');
+        }
+      }
+    });
+
+    ws.on('route:completed', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final routeId = event?['routeId'] as String?;
+      if (routeId != null) {
+        context.read<DriverState>().updateRouteStatus(routeId, 'COMPLETED');
+        context.read<DriverState>().setOperationalStatus('COMPLETED');
+      }
+    });
+
     ws.on('operational.alert', (data) {
       if (!mounted) return;
       final alert = data as Map?;
@@ -93,12 +136,57 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     // ─── Listen for patient boarding events (emitted by API after QR scan) ──
+    ws.on('trip:boarding', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final tripId = event?['tripId'] as String?;
+      final routeId = event?['routeId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'BOARDING');
+        context.read<DriverState>().setOperationalStatus('BOARDING');
+      }
+      if (routeId != null) {
+        context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
+      }
+    });
+
+    ws.on('trip:started', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final tripId = event?['tripId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'IN_PROGRESS');
+        context.read<DriverState>().setOperationalStatus('IN_TRANSIT');
+      }
+    });
+
+    ws.on('trip:in_transit', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final tripId = event?['tripId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'IN_PROGRESS');
+        context.read<DriverState>().setOperationalStatus('IN_TRANSIT');
+      }
+    });
+
+    ws.on('trip:arrived', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final tripId = event?['tripId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'ARRIVED');
+        context.read<DriverState>().setOperationalStatus('ARRIVED');
+      }
+    });
+
     ws.on('patient:boarded', (data) {
       if (!mounted) return;
       final event = data as Map?;
-      final patientId = event?['patientId'] as String?;
-      if (patientId != null) {
-        context.read<DriverState>().updatePatientStatus(patientId, 'BOARDING');
+      final tripId = event?['tripId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'BOARDING');
+        context.read<DriverState>().setOperationalStatus('BOARDING');
       }
     });
 
@@ -106,9 +194,10 @@ class _HomeScreenState extends State<HomeScreen> {
     ws.on('trip:completed', (data) {
       if (!mounted) return;
       final event = data as Map?;
-      final patientId = event?['patientId'] as String?;
-      if (patientId != null) {
-        context.read<DriverState>().updatePatientStatus(patientId, 'COMPLETED');
+      final tripId = event?['tripId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'COMPLETED');
+        context.read<DriverState>().setOperationalStatus('COMPLETED');
       }
     });
 
@@ -227,31 +316,42 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _changeStatus(String status) async {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
-    final ws = context.read<WsService>();
-    final vehicleId = driver.vehicle?['id'] as String?;
     final routeId = driver.activeRoute?['id'] as String?;
-    if (vehicleId == null) return;
+    final trip = _activeTrip(driver);
 
-    driver.setOperationalStatus(status);
-    ws.emitStatusChange(vehicleId, status);
-    ws.emitDriverStatus(status, vehicleId: vehicleId, routeId: routeId);
-
-    // Persist route status transitions via REST
     try {
-      if (status == 'MOVING' && routeId != null) {
-        final routeStatus = driver.activeRoute?['status'] as String?;
-        if (routeStatus == 'PLANNED' || routeStatus == 'DISPATCHED' || routeStatus == 'PREPARING') {
-          await _dio.post(
-            '${AppConfig.apiBaseUrl}/routes/$routeId/start',
-            options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-          );
-        }
-      } else if (status == 'IDLE' && routeId != null) {
+      if (status == 'START_ROUTE') {
+        if (routeId == null) return;
         await _dio.post(
-          '${AppConfig.apiBaseUrl}/routes/$routeId/complete',
+          '${AppConfig.apiBaseUrl}/routes/$routeId/start',
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } else if (status == 'BOARDING') {
+        if (trip == null) return;
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/board',
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } else if (status == 'IN_TRANSIT') {
+        if (trip == null) return;
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/in-transit',
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } else if (status == 'ARRIVED') {
+        if (trip == null) return;
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/arrived',
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } else if (status == 'COMPLETED') {
+        if (trip == null) return;
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/complete',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
         );
       }
+      driver.setOperationalStatus(status);
     } catch (e) {
       debugPrint('[HomeScreen] status change error: $e');
     }
@@ -535,11 +635,11 @@ class _StatusButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const statuses = [
-      ('INICIAR ROTA', 'MOVING', Icons.play_arrow_rounded),
+      ('INICIAR ROTA', 'START_ROUTE', Icons.play_arrow_rounded),
       ('EMBARCANDO', 'BOARDING', Icons.people_rounded),
-      ('EM TRÂNSITO', 'MOVING', Icons.directions_car),
+      ('EM TRÂNSITO', 'IN_TRANSIT', Icons.directions_car),
       ('CHEGADA', 'ARRIVED', Icons.local_hospital_rounded),
-      ('FINALIZAR', 'IDLE', Icons.check_circle_rounded),
+      ('FINALIZAR', 'COMPLETED', Icons.check_circle_rounded),
     ];
     return Wrap(
       spacing: 8,

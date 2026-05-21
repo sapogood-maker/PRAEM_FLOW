@@ -30,6 +30,16 @@ export class TripsController {
     return this.tripsService.board(id, req.user.tenantId);
   }
 
+  @Post(':id/in-transit')
+  inTransit(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.tripsService.inTransit(id, req.user.tenantId);
+  }
+
+  @Post(':id/arrived')
+  arrived(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.tripsService.arrived(id, req.user.tenantId);
+  }
+
   @Post(':id/complete')
   complete(@Request() req: AuthRequest, @Param('id') id: string) {
     return this.tripsService.complete(id, req.user.tenantId);

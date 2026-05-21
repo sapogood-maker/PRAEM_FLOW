@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { getDispatchStatusLabel } from '@/lib/i18n';
+import { useRealtimeStore } from '@/store/realtime.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ function RouteKanbanCard({
 export default function CentralOperacionalPage() {
   const qc = useQueryClient();
   const [filterDate, setFilterDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const revision = useRealtimeStore((s) => s.revision);
 
   const { data: routes = [], isLoading } = useQuery<RouteCard[]>({
     queryKey: ['central-routes', filterDate],
@@ -142,6 +144,10 @@ export default function CentralOperacionalPage() {
     },
     refetchInterval: 30_000,
   });
+
+  useEffect(() => {
+    qc.invalidateQueries({ queryKey: ['central-routes'] });
+  }, [revision, qc]);
 
   const moveMutation = useMutation({
     mutationFn: async ({ routeId, status }: { routeId: string; status: string }) => {

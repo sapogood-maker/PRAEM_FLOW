@@ -68,7 +68,7 @@ export class DriversService {
     const hashed = await bcrypt.hash(data.password, 10);
     const cnhExpiry = new Date(data.cnhExpiry);
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: any) => {
       const user = await tx.user.create({
         data: {
           tenantId,
@@ -164,7 +164,7 @@ export class DriversService {
       },
     });
 
-    return drivers.map(d => {
+    return drivers.map((d: any) => {
       const wsConnected  = d.wsLastSeenAt    ? (now - new Date(d.wsLastSeenAt).getTime())    < WS_THRESHOLD_MS  : false;
       const gpsActive    = d.lastHeartbeatAt ? (now - new Date(d.lastHeartbeatAt).getTime()) < GPS_THRESHOLD_MS : false;
       const operational  = wsConnected && gpsActive;
@@ -217,4 +217,3 @@ export class DriversService {
     }
   }
 }
-

@@ -73,7 +73,7 @@ export class DailyOperationService {
     });
 
     await Promise.all(
-      tenants.map(async ({ id: tenantId }) => {
+      tenants.map(async ({ id: tenantId }: { id: string }) => {
         const existing = await this.prisma.dailyOperation.findFirst({
           where: { tenantId, date: today },
         });

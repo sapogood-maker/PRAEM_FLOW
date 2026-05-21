@@ -15,7 +15,6 @@ class WsService extends ChangeNotifier {
   bool _connected = false;
   String? _tenantId;
   String? _driverId;
-  String? _vehicleId;
   String? _deviceId;
 
   final Map<String, List<WsEventCallback>> _listeners = {};
@@ -33,7 +32,6 @@ class WsService extends ChangeNotifier {
   }) {
     _tenantId = tenantId;
     _driverId = driverId;
-    _vehicleId = vehicleId;
     _deviceId = deviceId;
     _socket?.disconnect();
 
@@ -118,6 +116,32 @@ class WsService extends ChangeNotifier {
     });
   }
 
+  void emitLocationUpdate({
+    required String vehicleId,
+    required double lat,
+    required double lng,
+    required double speed,
+    required double heading,
+    required double battery,
+    required String deviceId,
+    String? routeId,
+  }) {
+    if (_socket == null || !_connected) return;
+    _socket!.emit('driver:location:update', {
+      'vehicleId': vehicleId,
+      'tenantId': _tenantId,
+      if (_driverId != null) 'driverId': _driverId,
+      'lat': lat,
+      'lng': lng,
+      'speed': speed,
+      'heading': heading,
+      'batteryLevel': battery,
+      'deviceId': deviceId,
+      if (routeId != null) 'routeId': routeId,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+
   // ─── Emit driver heartbeat (presence signal) ───────────────────────────────
   void emitDriverHeartbeat({required double battery}) {
     if (_socket == null || !_connected || _driverId == null) return;
@@ -184,11 +208,16 @@ class WsService extends ChangeNotifier {
 
   static const List<String> _operationalEvents = [
     'vehicle.location_updated',
+    'driver:location:update',
     'vehicle.online',
     'vehicle.offline',
     'vehicle.idle',
     'vehicle.status_changed',
     'vehicle.heartbeat',
+    'trip:boarding',
+    'trip:started',
+    'trip:in_transit',
+    'trip:arrived',
     'trip.started',
     'trip.completed',
     'trip:completed',
@@ -203,6 +232,7 @@ class WsService extends ChangeNotifier {
     'driver.offline',
     'operational.alert',
     'route:started',
+    'route.status_changed',
     'route:completed',
     'route:dispatched',
     'route.dispatched',

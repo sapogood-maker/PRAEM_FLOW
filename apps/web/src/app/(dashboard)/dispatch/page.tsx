@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { getPriorityLabel, getDriverStatusLabel, getConfirmationStatusLabel } from '@/lib/i18n';
@@ -7,6 +8,7 @@ import {
   useOperationalDispatchStore,
   type DispatchQueueItem,
 } from '@/store/operationalDispatch.store';
+import { useRealtimeStore } from '@/store/realtime.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -160,6 +162,7 @@ function PatientCard({
 
 export default function DispatchPage() {
   const qc = useQueryClient();
+  const revision = useRealtimeStore((s) => s.revision);
 
   const {
     pendingDispatch,
@@ -189,6 +192,12 @@ export default function DispatchPage() {
     queryKey: ['dispatch-locations'],
     queryFn: () => api.get('/healthcare-locations', { params: { limit: 100 } }).then((r) => r.data),
   });
+
+  useEffect(() => {
+    qc.invalidateQueries({ queryKey: ['dispatch-queue'] });
+    qc.invalidateQueries({ queryKey: ['trips'] });
+    qc.invalidateQueries({ queryKey: ['routes'] });
+  }, [revision, qc]);
 
   const drivers: Driver[] = driversData?.items ?? driversData ?? [];
   const vehicles: Vehicle[] = vehiclesData?.items ?? vehiclesData ?? [];

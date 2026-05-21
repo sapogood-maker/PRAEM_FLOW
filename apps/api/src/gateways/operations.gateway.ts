@@ -155,6 +155,17 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     return { ok: true };
   }
 
+  @SubscribeMessage('driver:location:update')
+  onDriverLocationUpdate(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (room) {
+      this.server.to(room).emit('driver:location:update', safe);
+      this.server.to(room).emit('vehicle.location_updated', safe);
+    }
+    return { ok: true };
+  }
+
   /** driver.status_changed — motorista altera status (embarque, trânsito, etc.). */
   @SubscribeMessage('driver.status_changed')
   onDriverStatus(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
@@ -186,7 +197,33 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   onVehicleHeartbeat(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     const safe = sanitizePayload(payload) as Record<string, unknown>;
     const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('vehicle.heartbeat', safe);
+    if (room) {
+      this.server.to(room).emit('vehicle.heartbeat', safe);
+      this.server.to(room).emit('vehicle.location_updated', sanitizePayload({
+        vehicleId: safe['vehicleId'],
+        driverId: safe['driverId'],
+        routeId: safe['routeId'],
+        lat: safe['lat'],
+        lng: safe['lng'],
+        speed: safe['speed'],
+        heading: safe['heading'],
+        batteryLevel: safe['batteryLevel'] ?? safe['battery'],
+        operationalStatus: safe['operationalStatus'],
+        timestamp: safe['timestamp'],
+      }));
+      this.server.to(room).emit('driver:location:update', sanitizePayload({
+        vehicleId: safe['vehicleId'],
+        driverId: safe['driverId'],
+        routeId: safe['routeId'],
+        lat: safe['lat'],
+        lng: safe['lng'],
+        speed: safe['speed'],
+        heading: safe['heading'],
+        batteryLevel: safe['batteryLevel'] ?? safe['battery'],
+        operationalStatus: safe['operationalStatus'],
+        timestamp: safe['timestamp'],
+      }));
+    }
     return { ok: true };
   }
 
@@ -326,11 +363,11 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     this.server.to(`tenant:${tenantId}`).emit(event, sanitizePayload(payload));
   }
 
-  /** Emit directly to a driver's tablet — bypasses tenant broadcast for targeted delivery. */
   emitToDriver(driverId: string, event: string, payload: Record<string, unknown>) {
     this.server.to(`driver:${driverId}`).emit(event, sanitizePayload(payload));
   }
 
+  /** Emit an alert to the tenant room. */
   emitAlert(tenantId: string, alert: { type: string; message: string; severity: string; data?: unknown }) {
     this.server.to(`tenant:${tenantId}`).emit('operational.alert', sanitizePayload(alert));
   }

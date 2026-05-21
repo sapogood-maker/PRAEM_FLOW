@@ -1,12 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
+import { OperationalFlowService } from '../operational-flow/operational-flow.service';
 
 @Injectable()
 export class RoutesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: OperationsGateway,
+    private readonly flow: OperationalFlowService,
   ) {}
 
   async findAll(tenantId: string, query: { status?: string | string[]; date?: string; startDate?: string; endDate?: string; driverId?: string; vehicleId?: string; page?: number; limit?: number }) {
@@ -113,41 +115,15 @@ export class RoutesService {
 
   /** Driver starts the route — status PLANNED → ACTIVE */
   async startRoute(id: string, tenantId: string) {
-    const route = await this.findOne(id, tenantId);
-    const updated = await this.prisma.route.update({
-      where: { id },
-      data: { status: 'ACTIVE' },
-      include: { driver: { include: { user: { select: { name: true } } } }, vehicle: { select: { id: true, plate: true } } },
-    });
-    this.gateway.emitToTenant(tenantId, 'route:started', {
-      routeId: id,
-      driverId: route.driverId,
-      vehicleId: route.vehicleId,
-      destination: route.destination,
-      status: 'ACTIVE',
-    });
-    return updated;
+    return this.flow.startRoute(tenantId, id);
   }
 
   /** Route fully complete — status ACTIVE → COMPLETED */
   async completeRoute(id: string, tenantId: string) {
-    const route = await this.findOne(id, tenantId);
-    const updated = await this.prisma.route.update({
-      where: { id },
-      data: { status: 'COMPLETED' },
-    });
-    this.gateway.emitToTenant(tenantId, 'route:completed', {
-      routeId: id,
-      driverId: route.driverId,
-      vehicleId: route.vehicleId,
-      status: 'COMPLETED',
-    });
-    return updated;
+    return this.flow.completeRoute(tenantId, id);
   }
 
   optimize(id: string) {
     return { routeId: id, optimized: true, message: 'Rota otimizada por heurística de distância' };
   }
 }
-
-

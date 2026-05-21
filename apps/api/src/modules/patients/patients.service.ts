@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException, ForbiddenException 
 import { createHash, randomUUID } from 'crypto';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RealtimeGateway } from '../../gateways/realtime.gateway';
+import { OperationalFlowService } from '../operational-flow/operational-flow.service';
 
 export interface ListPatientsQuery {
   tenantId: string;
@@ -46,7 +46,7 @@ function stripSensitive(patient: Record<string, unknown>) {
 export class PatientsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gateway: RealtimeGateway,
+    private readonly flow: OperationalFlowService,
   ) {}
 
   async list({ tenantId, search, clinicalRisk, page = 1, limit = 20 }: ListPatientsQuery) {
@@ -296,33 +296,21 @@ export class PatientsService {
       data: { qrLastReadAt: new Date(), qrLastUsedAt: new Date() },
     });
 
-    // If routeId or tripId was provided, update Trip to BOARDING and emit WS event
+    // If routeId or tripId was provided, centralize the operational boarding flow.
     if (payload.routeId || payload.tripId) {
-      const tripWhere: any = { tenantId };
-      if (payload.tripId) {
-        tripWhere.id = payload.tripId;
-      } else {
-        tripWhere.routeId = payload.routeId;
-        tripWhere.patientId = patient.id;
-        tripWhere.status = { in: ['SCHEDULED', 'CONFIRMED'] };
-      }
-      const trip = await this.prisma.trip.findFirst({ where: tripWhere });
-      if (trip && ['SCHEDULED', 'CONFIRMED'].includes(trip.status)) {
-        const updated = await this.prisma.trip.update({
-          where: { id: trip.id },
-          data: { status: 'BOARDING', qrScanned: true, boardedAt: new Date() },
-        });
-        this.gateway.emitToTenant(tenantId, 'patient:boarded', {
-          tripId: trip.id,
-          patientId: patient.id,
-          patientName: patient.name,
-          operationalId: patient.operationalId,
-          routeId: trip.routeId,
-          boardedAt: updated.boardedAt,
-          vehicleId: payload.vehicleId ?? null,
-          status: 'BOARDING',
-        });
-      }
+      await this.flow.confirmBoarding(tenantId, {
+        routeId: payload.routeId,
+        tripId: payload.tripId,
+        patientId: patient.id,
+      }, {
+        vehicleId: payload.vehicleId ?? null,
+        driverId: payload.operatorId ?? null,
+        deviceId: (payload as any).deviceId ?? device ?? null,
+        checkpoint: payload.checkpoint ?? 'BOARDING',
+        gpsLat: payload.gpsLat ?? null,
+        gpsLng: payload.gpsLng ?? null,
+        source: payload.source ?? 'API',
+      });
     }
 
     const activeQueue = patient.queues[0] ?? null;
@@ -342,7 +330,7 @@ export class PatientsService {
         ? {
             destination: activeQueue.healthcareLocation?.name ?? activeQueue.destination,
             city: activeQueue.healthcareLocation?.city ?? null,
-            specialties: activeQueue.healthcareLocation?.specialties?.map((s) => s.specialty) ?? [],
+            specialties: activeQueue.healthcareLocation?.specialties?.map((s: { specialty: string }) => s.specialty) ?? [],
             priority: activeQueue.priority,
             status: activeQueue.status,
             appointmentDate: activeQueue.appointmentDate,

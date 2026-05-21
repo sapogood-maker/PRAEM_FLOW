@@ -126,14 +126,16 @@ class GpsTrackingService extends ChangeNotifier {
     }
   }
 
-  void _sendRest(Map<String, dynamic> payload) {
-    _dio.post(
-      '${AppConfig.apiBaseUrl}/tracking/heartbeat',
-      data: payload,
-      options: Options(headers: {'x-device-token': _authToken}),
-    ).catchError((e) {
+  Future<void> _sendRest(Map<String, dynamic> payload) async {
+    try {
+      await _dio.post(
+        '${AppConfig.apiBaseUrl}/tracking/heartbeat',
+        data: payload,
+        options: Options(headers: {'x-device-token': _authToken}),
+      );
+    } catch (e) {
       debugPrint('[GpsTracking] REST heartbeat error: $e');
-    });
+    }
   }
 
   Future<void> _tryFlush() async {

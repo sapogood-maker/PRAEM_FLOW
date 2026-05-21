@@ -91,7 +91,6 @@ export class TrackingService {
       batteryLevel: payload.batteryLevel,
       timestamp: now.toISOString(),
     });
-
     // Battery alert
     if (payload.batteryLevel !== undefined && payload.batteryLevel < 20) {
       this.opsGateway.emitAlert(payload.tenantId, {
@@ -121,7 +120,7 @@ export class TrackingService {
     });
 
     const now = Date.now();
-    return trackings.map(t => {
+    return trackings.map((t: any) => {
       const staleSecs = t.lastHeartbeatAt
         ? (now - new Date(t.lastHeartbeatAt).getTime()) / 1000
         : Infinity;
@@ -242,7 +241,7 @@ export class TrackingService {
       orderBy: { timestamp: 'desc' },
       select: { id: true },
     });
-    const keepIds = latest.map(r => r.id);
+    const keepIds = latest.map((r: any) => r.id);
 
     const deleted = await this.prisma.vehicleTracking.deleteMany({
       where: {
@@ -264,4 +263,3 @@ export class TrackingService {
     return null;
   }
 }
-

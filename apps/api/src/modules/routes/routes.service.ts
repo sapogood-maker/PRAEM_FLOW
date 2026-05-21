@@ -104,9 +104,14 @@ export class RoutesService {
   }
 
   /** Driver starts the route — status PLANNED → ACTIVE */
-  async startRoute(id: string, tenantId: string) {
-    this.logger.log(`[ROUTE] startRoute tenantId=${tenantId} routeId=${id}`);
-    return this.flow.startRoute(tenantId, id);
+  async startRoute(id: string, tenantId: string, input?: { tripId?: string; source?: string }) {
+    this.logger.log(`[ROUTE] startRoute tenantId=${tenantId} routeId=${id} tripId=${input?.tripId ?? '-'} source=${input?.source ?? 'routes.start'}`);
+    return this.flow.startRoute(
+      tenantId,
+      id,
+      { source: input?.source ?? 'routes.start' },
+      input?.tripId,
+    );
   }
 
   /** Route fully complete — status ACTIVE → COMPLETED */

@@ -31,7 +31,7 @@ type OperationalState =
 
 const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
   DISPATCHED: ['DRIVER_ACCEPTED', 'CANCELLED'],
-  DRIVER_ACCEPTED: ['BOARDING', 'CANCELLED'],
+  DRIVER_ACCEPTED: ['BOARDING', 'IN_TRANSIT', 'CANCELLED'],
   BOARDING: ['IN_TRANSIT', 'CANCELLED'],
   IN_TRANSIT: ['ARRIVED', 'CANCELLED'],
   ARRIVED: ['COMPLETED', 'CANCELLED'],
@@ -77,8 +77,33 @@ export class OperationalFlowService {
     );
   }
 
-  async startRoute(tenantId: string, routeId: string, context: FlowContext = {}) {
-    return this.transitionState(tenantId, { routeId }, 'DRIVER_ACCEPTED', context);
+  async startRoute(tenantId: string, routeId: string, context: FlowContext = {}, requestedTripId?: string) {
+    const startTrip = await this.resolveStartTrip(tenantId, routeId, requestedTripId);
+    if (!startTrip) {
+      this.logger.warn(`[OPS] transition rejected reason=no_active_trip tenantId=${tenantId} routeId=${routeId} requestedTripId=${requestedTripId ?? '-'}`);
+      throw new BadRequestException('No active trip available to start this route');
+    }
+
+    const previousState = this.deriveOperationalState(startTrip.route.status, startTrip.status);
+    let nextState: OperationalState;
+    if (previousState === 'DISPATCHED') {
+      nextState = 'DRIVER_ACCEPTED';
+    } else if (previousState === 'DRIVER_ACCEPTED') {
+      nextState = startTrip.status === 'BOARDING' ? 'IN_TRANSIT' : 'BOARDING';
+    } else if (previousState === 'BOARDING') {
+      nextState = 'IN_TRANSIT';
+    } else {
+      this.logger.warn(`[OPS] transition rejected reason=invalid_start_state tenantId=${tenantId} routeId=${routeId} tripId=${startTrip.id} previous=${previousState}`);
+      throw new BadRequestException(`Route start is not allowed from state ${previousState}`);
+    }
+
+    this.logger.log(`[OPS] startRoute resolved tripId=${startTrip.id} previous=${previousState} next=${nextState} tenantId=${tenantId} routeId=${routeId}`);
+    return this.transitionState(
+      tenantId,
+      { routeId, tripId: startTrip.id },
+      nextState,
+      context,
+    );
   }
 
   async completeRoute(tenantId: string, routeId: string, context: FlowContext = {}) {
@@ -117,9 +142,11 @@ export class OperationalFlowService {
     const currentState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
     this.logger.log(`[OPS] current state tenantId=${tenantId} current=${currentState} target=${targetState} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'}`);
     if (!allowNoop && currentState === targetState) {
+      this.logger.warn(`[OPS] transition rejected reason=self_transition tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} state=${currentState}`);
       throw new BadRequestException(`Transition ${currentState} -> ${targetState} is already applied`);
     }
     if (!allowNoop && !TRANSITION_GRAPH[currentState].includes(targetState)) {
+      this.logger.warn(`[OPS] transition rejected reason=invalid_path tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} current=${currentState} target=${targetState}`);
       throw new BadRequestException(`Invalid transition: ${currentState} -> ${targetState}`);
     }
 
@@ -362,6 +389,32 @@ export class OperationalFlowService {
 
     if (!trip) throw new NotFoundException('Trip not found');
     return trip;
+  }
+
+  private async resolveStartTrip(tenantId: string, routeId: string, requestedTripId?: string): Promise<FlowTrip | null> {
+    const activeStatuses = ['BOARDING', 'SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] as any[];
+
+    if (requestedTripId) {
+      const requested = await this.prisma.trip.findFirst({
+        where: { tenantId, routeId, id: requestedTripId, status: { in: activeStatuses } },
+        include: { route: true },
+      });
+      if (requested) {
+        this.logger.log(`[OPS] resolved tripId from request routeId=${routeId} tripId=${requestedTripId}`);
+        return requested as unknown as FlowTrip;
+      }
+      this.logger.warn(`[OPS] requested tripId not active routeId=${routeId} tripId=${requestedTripId}`);
+    }
+
+    const resolved = await this.prisma.trip.findFirst({
+      where: { tenantId, routeId, status: { in: activeStatuses } },
+      include: { route: true },
+      orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+    });
+    if (resolved) {
+      this.logger.log(`[OPS] resolved tripId automatically routeId=${routeId} tripId=${resolved.id} status=${resolved.status}`);
+    }
+    return resolved as unknown as FlowTrip | null;
   }
 
   private async findLatestQueue(tenantId: string, patientId: string) {

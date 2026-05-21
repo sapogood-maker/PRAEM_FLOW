@@ -51,9 +51,9 @@ export class RoutesController {
   }
 
   @Post(':id/start')
-  startRoute(@Request() req: AuthRequest, @Param('id') id: string) {
-    this.logger.log(`[ROUTE] REST start request tenantId=${req.user.tenantId} routeId=${id}`);
-    return this.routesService.startRoute(id, req.user.tenantId);
+  startRoute(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { tripId?: string; source?: string }) {
+    this.logger.log(`[ROUTE] REST start request tenantId=${req.user.tenantId} routeId=${id} tripId=${body?.tripId ?? '-'} source=${body?.source ?? '-'}`);
+    return this.routesService.startRoute(id, req.user.tenantId, sanitizePayload(body));
   }
 
   @Post(':id/complete')

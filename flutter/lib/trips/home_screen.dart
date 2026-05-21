@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _loadRoute(auth, driver).then((_) {
           if (!mounted) return;
           if (driver.activeRoute != null) {
-            Navigator.pushNamed(context, AppRoutes.tripDetails);
+            Navigator.pushNamed(context, AppRoutes.trip);
           }
         });
       }
@@ -427,7 +427,7 @@ class _RouteCard extends StatelessWidget {
                           letterSpacing: 1)),
                   const Spacer(),
                   GestureDetector(
-                    onTap: () => Navigator.pushNamed(context, AppRoutes.tripDetails),
+                    onTap: () => Navigator.pushNamed(context, AppRoutes.trip),
                     child: const Text('VER DETALHES →',
                         style: TextStyle(
                             color: AppColors.primary,

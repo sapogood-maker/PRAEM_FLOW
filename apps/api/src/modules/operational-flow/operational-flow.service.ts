@@ -136,6 +136,7 @@ export class OperationalFlowService {
       trip = await this.prisma.trip.update({
         where: { id: trip.id },
         data: { status: 'BOARDING', qrScanned: true, boardedAt: now },
+        include: { route: true },
       });
       route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
       queueUpdate.status = 'BOARDING';
@@ -144,12 +145,20 @@ export class OperationalFlowService {
       queueUpdate.confirmedAt = now;
     }
     if (targetState === 'IN_TRANSIT' && trip) {
-      trip = await this.prisma.trip.update({ where: { id: trip.id }, data: { status: 'IN_PROGRESS' } });
+      trip = await this.prisma.trip.update({
+        where: { id: trip.id },
+        data: { status: 'IN_PROGRESS' },
+        include: { route: true },
+      });
       queueUpdate.status = 'IN_TRANSIT';
       queueUpdate.departedAt = now;
     }
     if (targetState === 'ARRIVED' && trip) {
-      trip = await this.prisma.trip.update({ where: { id: trip.id }, data: { status: 'ARRIVED' } });
+      trip = await this.prisma.trip.update({
+        where: { id: trip.id },
+        data: { status: 'ARRIVED' },
+        include: { route: true },
+      });
       queueUpdate.status = 'ARRIVED';
       queueUpdate.arrivedAt = now;
     }
@@ -158,6 +167,7 @@ export class OperationalFlowService {
         trip = await this.prisma.trip.update({
           where: { id: trip.id },
           data: { status: 'COMPLETED', completedAt: now },
+          include: { route: true },
         });
         queueUpdate.status = 'COMPLETED';
       }
@@ -174,7 +184,11 @@ export class OperationalFlowService {
     }
     if (targetState === 'CANCELLED') {
       if (trip) {
-        trip = await this.prisma.trip.update({ where: { id: trip.id }, data: { status: 'CANCELLED' } });
+        trip = await this.prisma.trip.update({
+          where: { id: trip.id },
+          data: { status: 'CANCELLED' },
+          include: { route: true },
+        });
         queueUpdate.status = 'CANCELLED';
       } else {
         route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'CANCELLED' } });

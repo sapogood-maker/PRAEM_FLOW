@@ -392,29 +392,95 @@ export class OperationalFlowService {
   }
 
   private async resolveStartTrip(tenantId: string, routeId: string, requestedTripId?: string): Promise<FlowTrip | null> {
-    const activeStatuses = ['BOARDING', 'SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] as any[];
+    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS'] as any[];
+    const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,BOARDING,IN_PROGRESS';
+
+    const routeAnyTenant = await this.prisma.route.findUnique({
+      where: { id: routeId },
+      select: {
+        id: true,
+        tenantId: true,
+        status: true,
+        trips: { select: { id: true, tenantId: true, status: true, patientId: true } },
+      },
+    });
+
+    if (!routeAnyTenant) {
+      this.logger.error(`[OPS] route-trips diagnostics reason=route_not_found routeId=${routeId} tenantId=${tenantId}`);
+      return null;
+    }
+
+    if (routeAnyTenant.tenantId !== tenantId) {
+      this.logger.error(`[OPS] route-trips diagnostics reason=tenant_mismatch routeId=${routeId} routeTenantId=${routeAnyTenant.tenantId} requestTenantId=${tenantId}`);
+      return null;
+    }
+
+    const routeTrips: Array<{ id: string; tenantId: string; status: string; patientId: string }> = routeAnyTenant.trips
+      .filter((t: { id: string; tenantId: string; status: string; patientId: string }) => t.tenantId === tenantId);
+    const tripStatuses = routeTrips.map((t: { id: string; tenantId: string; status: string; patientId: string }) => t.status).join(',') || '-';
+    this.logger.log(
+      `[OPS] route-trips diagnostics routeId=${routeId} tenantId=${tenantId} routeStatus=${routeAnyTenant.status} totalTrips=${routeTrips.length} tripStatuses=${tripStatuses} activeFilter=${allowedOperationalStartStatuses}`,
+    );
 
     if (requestedTripId) {
-      const requested = await this.prisma.trip.findFirst({
-        where: { tenantId, routeId, id: requestedTripId, status: { in: activeStatuses } },
-        include: { route: true },
-      });
-      if (requested) {
-        this.logger.log(`[OPS] resolved tripId from request routeId=${routeId} tripId=${requestedTripId}`);
-        return requested as unknown as FlowTrip;
+      const requestedTrip = routeTrips.find((t: { id: string; tenantId: string; status: string; patientId: string }) => t.id === requestedTripId) ?? null;
+      if (!requestedTrip) {
+        this.logger.warn(`[OPS] active trip resolution requestedTripNotLinked routeId=${routeId} tripId=${requestedTripId}`);
+      } else if (!activeStatuses.includes(requestedTrip.status as any)) {
+        this.logger.warn(`[OPS] active trip resolution requestedTripInvalidStatus routeId=${routeId} tripId=${requestedTrip.id} status=${requestedTrip.status}`);
+      } else {
+        const resolvedRequested = await this.findTrip(tenantId, { routeId, tripId: requestedTrip.id }, [
+          'SCHEDULED',
+          'CONFIRMED',
+          'BOARDING',
+          'IN_PROGRESS',
+          'ARRIVED',
+          'COMPLETED',
+          'CANCELLED',
+        ]);
+        this.logger.log(`[OPS] resolved tripId from request routeId=${routeId} tripId=${requestedTrip.id}`);
+        return resolvedRequested;
       }
-      this.logger.warn(`[OPS] requested tripId not active routeId=${routeId} tripId=${requestedTripId}`);
     }
 
-    const resolved = await this.prisma.trip.findFirst({
-      where: { tenantId, routeId, status: { in: activeStatuses } },
-      include: { route: true },
-      orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
-    });
-    if (resolved) {
-      this.logger.log(`[OPS] resolved tripId automatically routeId=${routeId} tripId=${resolved.id} status=${resolved.status}`);
+    const autoCandidates = routeTrips.filter((t: { id: string; tenantId: string; status: string; patientId: string }) => activeStatuses.includes(t.status as any));
+    if (routeTrips.length === 1 && autoCandidates.length === 0) {
+      const onlyTrip = routeTrips[0];
+      if (!['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(String(onlyTrip.status))) {
+        const resolvedSingle = await this.findTrip(tenantId, { routeId, tripId: onlyTrip.id }, [
+          'SCHEDULED',
+          'CONFIRMED',
+          'BOARDING',
+          'IN_PROGRESS',
+          'ARRIVED',
+          'COMPLETED',
+          'CANCELLED',
+        ]);
+        this.logger.log(`[OPS] resolved tripId safely by single-route-trip routeId=${routeId} tripId=${onlyTrip.id} status=${onlyTrip.status}`);
+        return resolvedSingle;
+      }
     }
-    return resolved as unknown as FlowTrip | null;
+
+    if (autoCandidates.length === 0) {
+      this.logger.error(`[OPS] active trip resolution failed reason=no_candidate routeId=${routeId} tenantId=${tenantId} totalTrips=${routeTrips.length} candidateTrips=${autoCandidates.length}`);
+      return null;
+    }
+
+    autoCandidates.sort(
+      (a: { id: string; tenantId: string; status: string; patientId: string }, b: { id: string; tenantId: string; status: string; patientId: string }) => a.id.localeCompare(b.id),
+    );
+    const chosen = autoCandidates[0];
+    const resolved = await this.findTrip(tenantId, { routeId, tripId: chosen.id }, [
+      'SCHEDULED',
+      'CONFIRMED',
+      'BOARDING',
+      'IN_PROGRESS',
+      'ARRIVED',
+      'COMPLETED',
+      'CANCELLED',
+    ]);
+    this.logger.log(`[OPS] resolved tripId automatically routeId=${routeId} tripId=${resolved.id} status=${resolved.status}`);
+    return resolved;
   }
 
   private async findLatestQueue(tenantId: string, patientId: string) {

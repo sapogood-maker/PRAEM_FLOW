@@ -30,6 +30,12 @@ export class RoutesController {
     return this.routesService.findOne(id, req.user.tenantId);
   }
 
+  @Get(':id/diagnostics/trips')
+  diagnostics(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[ROUTE] diagnostics request tenantId=${req.user.tenantId} routeId=${id}`);
+    return this.routesService.diagnostics(id, req.user.tenantId);
+  }
+
   @Post()
   create(@Request() req: AuthRequest, @Body() body: any) {
     return this.routesService.create(req.user.tenantId, sanitizePayload(body));

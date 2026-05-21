@@ -62,6 +62,38 @@ export class RoutesService {
     return route;
   }
 
+  async diagnostics(id: string, tenantId: string) {
+    const route = await this.prisma.route.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        tenantId: true,
+        status: true,
+        dispatchType: true,
+        date: true,
+        driverId: true,
+        vehicleId: true,
+        trips: {
+          select: { id: true, tenantId: true, patientId: true, status: true, boardedAt: true, completedAt: true },
+          orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+        },
+      },
+    });
+    if (!route) throw new NotFoundException('Route not found');
+    return {
+      routeId: route.id,
+      tenantId: route.tenantId,
+      routeStatus: route.status,
+      dispatchType: route.dispatchType,
+      date: route.date,
+      driverId: route.driverId,
+      vehicleId: route.vehicleId,
+      totalTrips: route.trips.length,
+      tripStatuses: route.trips.map((t: { status: string }) => t.status),
+      trips: route.trips,
+    };
+  }
+
   async create(tenantId: string, data: any) {
     const payload: any = { ...data, tenantId };
     if (payload.scheduledAt && typeof payload.scheduledAt === 'string') {

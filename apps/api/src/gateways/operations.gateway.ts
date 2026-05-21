@@ -448,7 +448,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
             patient: true,
             stops: { orderBy: { sequence: 'asc' } },
           },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
         },
       },
       orderBy: { date: 'desc' },

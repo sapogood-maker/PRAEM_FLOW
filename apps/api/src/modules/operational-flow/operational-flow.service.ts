@@ -41,6 +41,23 @@ const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
 
 const TERMINAL_TRIP_STATUSES = ['COMPLETED', 'CANCELLED', 'NO_SHOW'];
 
+type FlowTrip = {
+  id: string;
+  tenantId: string;
+  routeId: string;
+  patientId: string;
+  status: string;
+  boardedAt: Date | null;
+  completedAt: Date | null;
+  route: {
+    id: string;
+    tenantId: string;
+    driverId: string | null;
+    vehicleId: string | null;
+    status: string;
+  };
+};
+
 @Injectable()
 export class OperationalFlowService {
   constructor(
@@ -294,7 +311,7 @@ export class OperationalFlowService {
     return route;
   }
 
-  private async findTrip(tenantId: string, scope: FlowScope, statuses: string[]) {
+  private async findTrip(tenantId: string, scope: FlowScope, statuses: string[]): Promise<FlowTrip> {
     const trip = await this.prisma.trip.findFirst({
       where: {
         tenantId,
@@ -312,7 +329,7 @@ export class OperationalFlowService {
         },
         patient: { select: { id: true, name: true, operationalId: true } },
       },
-      orderBy: [{ boardedAt: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
     });
 
     if (!trip) throw new NotFoundException('Trip not found');

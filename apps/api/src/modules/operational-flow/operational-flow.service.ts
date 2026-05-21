@@ -111,7 +111,66 @@ export class OperationalFlowService {
   }
 
   async confirmBoarding(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
-    return this.transitionState(tenantId, scope, 'BOARDING', context);
+    const entity = await this.loadEntity(tenantId, scope);
+    const previousState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
+    this.logger.log(
+      `[OPS] qr boarding evaluate tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} previous=${previousState}`,
+    );
+
+    if (previousState === 'DISPATCHED') {
+      this.logger.log(
+        `[OPS] qr boarding auto-transition tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} decision=DRIVER_ACCEPTED_before_BOARDING`,
+      );
+      await this.transitionState(
+        tenantId,
+        {
+          routeId: entity.route.id,
+          tripId: entity.trip?.id ?? scope.tripId,
+          patientId: scope.patientId,
+        },
+        'DRIVER_ACCEPTED',
+        { ...context, source: context.source ?? 'QR_AUTO_START' },
+      );
+    }
+
+    const refreshed = await this.loadEntity(tenantId, {
+      routeId: entity.route.id,
+      tripId: entity.trip?.id ?? scope.tripId,
+      patientId: scope.patientId,
+    });
+    const nextResolvedState = this.deriveOperationalState(refreshed.route.status, refreshed.trip?.status ?? null);
+    this.logger.log(
+      `[OPS] qr boarding resolved tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} previous=${nextResolvedState} next=BOARDING`,
+    );
+
+    if (nextResolvedState === 'BOARDING') {
+      this.logger.log(
+        `[OPS] qr boarding accepted idempotent tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=already_boarding`,
+      );
+      const queue = refreshed.trip ? await this.findLatestQueue(tenantId, refreshed.trip.patientId) : null;
+      return { trip: refreshed.trip, route: refreshed.route, queue };
+    }
+
+    if (!['DRIVER_ACCEPTED', 'DISPATCHED'].includes(nextResolvedState)) {
+      this.logger.warn(
+        `[OPS] qr boarding rejected tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=invalid_qr_state previous=${nextResolvedState}`,
+      );
+      throw new BadRequestException(`QR boarding not allowed from state ${nextResolvedState}`);
+    }
+
+    this.logger.log(
+      `[OPS] qr boarding accepted tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} previous=${nextResolvedState} next=BOARDING`,
+    );
+    return this.transitionState(
+      tenantId,
+      {
+        routeId: refreshed.route.id,
+        tripId: refreshed.trip?.id ?? scope.tripId,
+        patientId: scope.patientId,
+      },
+      'BOARDING',
+      context,
+    );
   }
 
   async startInTransit(tenantId: string, scope: FlowScope, context: FlowContext = {}) {

@@ -1,13 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { OperationsGateway } from '../../gateways/operations.gateway';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
 
 @Injectable()
 export class RoutesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gateway: OperationsGateway,
     private readonly flow: OperationalFlowService,
   ) {}
 
@@ -76,21 +74,12 @@ export class RoutesService {
       payload.status = payload.dispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED';
     }
     const route = await this.prisma.route.create({ data: payload });
-    // Only notify via WebSocket for immediate dispatch — scheduled routes are
-    // saved for future execution and must not trigger realtime driver alerts.
     if (route.driverId && route.dispatchType === 'IMMEDIATE') {
-      const dispatchPayload = {
-        routeId: route.id,
+      await this.flow.recordDispatch(tenantId, route.id, {
         driverId: route.driverId,
         vehicleId: route.vehicleId,
-        date: route.date,
-        status: route.status,
-        timestamp: new Date().toISOString(),
-      };
-      // Broadcast to entire tenant room (web central panel)
-      this.gateway.emitToTenant(tenantId, 'route:dispatched', dispatchPayload);
-      // Also push directly to the driver's tablet room for reliable delivery
-      this.gateway.emitToDriver(route.driverId, 'route:dispatched', dispatchPayload);
+        source: 'dispatch',
+      });
     }
     return route;
   }

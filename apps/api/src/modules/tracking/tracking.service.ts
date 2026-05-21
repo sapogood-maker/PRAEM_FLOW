@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { sanitizePayload } from '../../common/sanitize';
+import { AuditService } from '../audit/audit.service';
 
 export type VehicleTrackingPayload = {
   vehicleId: string;
@@ -36,6 +37,7 @@ export class TrackingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly opsGateway: OperationsGateway,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -83,6 +85,9 @@ export class TrackingService {
     // Emit real-time location update
     this.opsGateway.emitToTenant(payload.tenantId, 'vehicle.location_updated', {
       vehicleId: payload.vehicleId,
+      driverId: payload.driverId ?? null,
+      routeId: payload.routeId ?? null,
+      tenantId: payload.tenantId,
       lat: payload.lat,
       lng: payload.lng,
       speed: payload.speed,
@@ -90,6 +95,24 @@ export class TrackingService {
       operationalStatus,
       batteryLevel: payload.batteryLevel,
       timestamp: now.toISOString(),
+    });
+    await this.audit.log({
+      tenantId: payload.tenantId,
+      userId: payload.driverId ?? payload.vehicleId,
+      action: 'GPS_POSITION',
+      entity: 'vehicle_tracking',
+      entityId: record.id,
+      after: {
+        vehicleId: payload.vehicleId,
+        driverId: payload.driverId ?? null,
+        routeId: payload.routeId ?? null,
+        lat: payload.lat,
+        lng: payload.lng,
+        speed: payload.speed ?? null,
+        heading: payload.heading ?? null,
+        batteryLevel: payload.batteryLevel ?? null,
+        timestamp: now.toISOString(),
+      },
     });
     // Battery alert
     if (payload.batteryLevel !== undefined && payload.batteryLevel < 20) {

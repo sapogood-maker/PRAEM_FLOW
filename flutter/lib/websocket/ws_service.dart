@@ -4,6 +4,7 @@
 // Auto-reconnects; joins driver-specific room; forwards events to listeners.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/app_config.dart';
@@ -16,6 +17,7 @@ class WsService extends ChangeNotifier {
   String? _tenantId;
   String? _driverId;
   String? _deviceId;
+  Timer? _pingTimer;
 
   final Map<String, List<WsEventCallback>> _listeners = {};
 
@@ -60,11 +62,24 @@ class WsService extends ChangeNotifier {
             if (deviceId != null) 'deviceId': deviceId,
           });
         }
+        _socket!.emit('ops:state:request', {
+          'tenantId': tenantId,
+          if (driverId != null) 'driverId': driverId,
+        });
+        _pingTimer?.cancel();
+        _pingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+          if (_connected) {
+            _socket!.emit('ops:ping', {'pingId': DateTime.now().millisecondsSinceEpoch.toString()});
+          }
+        });
+        _dispatch('ws:connected', {'tenantId': tenantId, 'driverId': driverId});
         notifyListeners();
         debugPrint('[WsService] connected to /operations as driver:$driverId');
       })
       ..onDisconnect((_) {
         _connected = false;
+        _pingTimer?.cancel();
+        _dispatch('ws:disconnected', {'tenantId': tenantId, 'driverId': driverId});
         notifyListeners();
         debugPrint('[WsService] disconnected');
       })
@@ -81,6 +96,7 @@ class WsService extends ChangeNotifier {
   }
 
   void disconnect() {
+    _pingTimer?.cancel();
     _socket?.disconnect();
     _socket = null;
     _connected = false;
@@ -241,10 +257,13 @@ class WsService extends ChangeNotifier {
     'route.started',
     'route.completed',
     'return.requested',
+    'ops:state:replay',
+    'ops:pong',
   ];
 
   @override
   void dispose() {
+    _pingTimer?.cancel();
     _socket?.disconnect();
     super.dispose();
   }

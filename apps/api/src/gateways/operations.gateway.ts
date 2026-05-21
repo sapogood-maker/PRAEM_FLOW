@@ -8,9 +8,17 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { sanitizePayload } from '../common/sanitize';
 import { PrismaService } from '../prisma/prisma.service';
+
+type SocketAuthUser = {
+  userId: string;
+  tenantId: string;
+  role: string;
+  driverId?: string | null;
+};
 
 /**
  * OperationsGateway — dedicated /operations namespace.
@@ -25,18 +33,30 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   private readonly logger = new Logger(OperationsGateway.name);
 
   private connectedClients = new Set<string>();
+  private socketUsers = new Map<string, SocketAuthUser>();
 
   /** socket.id → { driverId, tenantId } for disconnect tracking */
   private driverSockets = new Map<string, { driverId: string; tenantId: string }>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   handleConnection(client: Socket) {
+    const authUser = this.authenticateSocket(client);
+    if (!authUser) {
+      client.disconnect(true);
+      return;
+    }
+    this.socketUsers.set(client.id, authUser);
     this.connectedClients.add(client.id);
+    client.join(`tenant:${authUser.tenantId}`);
   }
 
   async handleDisconnect(client: Socket) {
     this.connectedClients.delete(client.id);
+    this.socketUsers.delete(client.id);
     const info = this.driverSockets.get(client.id);
     if (info) {
       this.driverSockets.delete(client.id);
@@ -61,19 +81,23 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
 
   @SubscribeMessage('join:tenant')
   onJoinTenant(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    if (typeof safe['tenantId'] === 'string') {
-      client.join(`tenant:${safe['tenantId']}`);
-    }
+    const tenantId = typeof safe['tenantId'] === 'string' ? safe['tenantId'] : user.tenantId;
+    if (tenantId !== user.tenantId) return { ok: false, error: 'forbidden' };
+    client.join(`tenant:${tenantId}`);
     return { ok: true };
   }
 
   @SubscribeMessage('leave:tenant')
   onLeaveTenant(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    if (typeof safe['tenantId'] === 'string') {
-      client.leave(`tenant:${safe['tenantId']}`);
-    }
+    const tenantId = typeof safe['tenantId'] === 'string' ? safe['tenantId'] : user.tenantId;
+    if (tenantId !== user.tenantId) return { ok: false, error: 'forbidden' };
+    client.leave(`tenant:${tenantId}`);
     return { ok: true };
   }
 
@@ -85,16 +109,24 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
    */
   @SubscribeMessage('join:driver')
   async onJoinDriver(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const tenantId = safe['tenantId'];
-    const driverId = safe['driverId'];
+    const tenantId = user.tenantId;
+    const driverId = typeof safe['driverId'] === 'string'
+      ? safe['driverId']
+      : (user.driverId ?? null);
     const deviceId = safe['deviceId'];
-    if (typeof tenantId === 'string') client.join(`tenant:${tenantId}`);
+    if (user.role === 'DRIVER' && user.driverId && driverId !== user.driverId) {
+      return { ok: false, error: 'forbidden' };
+    }
+
+    client.join(`tenant:${tenantId}`);
     if (typeof driverId === 'string') client.join(`driver:${driverId}`);
     if (typeof deviceId === 'string') client.join(`device:${deviceId}`);
 
     // Record WS connection timestamp for operational status tracking
-    if (typeof driverId === 'string' && typeof tenantId === 'string') {
+    if (typeof driverId === 'string') {
       this.driverSockets.set(client.id, { driverId, tenantId });
       const now = new Date();
       try {
@@ -111,8 +143,32 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
         tenantId,
         timestamp: now.toISOString(),
       }));
+      await this.emitStateReplay(client, tenantId, driverId);
     }
 
+    return { ok: true };
+  }
+
+  @SubscribeMessage('ops:state:request')
+  async onStateRequest(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    const requestedDriverId = typeof safe['driverId'] === 'string' ? safe['driverId'] : user.driverId ?? null;
+    if (user.role === 'DRIVER' && requestedDriverId && requestedDriverId !== user.driverId) {
+      return { ok: false, error: 'forbidden' };
+    }
+    await this.emitStateReplay(client, user.tenantId, requestedDriverId);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('ops:ping')
+  onOpsPing(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    client.emit('ops:pong', sanitizePayload({
+      at: new Date().toISOString(),
+      pingId: safe['pingId'] ?? null,
+    }));
     return { ok: true };
   }
 
@@ -123,12 +179,17 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
    */
   @SubscribeMessage('driver.heartbeat')
   async onDriverHeartbeat(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const tenantId = typeof safe['tenantId'] === 'string' ? safe['tenantId'] : null;
-    const driverId = typeof safe['driverId'] === 'string' ? safe['driverId'] : null;
+    const tenantId = user.tenantId;
+    const driverId = typeof safe['driverId'] === 'string' ? safe['driverId'] : user.driverId ?? null;
+    if (user.role === 'DRIVER' && user.driverId && driverId !== user.driverId) {
+      return { ok: false, error: 'forbidden' };
+    }
 
     if (tenantId) {
-      this.server.to(`tenant:${tenantId}`).emit('driver.heartbeat', safe);
+      this.server.to(`tenant:${tenantId}`).emit('driver.heartbeat', sanitizePayload({ ...safe, tenantId, driverId }));
     }
 
     if (driverId && tenantId) {
@@ -157,8 +218,11 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
 
   @SubscribeMessage('driver:location:update')
   onDriverLocationUpdate(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (!this.canEmitDriverEvent(user, safe)) return { ok: false, error: 'forbidden' };
+    const room = `tenant:${user.tenantId}`;
     if (room) {
       this.server.to(room).emit('driver:location:update', safe);
       this.server.to(room).emit('vehicle.location_updated', safe);
@@ -169,8 +233,11 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   /** driver.status_changed — motorista altera status (embarque, trânsito, etc.). */
   @SubscribeMessage('driver.status_changed')
   onDriverStatus(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    if (!this.canEmitDriverEvent(user, safe)) return { ok: false, error: 'forbidden' };
+    const room = `tenant:${user.tenantId}`;
     if (room) this.server.to(room).emit('driver.status_changed', safe);
     return { ok: true };
   }
@@ -179,24 +246,20 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
 
   @SubscribeMessage('vehicle.location_updated')
   onVehicleLocation(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('vehicle.location_updated', safe);
-    return { ok: true };
+    return this.emitTenantScoped('vehicle.location_updated', payload, client);
   }
 
   @SubscribeMessage('vehicle.status_changed')
   onVehicleStatus(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('vehicle.status_changed', safe);
-    return { ok: true };
+    return this.emitTenantScoped('vehicle.status_changed', payload, client);
   }
 
   @SubscribeMessage('vehicle.heartbeat')
   onVehicleHeartbeat(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
+    const room = `tenant:${user.tenantId}`;
     if (room) {
       this.server.to(room).emit('vehicle.heartbeat', safe);
       this.server.to(room).emit('vehicle.location_updated', sanitizePayload({
@@ -229,132 +292,87 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
 
   @SubscribeMessage('vehicle.online')
   onVehicleOnline(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('vehicle.online', safe);
-    return { ok: true };
+    return this.emitTenantScoped('vehicle.online', payload, client);
   }
 
   @SubscribeMessage('vehicle.offline')
   onVehicleOffline(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('vehicle.offline', safe);
-    return { ok: true };
+    return this.emitTenantScoped('vehicle.offline', payload, client);
   }
 
   @SubscribeMessage('vehicle.idle')
   onVehicleIdle(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('vehicle.idle', safe);
-    return { ok: true };
+    return this.emitTenantScoped('vehicle.idle', payload, client);
   }
 
   // ─── Patient domain ───────────────────────────────────────────────────────
 
   @SubscribeMessage('patient.checked_in')
   onPatientCheckedIn(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('patient.checked_in', safe);
-    return { ok: true };
+    return this.emitTenantScoped('patient.checked_in', payload, client);
   }
 
   @SubscribeMessage('patient.boarded')
   onPatientBoarded(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('patient.boarded', safe);
-    return { ok: true };
+    return this.emitTenantScoped('patient.boarded', payload, client);
   }
 
   @SubscribeMessage('patient.arrived')
   onPatientArrived(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('patient.arrived', safe);
-    return { ok: true };
+    return this.emitTenantScoped('patient.arrived', payload, client);
   }
 
   @SubscribeMessage('patient.missed')
   onPatientMissed(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('patient.missed', safe);
-    return { ok: true };
+    return this.emitTenantScoped('patient.missed', payload, client);
   }
 
   // ─── Queue domain ─────────────────────────────────────────────────────────
 
   @SubscribeMessage('queue.priority_changed')
   onQueuePriorityChanged(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('queue.priority_changed', safe);
-    return { ok: true };
+    return this.emitTenantScoped('queue.priority_changed', payload, client);
   }
 
   @SubscribeMessage('queue.updated')
   onQueueUpdated(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('queue.updated', safe);
-    return { ok: true };
+    return this.emitTenantScoped('queue.updated', payload, client);
   }
 
   // ─── Trip domain ──────────────────────────────────────────────────────────
 
   @SubscribeMessage('trip.status_changed')
   onTripStatus(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('trip.status_changed', safe);
-    return { ok: true };
+    return this.emitTenantScoped('trip.status_changed', payload, client);
   }
 
   @SubscribeMessage('trip.started')
   onTripStarted(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('trip.started', safe);
-    return { ok: true };
+    return this.emitTenantScoped('trip.started', payload, client);
   }
 
   @SubscribeMessage('trip.completed')
   onTripCompleted(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('trip.completed', safe);
-    return { ok: true };
+    return this.emitTenantScoped('trip.completed', payload, client);
   }
 
   // ─── Route domain ─────────────────────────────────────────────────────────
 
   @SubscribeMessage('route.optimized')
   onRouteOptimized(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('route.optimized', safe);
-    return { ok: true };
+    return this.emitTenantScoped('route.optimized', payload, client);
   }
 
   @SubscribeMessage('route.status_changed')
   onRouteStatus(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('route.status_changed', safe);
-    return { ok: true };
+    return this.emitTenantScoped('route.status_changed', payload, client);
   }
 
   // ─── QR domain ───────────────────────────────────────────────────────────
 
   @SubscribeMessage('qr.invalid_detected')
   onQrInvalid(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
-    const safe = sanitizePayload(payload) as Record<string, unknown>;
-    const room = typeof safe['tenantId'] === 'string' ? `tenant:${safe['tenantId']}` : null;
-    if (room) this.server.to(room).emit('qr.invalid_detected', safe);
-    return { ok: true };
+    return this.emitTenantScoped('qr.invalid_detected', payload, client);
   }
 
   // ─── Server-side emit helpers ─────────────────────────────────────────────
@@ -370,5 +388,87 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   /** Emit an alert to the tenant room. */
   emitAlert(tenantId: string, alert: { type: string; message: string; severity: string; data?: unknown }) {
     this.server.to(`tenant:${tenantId}`).emit('operational.alert', sanitizePayload(alert));
+  }
+
+  private getSocketUser(client: Socket) {
+    return this.socketUsers.get(client.id) ?? null;
+  }
+
+  private authenticateSocket(client: Socket): SocketAuthUser | null {
+    const authToken = client.handshake.auth?.token as string | undefined;
+    const headerToken = client.handshake.headers.authorization?.replace('Bearer ', '');
+    const rawToken = authToken ?? headerToken;
+    if (!rawToken) return null;
+    try {
+      const decoded = this.jwtService.verify(rawToken, {
+        secret: process.env.JWT_SECRET ?? 'change_me_jwt',
+      }) as Record<string, unknown>;
+      const tenantId = typeof decoded['tenantId'] === 'string' ? decoded['tenantId'] : null;
+      const userId = typeof decoded['sub'] === 'string'
+        ? decoded['sub']
+        : (typeof decoded['userId'] === 'string' ? decoded['userId'] : null);
+      const role = typeof decoded['role'] === 'string' ? decoded['role'] : null;
+      if (!tenantId || !userId || !role) return null;
+      const driverId = typeof decoded['driverId'] === 'string' ? decoded['driverId'] : null;
+      return { tenantId, userId, role, driverId };
+    } catch {
+      return null;
+    }
+  }
+
+  private canEmitDriverEvent(user: SocketAuthUser, payload: Record<string, unknown>) {
+    const payloadTenantId = typeof payload['tenantId'] === 'string' ? payload['tenantId'] : user.tenantId;
+    const payloadDriverId = typeof payload['driverId'] === 'string' ? payload['driverId'] : null;
+    if (payloadTenantId !== user.tenantId) return false;
+    if (user.role === 'DRIVER') {
+      if (!user.driverId || !payloadDriverId) return false;
+      return payloadDriverId === user.driverId;
+    }
+    return true;
+  }
+
+  private emitTenantScoped(event: string, payload: unknown, client: Socket) {
+    const user = this.getSocketUser(client);
+    if (!user) return { ok: false, error: 'unauthorized' };
+    const safe = sanitizePayload(payload) as Record<string, unknown>;
+    this.server.to(`tenant:${user.tenantId}`).emit(event, safe);
+    return { ok: true };
+  }
+
+  private async emitStateReplay(client: Socket, tenantId: string, driverId: string | null) {
+    const activeRoute = await this.prisma.route.findFirst({
+      where: {
+        tenantId,
+        ...(driverId ? { driverId } : {}),
+        status: { in: ['DISPATCHED', 'SCHEDULED', 'PLANNED', 'PREPARING', 'ACTIVE', 'RETURNING'] as any[] },
+      },
+      include: {
+        trips: {
+          include: {
+            patient: true,
+            stops: { orderBy: { sequence: 'asc' } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    const latestPosition = await this.prisma.vehicleTracking.findFirst({
+      where: {
+        tenantId,
+        ...(driverId ? { driverId } : {}),
+        ...(activeRoute?.vehicleId ? { vehicleId: activeRoute.vehicleId } : {}),
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    client.emit('ops:state:replay', sanitizePayload({
+      tenantId,
+      driverId,
+      route: activeRoute,
+      latestPosition,
+      replayedAt: new Date().toISOString(),
+    }));
   }
 }

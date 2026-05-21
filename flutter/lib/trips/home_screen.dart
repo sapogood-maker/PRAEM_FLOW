@@ -4,6 +4,7 @@
 // Connects WebSocket and starts GPS tracking on init.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
@@ -15,6 +16,7 @@ import '../config/app_config.dart';
 import '../core/constants.dart';
 import '../shared/widgets/operational_button.dart';
 import '../shared/widgets/status_badge.dart';
+import '../offline/offline_queue.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -26,6 +28,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _dio = Dio();
   bool _loadingRoute = true;
+  Timer? _offlineSyncTimer;
 
   Map<String, dynamic>? _activeTrip(DriverState driver) {
     for (final trip in driver.patients) {
@@ -75,6 +78,30 @@ class _HomeScreenState extends State<HomeScreen> {
           if (!mounted) return;
           if (driver.activeRoute != null) {
             Navigator.pushNamed(context, AppRoutes.trip);
+          }
+        });
+
+        ws.on('ws:connected', (_) async {
+          await _loadRoute(auth, driver);
+          await _syncOfflineQueues();
+        });
+
+        ws.on('ops:state:replay', (data) {
+          if (!mounted) return;
+          final replay = (data as Map?) ?? const {};
+          final route = replay['route'];
+          if (route is Map) {
+            driver.setActiveRoute(Map<String, dynamic>.from(route));
+            final trips = (route['trips'] as List?) ?? [];
+            driver.setPatients(trips.map((t) => Map<String, dynamic>.from(t as Map)).toList());
+            final allStops = <Map<String, dynamic>>[];
+            for (final trip in trips) {
+              final stops = (trip as Map)['stops'] as List? ?? [];
+              allStops.addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
+            }
+            allStops.sort((a, b) =>
+                ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
+            driver.setStops(allStops);
           }
         });
       }
@@ -214,6 +241,66 @@ class _HomeScreenState extends State<HomeScreen> {
         authToken: auth.token!,
       );
     }
+    _offlineSyncTimer?.cancel();
+    _offlineSyncTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _syncOfflineQueues();
+    });
+  }
+
+  Future<void> _syncOfflineQueues() async {
+    final auth = context.read<AuthService>();
+    if (!mounted || auth.token == null) return;
+    await _syncOfflineQr(auth);
+    await _syncOfflineOperational(auth);
+  }
+
+  Future<void> _syncOfflineQr(AuthService auth) async {
+    final queue = context.read<OfflineQueue>();
+    final pending = await queue.pendingQr();
+    if (pending.isEmpty) return;
+
+    final remaining = <Map<String, dynamic>>[];
+    for (final payload in pending) {
+      try {
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/patients/qr/scan',
+          data: payload,
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } on DioException catch (e) {
+        if (e.response == null) {
+          remaining.add(payload);
+          remaining.addAll(pending.skip(pending.indexOf(payload) + 1));
+          break;
+        }
+      }
+    }
+    await queue.replaceQr(remaining);
+  }
+
+  Future<void> _syncOfflineOperational(AuthService auth) async {
+    final queue = context.read<OfflineQueue>();
+    final pending = await queue.pendingOperational();
+    if (pending.isEmpty) return;
+
+    final remaining = <Map<String, dynamic>>[];
+    for (final item in pending) {
+      final url = item['url'] as String?;
+      if (url == null) continue;
+      try {
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}$url',
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } on DioException catch (e) {
+        if (e.response == null) {
+          remaining.add(item);
+          remaining.addAll(pending.skip(pending.indexOf(item) + 1));
+          break;
+        }
+      }
+    }
+    await queue.replaceOperational(remaining);
   }
 
   Future<void> _loadRoute(AuthService auth, DriverState driver) async {
@@ -316,45 +403,81 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _changeStatus(String status) async {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
+    final offlineQueue = context.read<OfflineQueue>();
     final routeId = driver.activeRoute?['id'] as String?;
     final trip = _activeTrip(driver);
 
     try {
+      await _syncOfflineQueues();
+      String? actionUrl;
       if (status == 'START_ROUTE') {
         if (routeId == null) return;
+        actionUrl = '/routes/$routeId/start';
         await _dio.post(
-          '${AppConfig.apiBaseUrl}/routes/$routeId/start',
+          '${AppConfig.apiBaseUrl}$actionUrl',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
         );
       } else if (status == 'BOARDING') {
         if (trip == null) return;
+        actionUrl = '/trips/${trip['id']}/board';
         await _dio.post(
-          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/board',
+          '${AppConfig.apiBaseUrl}$actionUrl',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
         );
       } else if (status == 'IN_TRANSIT') {
         if (trip == null) return;
+        actionUrl = '/trips/${trip['id']}/in-transit';
         await _dio.post(
-          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/in-transit',
+          '${AppConfig.apiBaseUrl}$actionUrl',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
         );
       } else if (status == 'ARRIVED') {
         if (trip == null) return;
+        actionUrl = '/trips/${trip['id']}/arrived';
         await _dio.post(
-          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/arrived',
+          '${AppConfig.apiBaseUrl}$actionUrl',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
         );
       } else if (status == 'COMPLETED') {
         if (trip == null) return;
+        actionUrl = '/trips/${trip['id']}/complete';
         await _dio.post(
-          '${AppConfig.apiBaseUrl}/trips/${trip['id']}/complete',
+          '${AppConfig.apiBaseUrl}$actionUrl',
           options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
         );
       }
       driver.setOperationalStatus(status);
+    } on DioException catch (e) {
+      if (e.response == null) {
+        final routeIdToUse = routeId ?? '';
+        final tripIdToUse = trip?['id'] as String?;
+        String? fallbackUrl;
+        if (status == 'START_ROUTE' && routeIdToUse.isNotEmpty) fallbackUrl = '/routes/$routeIdToUse/start';
+        if (status == 'BOARDING' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/board';
+        if (status == 'IN_TRANSIT' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/in-transit';
+        if (status == 'ARRIVED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/arrived';
+        if (status == 'COMPLETED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/complete';
+        if (fallbackUrl != null) {
+          await offlineQueue.enqueueOperational({
+            'url': fallbackUrl,
+            'status': status,
+            'routeId': routeIdToUse,
+            'tripId': tripIdToUse,
+            'timestamp': DateTime.now().toIso8601String(),
+          });
+          driver.setOperationalStatus(status);
+        }
+      }
+      debugPrint('[HomeScreen] status change error: $e');
     } catch (e) {
       debugPrint('[HomeScreen] status change error: $e');
     }
+  }
+
+  @override
+  void dispose() {
+    _offlineSyncTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -397,9 +520,8 @@ class _HomeScreenState extends State<HomeScreen> {
               context.read<GpsTrackingService>().stop();
               context.read<WsService>().disconnect();
               await context.read<AuthService>().logout();
-              if (mounted) {
-                Navigator.pushReplacementNamed(context, AppRoutes.login);
-              }
+              if (!context.mounted) return;
+              Navigator.pushReplacementNamed(context, AppRoutes.login);
             },
           ),
         ],

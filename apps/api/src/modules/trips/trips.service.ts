@@ -66,8 +66,7 @@ export class TripsService {
   }
 
   async cancel(id: string, tenantId: string) {
-    const trip = await this.prisma.trip.findFirst({ where: { id, tenantId } });
-    if (!trip) throw new NotFoundException('Trip not found');
-    return this.prisma.trip.update({ where: { id }, data: { status: 'CANCELLED' } });
+    const result = await this.flow.cancel(tenantId, { tripId: id });
+    return result.trip;
   }
 }

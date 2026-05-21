@@ -68,6 +68,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
+    final offline = context.read<OfflineQueue>();
+
+    await _flushQueuedQr(auth, offline);
 
     final payload = {
       'qrToken': token,
@@ -94,11 +97,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
       setState(() {
         _result = {
-          'name': data['patient']?['name'] ?? '—',
-          'destination': data['patient']?['destination'] ?? '—',
-          'priority': data['patient']?['clinicalRisk'] ?? '—',
+          'name': data['patient']?['name'] ?? data['name'] ?? '—',
+          'destination': data['patient']?['destination'] ?? data['destination'] ?? '—',
+          'priority': data['patient']?['clinicalRisk'] ?? data['clinicalRisk'] ?? '—',
           'status': data['status'] ?? 'SUCCESS',
-          'tripId': data['tripId'],
+          'tripId': data['tripId'] ?? data['trip']?['id'],
         };
 
         _loading = false;
@@ -109,7 +112,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       if (e.response == null) {
 
         // Offline queue
-        await context.read<OfflineQueue>().enqueueQr({
+        await offline.enqueueQr({
           ...payload,
           'offline': true,
         });
@@ -128,6 +131,28 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
       }
     }
+  }
+
+  Future<void> _flushQueuedQr(AuthService auth, OfflineQueue offline) async {
+    final pending = await offline.pendingQr();
+    if (pending.isEmpty) return;
+    final remaining = <Map<String, dynamic>>[];
+    for (final item in pending) {
+      try {
+        await _dio.post(
+          '${AppConfig.apiBaseUrl}/patients/qr/scan',
+          data: item,
+          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        );
+      } on DioException catch (e) {
+        if (e.response == null) {
+          remaining.add(item);
+          remaining.addAll(pending.skip(pending.indexOf(item) + 1));
+          break;
+        }
+      }
+    }
+    await offline.replaceQr(remaining);
   }
 
   // ───────────────────────────────────────────────────────────────────

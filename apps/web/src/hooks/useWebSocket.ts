@@ -31,6 +31,7 @@ export function useWebSocket() {
     socket.on('connect', () => {
       setConnected(true);
       socket.emit('join:tenant', { tenantId });
+      socket.emit('ops:state:request', { tenantId });
     });
     socket.on('disconnect', () => setConnected(false));
 
@@ -48,6 +49,15 @@ export function useWebSocket() {
 
     socket.on('driver:location:update', (data: VehiclePosition) => {
       updateVehiclePosition(data);
+    });
+
+    socket.on('ops:state:replay', (data: { latestPosition?: VehiclePosition; route?: { id: string; status?: string }; driverId?: string }) => {
+      if (data.latestPosition) {
+        updateVehiclePosition(data.latestPosition);
+      }
+      if (data.route?.id) {
+        record(`♻️ Estado recuperado: rota ${data.route.id}`, 'route');
+      }
     });
 
     socket.on('trip:status', (data: { tripId: string; status: string }) => {
@@ -97,6 +107,11 @@ export function useWebSocket() {
 
     socket.on('route.status_changed', (data: { routeId: string; status: string }) => {
       record(`Rota ${data.routeId} → ${data.status}`, 'route');
+    });
+
+    socket.on('operational:state_changed', (data: { routeId?: string; tripId?: string; operationalState: string }) => {
+      const target = data.tripId ? `viagem ${data.tripId}` : `rota ${data.routeId ?? '—'}`;
+      record(`🔄 ${target} → ${data.operationalState}`, 'trip');
     });
 
     return () => {

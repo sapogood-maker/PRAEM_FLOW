@@ -34,6 +34,7 @@ export function TopBar() {
         </div>
         <div className='flex items-center gap-4'>
           <StatusBadge label={connected ? '● Conectado' : '○ Offline'} active={connected} />
+          <StatusBadge label={connected ? 'WS CONNECTED' : 'WS DISCONNECTED'} active={connected} />
           <div className='text-right'>
             <p className='text-xs text-slate-500'>Operador</p>
             <p className='text-sm text-slate-300'>{userName || '—'}</p>

@@ -10,10 +10,6 @@ import { api } from '@/services/api';
 export function useWebSocket() {
   const token = useAuthStore((s) => s.token);
   const tenantId = useAuthStore((s) => s.user?.tenantId);
-  const setConnected = useRealtimeStore((s) => s.setConnected);
-  const bumpRevision = useRealtimeStore((s) => s.bumpRevision);
-  const pushActivity = useRealtimeStore((s) => s.pushActivity);
-  const pushBoardingEvent = useRealtimeStore((s) => s.pushBoardingEvent);
 
   useEffect(() => {
     if (!token || !tenantId) {
@@ -24,30 +20,45 @@ export function useWebSocket() {
       return;
     }
 
-    const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL;
+    const wsEnv = process.env.NEXT_PUBLIC_WS_URL;
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!wsBaseUrl) {
-      console.debug('[SOCKET] websocket skipped: NEXT_PUBLIC_WS_URL missing');
-      setConnected(false);
+    const resolvedWsBaseUrl = wsEnv
+      ?? apiBaseUrl
+      ?? (typeof window !== 'undefined' ? window.location.origin : null);
+
+    if (!resolvedWsBaseUrl) {
+      console.debug('[SOCKET] websocket skipped: no resolvable base URL', {
+        NEXT_PUBLIC_WS_URL: wsEnv ?? null,
+        NEXT_PUBLIC_API_URL: apiBaseUrl ?? null,
+      });
+      useRealtimeStore.getState().setConnected(false);
       return;
     }
+
+    console.debug('[SOCKET] connecting /operations', {
+      wsBaseUrl: resolvedWsBaseUrl,
+      namespace: '/operations',
+      hasToken: Boolean(token),
+      tenantId,
+    });
     console.debug('[AUTH] websocket init', {
       hasToken: Boolean(token),
       tenantId,
-      wsBaseUrl,
+      wsBaseUrl: resolvedWsBaseUrl,
       apiBaseUrl: apiBaseUrl ?? 'not-set',
       namespace: '/operations',
     });
 
-    const socket = io(`${wsBaseUrl}/operations`, {
+    const socket = io(`${resolvedWsBaseUrl}/operations`, {
       auth: { token },
       transports: ['websocket'],
       reconnection: true,
     });
 
     const record = (message: string, type: 'route' | 'trip' | 'queue' | 'vehicle' | 'alert' | 'boarding' = 'trip') => {
-      pushActivity({ message, type, timestamp: new Date().toISOString() });
-      bumpRevision();
+      const store = useRealtimeStore.getState();
+      store.pushActivity({ message, type, timestamp: new Date().toISOString() });
+      store.bumpRevision();
     };
 
     const extractGpsPayload = (incoming: unknown): VehiclePosition => {
@@ -66,8 +77,9 @@ export function useWebSocket() {
     };
 
     socket.on('connect', () => {
-      setConnected(true);
+      useRealtimeStore.getState().setConnected(true);
       console.debug('[SOCKET] connected /operations', { tenantId });
+      console.debug('[SOCKET] auth success', { tenantId, namespace: '/operations' });
       socket.emit('join:tenant', { tenantId });
       socket.emit('ops:state:request', { tenantId });
       void api.get('/tracking/live', {
@@ -103,11 +115,16 @@ export function useWebSocket() {
     });
     socket.on('disconnect', () => {
       console.debug('[SOCKET] disconnected /operations', { tenantId });
-      setConnected(false);
+      useRealtimeStore.getState().setConnected(false);
     });
     socket.on('connect_error', (error: unknown) => {
-      console.debug('[SOCKET] connect_error /operations', { tenantId, error: String(error) });
-      setConnected(false);
+      console.debug('[SOCKET] connect_error /operations', {
+        tenantId,
+        error: String(error),
+        wsBaseUrl: resolvedWsBaseUrl,
+      });
+      console.debug('[SOCKET] auth failed', { tenantId, error: String(error) });
+      useRealtimeStore.getState().setConnected(false);
     });
     socket.on('error', (error: unknown) => {
       console.debug('[SOCKET] socket error /operations', { tenantId, error: String(error) });
@@ -168,7 +185,12 @@ export function useWebSocket() {
 
     socket.on('patient:boarded', (data: { tripId: string; patientId: string; patientName?: string; boardedAt?: string }) => {
       record(`🟢 Paciente embarcou: ${data.patientName ?? data.patientId}`, 'boarding');
-      pushBoardingEvent({ tripId: data.tripId, patientId: data.patientId, patientName: data.patientName, boardedAt: data.boardedAt ?? new Date().toISOString() });
+      useRealtimeStore.getState().pushBoardingEvent({
+        tripId: data.tripId,
+        patientId: data.patientId,
+        patientName: data.patientName,
+        boardedAt: data.boardedAt ?? new Date().toISOString(),
+      });
     });
 
     socket.on('trip:completed', (data: { tripId: string; patientId?: string }) => {
@@ -204,5 +226,5 @@ export function useWebSocket() {
       console.debug('[SOCKET] cleanup /operations', { tenantId });
       socket.disconnect();
     };
-  }, [token, tenantId, setConnected, bumpRevision, pushActivity, pushBoardingEvent]);
+  }, [token, tenantId]);
 }

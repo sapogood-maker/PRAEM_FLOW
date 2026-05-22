@@ -18,6 +18,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const normalizedChildren = normalizeChildren(children);
 
   useEffect(() => {
+    console.debug('[SOCKET] dashboard layout mounted');
+    return () => {
+      console.debug('[SOCKET] dashboard layout unmounted');
+    };
+  }, []);
+
+  useEffect(() => {
     if (!token) router.push('/login');
   }, [token, router]);
 
@@ -35,4 +42,3 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     </QueryClientProvider>
   );
 }
-

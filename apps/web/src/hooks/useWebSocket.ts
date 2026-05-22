@@ -52,6 +52,7 @@ export function useWebSocket() {
     });
 
     socket.on('vehicle:tracking', (data: VehiclePosition) => {
+      console.debug('[GPS] vehicle:tracking', data);
       updateVehiclePosition(data);
     });
 

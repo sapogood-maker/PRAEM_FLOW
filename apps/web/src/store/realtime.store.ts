@@ -33,29 +33,70 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
 
   updateVehiclePosition: (pos) =>
     set((state) => {
-      const lat = Number(pos.lat);
-      const lng = Number(pos.lng);
-      const fallbackId = pos.driverId ? `driver:${pos.driverId}` : undefined;
-      const markerId = pos.vehicleId ?? fallbackId;
-      if (!markerId || Number.isNaN(lat) || Number.isNaN(lng)) {
-        console.debug('[MAP] filtered payload', {
-          reason: !markerId ? 'missing vehicleId/driverId' : 'invalid coordinates',
-          payload: pos,
+      const raw = pos as VehiclePosition & {
+        latitude?: unknown;
+        longitude?: unknown;
+        lat?: unknown;
+        lng?: unknown;
+        vehicleId?: string;
+        driverId?: string | null;
+        routeId?: string | null;
+      };
+      const rawLat = raw.lat ?? raw.latitude;
+      const rawLng = raw.lng ?? raw.longitude;
+      const lat = Number(rawLat);
+      const lng = Number(rawLng);
+      const markerId = raw.vehicleId ?? raw.driverId ?? undefined;
+
+      console.debug('[GPS] raw websocket payload', raw);
+      console.debug('[GPS] coordinate aliases', {
+        latValue: raw.lat,
+        lngValue: raw.lng,
+        latitudeValue: raw.latitude,
+        longitudeValue: raw.longitude,
+        latType: typeof rawLat,
+        lngType: typeof rawLng,
+        vehicleId: raw.vehicleId,
+        driverId: raw.driverId,
+        routeId: raw.routeId,
+      });
+
+      if (!markerId) {
+        console.debug('[MAP] payload rejected', {
+          reason: 'missing markerId (vehicleId ?? driverId)',
+          payload: raw,
+        });
+        return state;
+      }
+      if (Number.isNaN(lat) || Number.isNaN(lng)) {
+        console.debug('[MAP] payload rejected', {
+          reason: 'invalid coordinates',
+          markerId,
+          rawLat,
+          rawLng,
+          payload: raw,
         });
         return state;
       }
 
       const existed = state.vehiclePositions.find((v) => v.vehicleId === markerId);
       const normalized: VehiclePosition = {
-        ...pos,
+        ...raw,
         vehicleId: markerId,
         lat,
         lng,
-        speed: pos.speed == null ? undefined : Number(pos.speed),
-        heading: pos.heading == null ? undefined : Number(pos.heading),
-        accuracy: pos.accuracy == null ? undefined : Number(pos.accuracy),
-        online: pos.online ?? true,
+        speed: raw.speed == null ? undefined : Number(raw.speed),
+        heading: raw.heading == null ? undefined : Number(raw.heading),
+        accuracy: raw.accuracy == null ? undefined : Number(raw.accuracy),
+        online: raw.online ?? true,
       };
+      console.debug('[MAP] payload accepted', {
+        markerId,
+        lat: normalized.lat,
+        lng: normalized.lng,
+        driverId: normalized.driverId,
+        routeId: normalized.routeId,
+      });
       console.debug(existed ? '[MAP] marker updated' : '[MAP] marker created', {
         vehicleId: normalized.vehicleId,
         driverId: normalized.driverId,

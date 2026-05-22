@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -12,22 +12,27 @@ import { normalizeChildren } from '@/lib/normalize-children';
 const queryClient = new QueryClient();
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  useWebSocket();
+  const [mounted, setMounted] = useState(false);
+  useWebSocket(mounted);
   const token = useAuthStore((s) => s.token);
   const router = useRouter();
   const normalizedChildren = normalizeChildren(children);
 
   useEffect(() => {
+    setMounted(true);
+    console.debug('[REACT] dashboard hydration ready');
     console.debug('[SOCKET] dashboard layout mounted');
     return () => {
+      console.debug('[REACT] dashboard layout cleanup');
       console.debug('[SOCKET] dashboard layout unmounted');
     };
   }, []);
 
   useEffect(() => {
-    if (!token) router.push('/login');
-  }, [token, router]);
+    if (mounted && !token) router.push('/login');
+  }, [mounted, token, router]);
 
+  if (!mounted) return null;
   if (!token) return null;
 
   return (

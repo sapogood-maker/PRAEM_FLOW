@@ -7,11 +7,16 @@ import { useAuthStore } from '@/store/auth.store';
 import type { VehiclePosition } from '@/types';
 import { api } from '@/services/api';
 
-export function useWebSocket() {
+export function useWebSocket(enabled = true) {
   const token = useAuthStore((s) => s.token);
   const tenantId = useAuthStore((s) => s.user?.tenantId);
 
   useEffect(() => {
+    if (!enabled) {
+      console.debug('[REACT] websocket bootstrap deferred (layout not ready)');
+      return;
+    }
+
     if (!token || !tenantId) {
       console.debug('[AUTH] websocket skipped: missing token/tenant', {
         hasToken: Boolean(token),
@@ -226,5 +231,5 @@ export function useWebSocket() {
       console.debug('[SOCKET] cleanup /operations', { tenantId });
       socket.disconnect();
     };
-  }, [token, tenantId]);
+  }, [enabled, token, tenantId]);
 }

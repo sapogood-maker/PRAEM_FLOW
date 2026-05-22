@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { useAuthStore } from '@/store/auth.store';
 import { useRealtimeStore } from '@/store/realtime.store';
@@ -10,8 +11,16 @@ export function TopBar() {
   const userName = useAuthStore((s) => s.userName);
   const connected = useRealtimeStore((s) => s.connected);
   const { logout } = useAuth();
-  const now = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  const [now, setNow] = useState<string>('--/--/---- --:--');
   const isHomolog = tenantName?.toUpperCase().includes('HOMOLOG');
+
+  useEffect(() => {
+    setNow(new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }));
+    console.debug('[REACT] TopBar mounted');
+    return () => {
+      console.debug('[REACT] TopBar unmounted');
+    };
+  }, []);
 
   return (
     <>

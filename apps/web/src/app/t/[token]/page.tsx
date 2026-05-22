@@ -36,7 +36,7 @@ const TYPE_DESCRIPTION: Record<string, string> = {
 
 const TYPE_BUTTON_COLOR: Record<string, string> = {
   CONFIRMATION: 'bg-blue-600 hover:bg-blue-700',
-  BOARDING:     'bg-emerald-600 hover:bg-emerald-700',
+  BOARDING:     'bg-slate-600',
   RETURN:       'bg-cyan-600 hover:bg-cyan-700',
   REBOOK:       'bg-amber-600 hover:bg-amber-700',
 };
@@ -137,6 +137,7 @@ export default function TokenPage() {
   const label = TYPE_LABEL[info.type] ?? info.type;
   const description = TYPE_DESCRIPTION[info.type] ?? '';
   const btnColor = TYPE_BUTTON_COLOR[info.type] ?? 'bg-blue-600 hover:bg-blue-700';
+  const boardingDisabled = info.type === 'BOARDING';
 
   return (
     <div className='flex min-h-screen flex-col items-center justify-center bg-slate-900 p-4'>
@@ -173,11 +174,11 @@ export default function TokenPage() {
 
         {/* Botão de ação */}
         <button
-          onClick={handleAction}
-          disabled={acting}
+          onClick={boardingDisabled ? undefined : handleAction}
+          disabled={acting || boardingDisabled}
           className={`w-full rounded-xl py-3 text-base font-semibold text-white transition-colors disabled:opacity-50 ${btnColor}`}
         >
-          {acting ? 'Processando…' : label}
+          {boardingDisabled ? 'Embarque somente pelo app do motorista' : acting ? 'Processando…' : label}
         </button>
       </div>
     </div>

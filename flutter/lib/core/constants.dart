@@ -36,14 +36,30 @@ class AppColors {
 // ─── Status colours by VehicleOperationalStatus ──────────────────────────────
 Color statusColor(String status) {
   switch (status.toUpperCase()) {
+    case 'CREATED':
+    case 'SCHEDULED':
+    case 'PLANNED':
+    case 'PENDING':
+    case 'DISPATCHED':
+      return AppColors.textSecondary;
+    case 'DRIVER_ACCEPTED':
+    case 'WAITING_PATIENT':
+    case 'CONFIRMED':
+      return AppColors.warning;
     case 'MOVING':
       return AppColors.primary;
     case 'IDLE':
       return AppColors.warning;
     case 'BOARDING':
       return AppColors.boarding;
+    case 'IN_PROGRESS':
+    case 'IN_TRANSIT':
     case 'ARRIVED':
       return AppColors.info;
+    case 'COMPLETED':
+      return AppColors.primary;
+    case 'NO_SHOW':
+    case 'CANCELLED':
     case 'OFFLINE':
     case 'MAINTENANCE':
       return AppColors.danger;

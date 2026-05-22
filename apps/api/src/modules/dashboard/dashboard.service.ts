@@ -5,6 +5,8 @@ export interface OperationalKpis {
   patientsToday: number;
   waitingPatients: number;
   boardedPatients: number;
+  inTransitPatients: number;
+  arrivedPatients: number;
   criticalPatients: number;
   activeRoutes: number;
   completedTrips: number;
@@ -33,6 +35,8 @@ export class DashboardService {
       patientsToday,
       waitingPatients,
       boardedPatients,
+      inTransitPatients,
+      arrivedPatients,
       criticalPatients,
       activeRoutes,
       completedTrips,
@@ -50,9 +54,17 @@ export class DashboardService {
       this.prisma.trip.count({
         where: { tenantId, status: { in: ['SCHEDULED', 'CONFIRMED'] } },
       }),
-      // Embarcados / em rota
+      // Embarque em andamento
       this.prisma.trip.count({
-        where: { tenantId, status: { in: ['BOARDING', 'IN_PROGRESS'] } },
+        where: { tenantId, status: 'BOARDING' },
+      }),
+      // Em trânsito
+      this.prisma.trip.count({
+        where: { tenantId, status: 'IN_PROGRESS' },
+      }),
+      // Chegou ao destino
+      this.prisma.trip.count({
+        where: { tenantId, status: 'ARRIVED' },
       }),
       // Críticos
       this.prisma.operationalQueue.count({
@@ -89,6 +101,8 @@ export class DashboardService {
       patientsToday,
       waitingPatients,
       boardedPatients,
+      inTransitPatients,
+      arrivedPatients,
       criticalPatients,
       activeRoutes,
       completedTrips,

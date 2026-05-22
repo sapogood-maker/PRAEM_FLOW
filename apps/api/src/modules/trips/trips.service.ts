@@ -70,16 +70,25 @@ export class TripsService {
     return result.trip;
   }
 
-  async complete(id: string, tenantId: string) {
+  async complete(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
     this.logger.log(`[TRIP] complete tenantId=${tenantId} tripId=${id}`);
-    const result = await this.flow.completeTrip(tenantId, { tripId: id });
+    const result = await this.flow.completeTrip(tenantId, { tripId: id }, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_COMPLETED',
+    });
     return result.trip;
   }
 
-  async noShow(id: string, tenantId: string) {
+  async noShow(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
     const trip = await this.prisma.trip.findFirst({ where: { id, tenantId } });
     if (!trip) throw new NotFoundException('Trip not found');
-    return this.prisma.trip.update({ where: { id }, data: { status: 'NO_SHOW' } });
+    const result = await this.flow.markNoShow(tenantId, { tripId: id }, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_NO_SHOW',
+    });
+    return result.trip;
   }
 
   async cancel(id: string, tenantId: string) {

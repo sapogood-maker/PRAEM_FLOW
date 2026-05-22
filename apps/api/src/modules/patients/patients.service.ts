@@ -296,9 +296,10 @@ export class PatientsService {
       data: { qrLastReadAt: new Date(), qrLastUsedAt: new Date() },
     });
 
+    let boardingFlowResult: { trip: any; route: any; queue: any } | null = null;
     // If routeId or tripId was provided, centralize the operational boarding flow.
     if (payload.routeId || payload.tripId) {
-      await this.flow.confirmBoarding(tenantId, {
+      boardingFlowResult = await this.flow.confirmBoarding(tenantId, {
         routeId: payload.routeId,
         tripId: payload.tripId,
         patientId: patient.id,
@@ -317,6 +318,9 @@ export class PatientsService {
 
     return {
       valid: true,
+      tripId: boardingFlowResult?.trip?.id ?? payload.tripId ?? null,
+      routeId: boardingFlowResult?.route?.id ?? payload.routeId ?? null,
+      operationalState: boardingFlowResult?.trip?.status ?? null,
       name: patient.name,
       operationalId: patient.operationalId,
       mobility: patient.mobility,

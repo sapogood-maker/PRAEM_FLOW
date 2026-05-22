@@ -187,10 +187,6 @@ export class TripTokensService {
         break;
 
       case 'RETURN':
-        await this.prisma.trip.update({
-          where: { id: tripId },
-          data: { status: 'IN_PROGRESS' },
-        });
         this.gateway.emitToTenant(tenantId, 'trip:returning', {
           tripId,
           patientId: record.patientId,

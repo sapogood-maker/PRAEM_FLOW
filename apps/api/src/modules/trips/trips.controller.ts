@@ -39,6 +39,7 @@ export class TripsController {
   }
 
   @Post(':id/in-transit')
+  @Roles('DRIVER')
   inTransit(@Request() req: AuthRequest, @Param('id') id: string) {
     this.logger.log(`[TRIP] REST in-transit request tenantId=${req.user.tenantId} tripId=${id}`);
     return this.tripsService.inTransit(id, req.user.tenantId, {
@@ -48,6 +49,7 @@ export class TripsController {
   }
 
   @Post(':id/arrived')
+  @Roles('DRIVER')
   arrived(@Request() req: AuthRequest, @Param('id') id: string) {
     this.logger.log(`[TRIP] REST arrived request tenantId=${req.user.tenantId} tripId=${id}`);
     return this.tripsService.arrived(id, req.user.tenantId, {
@@ -57,14 +59,22 @@ export class TripsController {
   }
 
   @Post(':id/complete')
+  @Roles('DRIVER')
   complete(@Request() req: AuthRequest, @Param('id') id: string) {
     this.logger.log(`[TRIP] REST complete request tenantId=${req.user.tenantId} tripId=${id}`);
-    return this.tripsService.complete(id, req.user.tenantId);
+    return this.tripsService.complete(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
   }
 
   @Post(':id/no-show')
+  @Roles('DRIVER')
   noShow(@Request() req: AuthRequest, @Param('id') id: string) {
-    return this.tripsService.noShow(id, req.user.tenantId);
+    return this.tripsService.noShow(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
   }
 
   @Post(':id/cancel')

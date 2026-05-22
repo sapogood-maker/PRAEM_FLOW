@@ -21,6 +21,7 @@ type FlowContext = {
 };
 
 type OperationalState =
+  | 'CREATED'
   | 'DISPATCHED'
   | 'DRIVER_ACCEPTED'
   | 'WAITING_PATIENT'
@@ -28,16 +29,19 @@ type OperationalState =
   | 'IN_TRANSIT'
   | 'ARRIVED'
   | 'COMPLETED'
+  | 'NO_SHOW'
   | 'CANCELLED';
 
 const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
-  DISPATCHED: ['DRIVER_ACCEPTED', 'CANCELLED'],
-  DRIVER_ACCEPTED: ['WAITING_PATIENT', 'CANCELLED'],
-  WAITING_PATIENT: ['BOARDING', 'CANCELLED'],
-  BOARDING: ['IN_TRANSIT', 'CANCELLED'],
+  CREATED: ['DISPATCHED', 'CANCELLED'],
+  DISPATCHED: ['DRIVER_ACCEPTED', 'NO_SHOW', 'CANCELLED'],
+  DRIVER_ACCEPTED: ['WAITING_PATIENT', 'NO_SHOW', 'CANCELLED'],
+  WAITING_PATIENT: ['BOARDING', 'NO_SHOW', 'CANCELLED'],
+  BOARDING: ['IN_TRANSIT', 'NO_SHOW', 'CANCELLED'],
   IN_TRANSIT: ['ARRIVED', 'CANCELLED'],
   ARRIVED: ['COMPLETED', 'CANCELLED'],
   COMPLETED: [],
+  NO_SHOW: ['CANCELLED'],
   CANCELLED: [],
 };
 
@@ -117,50 +121,9 @@ export class OperationalFlowService {
       `[OPS] qr boarding evaluate tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} previous=${previousState}`,
     );
 
-    if (previousState === 'DISPATCHED') {
-      this.logger.log(
-        `[OPS] qr boarding auto-transition tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} decision=DRIVER_ACCEPTED_before_BOARDING`,
-      );
-      await this.transitionState(
-        tenantId,
-        {
-          routeId: entity.route.id,
-          tripId: entity.trip?.id ?? scope.tripId,
-          patientId: scope.patientId,
-        },
-        'DRIVER_ACCEPTED',
-        { ...context, source: context.source ?? 'QR_AUTO_START' },
-      );
-    }
-
-    let stabilized = await this.loadEntity(tenantId, {
+    const refreshed = await this.loadEntity(tenantId, {
       routeId: entity.route.id,
       tripId: entity.trip?.id ?? scope.tripId,
-      patientId: scope.patientId,
-    });
-    let stabilizedState = this.deriveOperationalState(stabilized.route.status, stabilized.trip?.status ?? null);
-    if (stabilizedState === 'DRIVER_ACCEPTED') {
-      await this.transitionState(
-        tenantId,
-        {
-          routeId: stabilized.route.id,
-          tripId: stabilized.trip?.id ?? scope.tripId,
-          patientId: scope.patientId,
-        },
-        'WAITING_PATIENT',
-        { ...context, source: context.source ?? 'QR_WAITING_PATIENT' },
-      );
-      stabilized = await this.loadEntity(tenantId, {
-        routeId: stabilized.route.id,
-        tripId: stabilized.trip?.id ?? scope.tripId,
-        patientId: scope.patientId,
-      });
-      stabilizedState = this.deriveOperationalState(stabilized.route.status, stabilized.trip?.status ?? null);
-    }
-
-    const refreshed = await this.loadEntity(tenantId, {
-      routeId: stabilized.route.id,
-      tripId: stabilized.trip?.id ?? scope.tripId,
       patientId: scope.patientId,
     });
     const nextResolvedState = this.deriveOperationalState(refreshed.route.status, refreshed.trip?.status ?? null);
@@ -176,6 +139,12 @@ export class OperationalFlowService {
       return { trip: refreshed.trip, route: refreshed.route, queue };
     }
 
+    if (nextResolvedState === 'CREATED' || nextResolvedState === 'DISPATCHED' || nextResolvedState === 'DRIVER_ACCEPTED') {
+      this.logger.warn(
+        `[OPS] qr boarding rejected tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=driver_not_ready previous=${nextResolvedState}`,
+      );
+      throw new BadRequestException('Driver must accept route and set waiting status before boarding');
+    }
     if (!['WAITING_PATIENT'].includes(nextResolvedState)) {
       this.logger.warn(
         `[OPS] qr boarding rejected tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=invalid_qr_state previous=${nextResolvedState}`,
@@ -210,6 +179,10 @@ export class OperationalFlowService {
     return this.transitionState(tenantId, scope, 'COMPLETED', context);
   }
 
+  async markNoShow(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
+    return this.transitionState(tenantId, scope, 'NO_SHOW', context);
+  }
+
   async cancel(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
     return this.transitionState(tenantId, scope, 'CANCELLED', context, true);
   }
@@ -225,7 +198,15 @@ export class OperationalFlowService {
     const entity = await this.loadEntity(tenantId, scope);
     const currentState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
     this.logger.log(`[OPS] current state tenantId=${tenantId} current=${currentState} target=${targetState} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'}`);
-    const driverOnlyStates: OperationalState[] = ['DRIVER_ACCEPTED', 'WAITING_PATIENT', 'BOARDING', 'IN_TRANSIT'];
+    const driverOnlyStates: OperationalState[] = [
+      'DRIVER_ACCEPTED',
+      'WAITING_PATIENT',
+      'BOARDING',
+      'IN_TRANSIT',
+      'ARRIVED',
+      'COMPLETED',
+      'NO_SHOW',
+    ];
     if (driverOnlyStates.includes(targetState)) {
       if (!context.driverId) {
         this.logger.warn(`[OPS] transition rejected reason=driver_required tenantId=${tenantId} routeId=${entity.route.id} target=${targetState}`);
@@ -326,6 +307,28 @@ export class OperationalFlowService {
         this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       }
     }
+    if (targetState === 'NO_SHOW' && trip) {
+      trip = await this.prisma.trip.update({
+        where: { id: trip.id },
+        data: { status: 'NO_SHOW' },
+        include: { route: true },
+      });
+      queueUpdate.status = 'NO_SHOW';
+      queueUpdate.noShowAt = now;
+      queueUpdate.noShowReason = 'NOT_FOUND';
+      this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
+      const remaining = await this.prisma.trip.count({
+        where: {
+          tenantId,
+          routeId: route.id,
+          status: { notIn: TERMINAL_TRIP_STATUSES as any[] },
+        },
+      });
+      if (remaining === 0) {
+        route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'COMPLETED' } });
+        this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
+      }
+    }
     if (targetState === 'CANCELLED') {
       if (trip) {
         trip = await this.prisma.trip.update({
@@ -375,6 +378,7 @@ export class OperationalFlowService {
         'IN_PROGRESS',
         'ARRIVED',
         'COMPLETED',
+        'NO_SHOW',
         'CANCELLED',
       ]);
       return { route: trip.route, trip };
@@ -388,10 +392,15 @@ export class OperationalFlowService {
 
   private deriveOperationalState(routeStatus: string, tripStatus: string | null): OperationalState {
     if (routeStatus === 'CANCELLED' || tripStatus === 'CANCELLED') return 'CANCELLED';
+    if (tripStatus === 'NO_SHOW') return 'NO_SHOW';
     if (tripStatus === 'COMPLETED') return 'COMPLETED';
     if (tripStatus === 'ARRIVED') return 'ARRIVED';
     if (tripStatus === 'IN_PROGRESS') return 'IN_TRANSIT';
     if (tripStatus === 'BOARDING') return 'BOARDING';
+    if (routeStatus === 'SCHEDULED' || routeStatus === 'PLANNED' || routeStatus === 'PENDING' || routeStatus === 'PREPARING') {
+      return 'CREATED';
+    }
+    if (routeStatus === 'DISPATCHED') return 'DISPATCHED';
     if (
       (routeStatus === 'ACTIVE' || routeStatus === 'RETURNING')
       && (tripStatus === 'SCHEDULED' || tripStatus === 'CONFIRMED' || tripStatus === null)
@@ -408,6 +417,7 @@ export class OperationalFlowService {
     driverId: string | null,
     payload: Record<string, unknown>,
   ) {
+    if (state === 'CREATED') this.emitToRoute(tenantId, driverId, 'route:created', payload);
     if (state === 'DISPATCHED') this.emitToRoute(tenantId, driverId, 'route:dispatched', payload);
     if (state === 'DRIVER_ACCEPTED') this.emitToRoute(tenantId, driverId, 'route:started', payload);
     if (state === 'WAITING_PATIENT') this.emitToRoute(tenantId, driverId, 'route:waiting_patient', payload);
@@ -427,6 +437,10 @@ export class OperationalFlowService {
       this.emitToRoute(tenantId, driverId, 'trip:completed', payload);
       this.emitToRoute(tenantId, driverId, 'patient.completed', payload);
       this.emitToRoute(tenantId, driverId, 'route:completed', payload);
+    }
+    if (state === 'NO_SHOW') {
+      this.emitToRoute(tenantId, driverId, 'trip:no_show', payload);
+      this.emitToRoute(tenantId, driverId, 'patient:no_show', payload);
     }
     if (state === 'CANCELLED') {
       this.emitToRoute(tenantId, driverId, 'trip:cancelled', payload);
@@ -506,7 +520,7 @@ export class OperationalFlowService {
 
   private async resolveStartTrip(tenantId: string, routeId: string, requestedTripId?: string): Promise<FlowTrip | null> {
     const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS'] as any[];
-    const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,BOARDING,IN_PROGRESS';
+    const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,WAITING_PATIENT,BOARDING,IN_PROGRESS';
 
     const routeAnyTenant = await this.prisma.route.findUnique({
       where: { id: routeId },
@@ -549,6 +563,7 @@ export class OperationalFlowService {
           'IN_PROGRESS',
           'ARRIVED',
           'COMPLETED',
+          'NO_SHOW',
           'CANCELLED',
         ]);
         this.logger.log(`[OPS] resolved tripId from request routeId=${routeId} tripId=${requestedTrip.id}`);
@@ -567,6 +582,7 @@ export class OperationalFlowService {
           'IN_PROGRESS',
           'ARRIVED',
           'COMPLETED',
+          'NO_SHOW',
           'CANCELLED',
         ]);
         this.logger.log(`[OPS] resolved tripId safely by single-route-trip routeId=${routeId} tripId=${onlyTrip.id} status=${onlyTrip.status}`);
@@ -590,6 +606,7 @@ export class OperationalFlowService {
       'IN_PROGRESS',
       'ARRIVED',
       'COMPLETED',
+      'NO_SHOW',
       'CANCELLED',
     ]);
     this.logger.log(`[OPS] resolved tripId automatically routeId=${routeId} tripId=${resolved.id} status=${resolved.status}`);

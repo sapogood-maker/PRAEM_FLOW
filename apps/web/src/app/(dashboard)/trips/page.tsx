@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useRealtimeStore } from '@/store/realtime.store';
@@ -39,15 +39,6 @@ export default function TripsPage() {
 
   const items = (data?.items ?? []) as any[];
   const total: number = data?.total ?? 0;
-
-  const complete = useMutation({
-    mutationFn: (id: string) => api.post(`/trips/${id}/complete`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['trips'] }),
-  });
-  const noShow = useMutation({
-    mutationFn: (id: string) => api.post(`/trips/${id}/no-show`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['trips'] }),
-  });
 
   const statuses: { value: string; label: string }[] = [
     { value: '', label: 'Todos os Status' },
@@ -115,12 +106,11 @@ export default function TripsPage() {
                 <th className='p-3 text-left'>Status</th>
                 <th className='p-3 text-left'>Embarque</th>
                 <th className='p-3 text-left'>QR</th>
-                <th className='p-3 text-left'>Ações</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
-                <tr><td colSpan={6} className='p-6 text-center text-slate-500'>Nenhuma viagem encontrada</td></tr>
+                <tr><td colSpan={5} className='p-6 text-center text-slate-500'>Nenhuma viagem encontrada</td></tr>
               )}
               {items.map((t: any) => {
                 // Highlight trips that had a recent boarding event
@@ -136,14 +126,6 @@ export default function TripsPage() {
                       {t.boardedAt ? new Date(t.boardedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'}
                     </td>
                     <td className='p-3 text-center'>{t.qrScanned ? '✅' : '⬜'}</td>
-                    <td className='p-3 flex gap-1 flex-wrap'>
-                      {(t.status === 'BOARDING' || t.status === 'BOARDED' || t.status === 'IN_PROGRESS' || t.status === 'ARRIVED') && (
-                        <button type='button' onClick={() => complete.mutate(t.id)} className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>Concluir</button>
-                      )}
-                      {t.status === 'SCHEDULED' && (
-                        <button type='button' onClick={() => noShow.mutate(t.id)} className='rounded bg-red-900/50 px-2 py-1 text-xs text-red-300 hover:bg-red-800 transition-colors'>Falta</button>
-                      )}
-                    </td>
                   </tr>
                 );
               })}

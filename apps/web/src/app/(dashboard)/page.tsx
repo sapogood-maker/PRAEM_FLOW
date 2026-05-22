@@ -12,6 +12,8 @@ const EMPTY_KPIS: OperationalKpis = {
   patientsToday: 0,
   waitingPatients: 0,
   boardedPatients: 0,
+  inTransitPatients: 0,
+  arrivedPatients: 0,
   criticalPatients: 0,
   activeRoutes: 0,
   completedTrips: 0,

@@ -52,6 +52,8 @@ export interface OperationalKpis {
   patientsToday: number;
   waitingPatients: number;
   boardedPatients: number;
+  inTransitPatients: number;
+  arrivedPatients: number;
   criticalPatients: number;
   activeRoutes: number;
   completedTrips: number;

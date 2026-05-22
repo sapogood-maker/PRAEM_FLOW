@@ -11,6 +11,7 @@ export const TRIP_STATUS_LABEL: Record<string, string> = {
   BOARDING:    'Embarcando',
   BOARDED:     'Embarcado',
   IN_PROGRESS: 'Em Andamento',
+  ARRIVED:     'Chegou',
   COMPLETED:   'Finalizado',
   NO_SHOW:     'Não Compareceu',
   CANCELLED:   'Cancelado',

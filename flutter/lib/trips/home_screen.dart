@@ -41,6 +41,27 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
+  String _deriveOperationalStatus(Map<String, dynamic>? route, List<Map<String, dynamic>> trips) {
+    final routeStatus = route?['status'] as String?;
+    final activeTrip = trips.firstWhere(
+      (t) => !['COMPLETED', 'CANCELLED', 'NO_SHOW'].contains((t['status'] as String?) ?? ''),
+      orElse: () => <String, dynamic>{},
+    );
+    final tripStatus = activeTrip['status'] as String?;
+
+    if (tripStatus == 'BOARDING') return 'BOARDING';
+    if (tripStatus == 'IN_PROGRESS') return 'IN_TRANSIT';
+    if (tripStatus == 'ARRIVED') return 'ARRIVED';
+    if (tripStatus == 'COMPLETED') return 'COMPLETED';
+    if (tripStatus == 'NO_SHOW') return 'NO_SHOW';
+    if (routeStatus == 'DISPATCHED') return 'DISPATCHED';
+    if (routeStatus == 'ACTIVE') return 'WAITING_PATIENT';
+    if (routeStatus == 'PLANNED' || routeStatus == 'SCHEDULED' || routeStatus == 'PENDING' || routeStatus == 'PREPARING') {
+      return 'CREATED';
+    }
+    return 'OFFLINE';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -72,6 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final event = data as Map?;
       final driverId = event?['driverId'] as String?;
       if (driverId != null && driverId == auth.driverId) {
+        context.read<DriverState>().setOperationalStatus('DISPATCHED');
         final routeId = event?['routeId'] as String?;
         // Acknowledge receipt
         if (routeId != null) {
@@ -136,8 +158,18 @@ class _HomeScreenState extends State<HomeScreen> {
       final routeId = event?['routeId'] as String?;
       if (routeId != null) {
         context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
-        context.read<DriverState>().setOperationalStatus('START_ROUTE');
+        context.read<DriverState>().setOperationalStatus('DRIVER_ACCEPTED');
       }
+    });
+
+    ws.on('route:waiting_patient', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final routeId = event?['routeId'] as String?;
+      if (routeId != null) {
+        context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
+      }
+      context.read<DriverState>().setOperationalStatus('WAITING_PATIENT');
     });
 
     ws.on('route.status_changed', (data) {
@@ -147,6 +179,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final status = event?['status'] as String?;
       if (routeId != null && status != null) {
         context.read<DriverState>().updateRouteStatus(routeId, status);
+        if (status == 'DISPATCHED') {
+          context.read<DriverState>().setOperationalStatus('DISPATCHED');
+        }
         if (status == 'COMPLETED') {
           context.read<DriverState>().setOperationalStatus('COMPLETED');
         }
@@ -170,6 +205,24 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Text(alert?['message']?.toString() ?? 'Alerta operacional'),
         backgroundColor: AppColors.warning,
       ));
+    });
+
+    ws.on('operational:state_changed', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final operationalState = event?['operationalState'] as String?;
+      final routeId = event?['routeId'] as String?;
+      final tripId = event?['tripId'] as String?;
+      final status = event?['status'] as String?;
+      if (routeId != null && event?['routeStatus'] is String) {
+        context.read<DriverState>().updateRouteStatus(routeId, event!['routeStatus'] as String);
+      }
+      if (tripId != null && status != null) {
+        context.read<DriverState>().updateTripStatus(tripId, status);
+      }
+      if (operationalState != null) {
+        context.read<DriverState>().setOperationalStatus(operationalState);
+      }
     });
 
     // ─── Listen for patient boarding events (emitted by API after QR scan) ──
@@ -235,6 +288,16 @@ class _HomeScreenState extends State<HomeScreen> {
       if (tripId != null) {
         context.read<DriverState>().updateTripStatus(tripId, 'COMPLETED');
         context.read<DriverState>().setOperationalStatus('COMPLETED');
+      }
+    });
+
+    ws.on('trip:no_show', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final tripId = event?['tripId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'NO_SHOW');
+        context.read<DriverState>().setOperationalStatus('NO_SHOW');
       }
     });
 
@@ -350,8 +413,10 @@ class _HomeScreenState extends State<HomeScreen> {
         driver.setActiveRoute(foundRoute);
         await _loadPatients(auth, driver, foundRoute['id'] as String);
         await _loadStops(auth, driver, foundRoute['id'] as String);
+        driver.setOperationalStatus(_deriveOperationalStatus(foundRoute, driver.patients));
       } else {
         debugPrint('[FLUTTER] no active route found driverId=$driverId vehicleId=$vehicleId');
+        driver.setOperationalStatus('OFFLINE');
       }
     } catch (e) {
       debugPrint('[FLUTTER] loadRoute error: $e');
@@ -433,8 +498,8 @@ class _HomeScreenState extends State<HomeScreen> {
         trip = _activeTrip(driver);
       }
 
-      if (status == 'START_ROUTE' && routeId == null) {
-        debugPrint('[FLUTTER] cannot START_ROUTE because routeId is null');
+      if ((status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') && routeId == null) {
+        debugPrint('[FLUTTER] cannot proceed because routeId is null for status=$status');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Nenhuma rota ativa para iniciar'),
@@ -445,7 +510,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       String? actionUrl;
-      if (status == 'START_ROUTE') {
+      if (status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') {
         actionUrl = '/routes/$routeId/start';
       } else if (status == 'BOARDING') {
         if (trip == null) return;
@@ -490,7 +555,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final routeIdToUse = routeId ?? '';
         final tripIdToUse = trip?['id'] as String?;
         String? fallbackUrl;
-        if (status == 'START_ROUTE' && routeIdToUse.isNotEmpty) fallbackUrl = '/routes/$routeIdToUse/start';
+        if ((status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') && routeIdToUse.isNotEmpty) fallbackUrl = '/routes/$routeIdToUse/start';
         if (status == 'BOARDING' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/board';
         if (status == 'IN_TRANSIT' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/in-transit';
         if (status == 'ARRIVED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/arrived';
@@ -615,6 +680,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   // ─── Operational status buttons ────────────────────────────
                   _StatusButtons(
                     currentStatus: driver.operationalStatus,
+                    hasActiveRoute: driver.activeRoute != null,
+                    hasActiveTrip: _activeTrip(driver) != null,
+                    hasBoardedPassenger: (() {
+                      final trip = _activeTrip(driver);
+                      if (trip == null) return false;
+                      final status = (trip['status'] as String?) ?? '';
+                      return trip['boardedAt'] != null || status == 'BOARDING' || status == 'IN_PROGRESS' || status == 'ARRIVED' || status == 'COMPLETED';
+                    })(),
                     onTap: _changeStatus,
                   ),
                   const SizedBox(height: 16),
@@ -816,34 +889,60 @@ class _RouteCard extends StatelessWidget {
 // ─── Status buttons ───────────────────────────────────────────────────────────
 class _StatusButtons extends StatelessWidget {
   final String currentStatus;
+  final bool hasActiveRoute;
+  final bool hasActiveTrip;
+  final bool hasBoardedPassenger;
   final void Function(String) onTap;
   const _StatusButtons(
-      {required this.currentStatus, required this.onTap});
+      {required this.currentStatus, required this.hasActiveRoute, required this.hasActiveTrip, required this.hasBoardedPassenger, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     const statuses = [
-      ('INICIAR ROTA', 'START_ROUTE', Icons.play_arrow_rounded),
-      ('EMBARCANDO', 'BOARDING', Icons.people_rounded),
-      ('EM TRÂNSITO', 'IN_TRANSIT', Icons.directions_car),
+      ('ACEITAR ROTA', 'DRIVER_ACCEPTED', Icons.play_arrow_rounded),
+      ('AGUARDAR PACIENTE', 'WAITING_PATIENT', Icons.person_search_rounded),
+      ('CONFIRMAR EMBARQUE', 'BOARDING', Icons.people_rounded),
+      ('INICIAR TRÂNSITO', 'IN_TRANSIT', Icons.directions_car),
       ('CHEGADA', 'ARRIVED', Icons.local_hospital_rounded),
       ('FINALIZAR', 'COMPLETED', Icons.check_circle_rounded),
     ];
+    bool enabledFor(String target) {
+      if (!hasActiveRoute) return false;
+      if ((target == 'BOARDING' || target == 'IN_TRANSIT' || target == 'ARRIVED' || target == 'COMPLETED') && !hasActiveTrip) {
+        return false;
+      }
+      switch (target) {
+        case 'DRIVER_ACCEPTED':
+          return currentStatus == 'DISPATCHED' || currentStatus == 'CREATED' || currentStatus == 'OFFLINE';
+        case 'WAITING_PATIENT':
+          return currentStatus == 'DRIVER_ACCEPTED';
+        case 'BOARDING':
+          return currentStatus == 'WAITING_PATIENT';
+        case 'IN_TRANSIT':
+          return currentStatus == 'BOARDING' && hasBoardedPassenger;
+        case 'ARRIVED':
+          return currentStatus == 'IN_TRANSIT';
+        case 'COMPLETED':
+          return currentStatus == 'ARRIVED';
+        default:
+          return false;
+      }
+    }
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        for (final (label, status, icon) in statuses)
+        for (final (label, target, icon) in statuses)
           SizedBox(
             width: (MediaQuery.of(context).size.width - 56) / 2,
             child: OperationalButton(
               label: label,
               icon: icon,
-              onPressed: () => onTap(status),
-              color: currentStatus == status
+              onPressed: enabledFor(target) ? () => onTap(target) : null,
+              color: currentStatus == target
                   ? AppColors.primary
                   : AppColors.surface,
-              outlined: currentStatus != status,
+              outlined: currentStatus != target,
             ),
           ),
       ],

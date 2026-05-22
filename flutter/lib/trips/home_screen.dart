@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
+import 'package:geolocator/geolocator.dart';
 import '../auth/auth_service.dart';
 import '../driver/driver_state.dart';
 import '../websocket/ws_service.dart';
@@ -82,6 +83,148 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  String _displayStatusLabel(String status) {
+    switch (status.toUpperCase()) {
+      case 'CREATED':
+      case 'SCHEDULED':
+      case 'PLANNED':
+      case 'PENDING':
+      case 'PREPARING':
+        return 'AGUARDANDO DESPACHO';
+      case 'DISPATCHED':
+        return 'ROTA DISPARADA';
+      case 'DRIVER_ACCEPTED':
+        return 'ROTA ACEITA';
+      case 'WAITING_PATIENT':
+        return 'AGUARDANDO PASSAGEIRO';
+      case 'BOARDING':
+        return 'EMBARQUE';
+      case 'IN_TRANSIT':
+      case 'IN_PROGRESS':
+        return 'EM DESLOCAMENTO';
+      case 'ARRIVED':
+        return 'CHEGADA';
+      case 'COMPLETED':
+        return 'CONCLUÍDO';
+      case 'NO_SHOW':
+        return 'NÃO COMPARECEU';
+      case 'CANCELLED':
+        return 'CANCELADO';
+      default:
+        return 'OFFLINE';
+    }
+  }
+
+  Color _displayStatusColor(String status) {
+    switch (status.toUpperCase()) {
+      case 'WAITING_PATIENT':
+        return AppColors.warning;
+      case 'BOARDING':
+        return AppColors.boarding;
+      case 'IN_TRANSIT':
+      case 'IN_PROGRESS':
+        return AppColors.primary;
+      case 'NO_SHOW':
+      case 'CANCELLED':
+        return AppColors.danger;
+      case 'COMPLETED':
+        return AppColors.completed;
+      case 'ARRIVED':
+        return AppColors.info;
+      case 'DISPATCHED':
+      case 'DRIVER_ACCEPTED':
+        return AppColors.textSecondary;
+      case 'CREATED':
+      case 'SCHEDULED':
+      case 'PLANNED':
+      case 'PENDING':
+      case 'PREPARING':
+        return AppColors.textSecondary;
+      default:
+        return AppColors.textSecondary;
+    }
+  }
+
+  bool _isBoardedPassenger(Map<String, dynamic> patient) {
+    final status = (patient['status'] as String? ?? '').toUpperCase();
+    return patient['boardedAt'] != null ||
+        status == 'BOARDING' ||
+        status == 'IN_PROGRESS' ||
+        status == 'IN_TRANSIT' ||
+        status == 'ARRIVED' ||
+        status == 'COMPLETED';
+  }
+
+  bool _isMissingPassenger(Map<String, dynamic> patient) {
+    final status = (patient['status'] as String? ?? '').toUpperCase();
+    return status == 'NO_SHOW' || status == 'CANCELLED';
+  }
+
+  bool _isCompletedPassenger(Map<String, dynamic> patient) {
+    final status = (patient['status'] as String? ?? '').toUpperCase();
+    return status == 'COMPLETED';
+  }
+
+  String? _nextActionFor(String status, {required int boardedCount, required int pendingCount}) {
+    switch (status.toUpperCase()) {
+      case 'DISPATCHED':
+        return 'ACEITAR ROTA';
+      case 'DRIVER_ACCEPTED':
+      case 'WAITING_PATIENT':
+        return 'ESCANEAR PASSAGEIRO';
+      case 'BOARDING':
+        if (pendingCount > 0) return 'ESCANEAR PASSAGEIRO';
+        return boardedCount > 0 ? 'INICIAR DESLOCAMENTO' : 'ESCANEAR PASSAGEIRO';
+      case 'IN_TRANSIT':
+      case 'IN_PROGRESS':
+        return 'CHEGADA';
+      case 'ARRIVED':
+        return 'FINALIZAR ROTA';
+      default:
+        return null;
+    }
+  }
+
+  String _nextActionHint(String status, {required int boardedCount, required int pendingCount}) {
+    switch (status.toUpperCase()) {
+      case 'DISPATCHED':
+        return 'A rota está pronta para aceite.';
+      case 'CREATED':
+      case 'SCHEDULED':
+      case 'PLANNED':
+      case 'PENDING':
+      case 'PREPARING':
+        return 'Aguardando despacho da central.';
+      case 'DRIVER_ACCEPTED':
+      case 'WAITING_PATIENT':
+        return 'Abra o scanner para confirmar o passageiro.';
+      case 'BOARDING':
+        if (boardedCount == 0) {
+          return 'Escaneie o primeiro passageiro.';
+        }
+        if (pendingCount > 0) {
+          return 'Confira os embarques e siga para a saída.';
+        }
+        return 'Todos os passageiros embarcados.';
+      case 'IN_TRANSIT':
+      case 'IN_PROGRESS':
+        return 'Siga até o destino da rota.';
+      case 'ARRIVED':
+        return 'Confirme a chegada e finalize a operação.';
+      case 'COMPLETED':
+        return 'Operação concluída com sucesso.';
+      case 'NO_SHOW':
+        return 'Registre os ausentes e encerre a etapa.';
+      default:
+        return 'Sem ação disponível no momento.';
+    }
+  }
+
+  String _gpsOperationalLabel(Position? pos) {
+    if (pos == null) return 'Aguardando sinal GPS';
+    return 'Atualizado agora';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -122,10 +265,6 @@ class _HomeScreenState extends State<HomeScreen> {
         // Reload route and auto-open trip screen
         _loadRoute(auth, driver).then((_) {
           _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
-          if (!mounted) return;
-          if (driver.activeRoute != null) {
-            Navigator.pushNamed(context, AppRoutes.trip);
-          }
         });
       }
     });
@@ -662,6 +801,27 @@ class _HomeScreenState extends State<HomeScreen> {
     final driver = context.watch<DriverState>();
     final ws = context.watch<WsService>();
     final gps = context.watch<GpsTrackingService>();
+    final route = driver.activeRoute;
+    final patients = driver.patients;
+    final boardedPatients = patients.where(_isBoardedPassenger).toList();
+    final missingPatients = patients.where(_isMissingPassenger).toList();
+    final completedPatients = patients.where(_isCompletedPassenger).toList();
+    final waitingPatients = patients.where((p) =>
+        !_isBoardedPassenger(p) &&
+        !_isMissingPassenger(p) &&
+        !_isCompletedPassenger(p)).toList();
+    final currentStatus = driver.operationalStatus.toUpperCase();
+    final nextAction = _nextActionFor(
+      currentStatus,
+      boardedCount: boardedPatients.length,
+      pendingCount: waitingPatients.length,
+    );
+    final showScanner = nextAction == 'ESCANEAR PASSAGEIRO';
+    final statusColor = _displayStatusColor(currentStatus);
+    final routeTitle = route == null
+        ? 'Sem rota ativa'
+        : '${route['origin'] as String? ?? 'Origem'} → ${route['destination'] as String? ?? 'Destino'}';
+    final gpsLabel = _gpsOperationalLabel(gps.lastPosition);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -672,24 +832,17 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(Icons.local_hospital_rounded,
                 color: AppColors.primary, size: 20),
             const SizedBox(width: 8),
-            const Text('PRAEM OPS',
+            const Text('Fluxo operacional',
                 style: TextStyle(color: AppColors.textPrimary,
                     fontWeight: FontWeight.bold)),
             const Spacer(),
             StatusBadge(
-                label: ws.connected ? 'AO VIVO' : 'OFFLINE',
+                label: ws.connected ? 'CONEXÃO ATIVA' : 'SEM CONEXÃO',
                 color: ws.connected ? AppColors.primary : AppColors.danger),
           ],
         ),
         automaticallyImplyLeading: false,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner,
-                color: AppColors.primary),
-            tooltip: 'Scan QR',
-            onPressed: () =>
-                Navigator.pushNamed(context, AppRoutes.qrScanner),
-          ),
           IconButton(
             icon: const Icon(Icons.logout, color: AppColors.textSecondary),
             tooltip: 'Sair',
@@ -707,49 +860,57 @@ class _HomeScreenState extends State<HomeScreen> {
       body: _loadingRoute
           ? const Center(
               child: CircularProgressIndicator(color: AppColors.primary))
-          : SingleChildScrollView(
+          : ListView(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ─── Vehicle card ──────────────────────────────────────────
-                  _VehicleCard(vehicle: driver.vehicle, gps: gps),
-                  const SizedBox(height: 12),
-
-                  // ─── Route card ────────────────────────────────────────────
-                  _RouteCard(
-                    route: driver.activeRoute,
-                    currentStop: driver.currentStop,
-                    nextStop: driver.nextStop,
+              children: [
+                _GuidedStatusCard(
+                  statusLabel: _displayStatusLabel(currentStatus),
+                  statusColor: statusColor,
+                  routeTitle: routeTitle,
+                  nextAction: nextAction ?? '',
+                  nextActionHint: _nextActionHint(
+                    currentStatus,
+                    boardedCount: boardedPatients.length,
+                    pendingCount: waitingPatients.length,
                   ),
-                  const SizedBox(height: 12),
-
-                  // ─── Operational status buttons ────────────────────────────
-                  _StatusButtons(
-                    currentStatus: driver.operationalStatus,
-                    hasActiveRoute: driver.activeRoute != null,
-                    hasActiveTrip: _activeTrip(driver) != null,
-                    hasBoardedPassenger: (() {
-                      final trip = _activeTrip(driver);
-                      if (trip == null) return false;
-                      final status = (trip['status'] as String?) ?? '';
-                      return trip['boardedAt'] != null || status == 'BOARDING' || status == 'IN_PROGRESS' || status == 'ARRIVED' || status == 'COMPLETED';
-                    })(),
-                    onTap: _changeStatus,
-                  ),
-                  const SizedBox(height: 10),
-                  OperationalButton(
-                    label: 'SCAN PASSENGER QR',
-                    icon: Icons.qr_code_scanner,
-                    onPressed: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
-                    color: AppColors.info,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // ─── Patient list ──────────────────────────────────────────
-                  _PatientList(patients: driver.patients),
-                ],
-              ),
+                  boardedCount: boardedPatients.length,
+                  pendingCount: waitingPatients.length,
+                  missingCount: missingPatients.length,
+                  completedCount: completedPatients.length,
+                ),
+                const SizedBox(height: 12),
+                _NextActionCard(
+                  currentStatus: currentStatus,
+                  nextAction: nextAction,
+                  showScanner: showScanner,
+                  onAcceptRoute: () => _changeStatus('DRIVER_ACCEPTED'),
+                  onOpenScanner: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
+                  onStartTransit: () => _changeStatus('IN_TRANSIT'),
+                  onArrive: () => _changeStatus('ARRIVED'),
+                  onComplete: () => _changeStatus('COMPLETED'),
+                ),
+                const SizedBox(height: 12),
+                _PassengerOverviewCard(
+                  boardedCount: boardedPatients.length,
+                  waitingCount: waitingPatients.length,
+                  missingCount: missingPatients.length,
+                ),
+                const SizedBox(height: 12),
+                _PassengerGroupsCard(
+                  boarded: boardedPatients,
+                  waiting: waitingPatients,
+                  missing: missingPatients,
+                  completed: completedPatients,
+                ),
+                const SizedBox(height: 12),
+                _GpsOperationalCard(
+                  vehicle: driver.vehicle,
+                  gpsLabel: gpsLabel,
+                  position: gps.lastPosition,
+                ),
+                const SizedBox(height: 12),
+                const _MapPlaceholderCard(),
+              ],
             ),
     );
   }
@@ -1068,7 +1229,561 @@ class _PatientTile extends StatelessWidget {
               ],
             ),
           ),
-          StatusBadge(label: status, color: statusColor(status)),
+          StatusBadge(label: _label(status), color: statusColor(status)),
+        ],
+      ),
+    );
+  }
+
+  String _label(String status) {
+    switch (status.toUpperCase()) {
+      case 'BOARDING':
+        return 'Embarcando';
+      case 'IN_PROGRESS':
+      case 'IN_TRANSIT':
+        return 'Em deslocamento';
+      case 'ARRIVED':
+        return 'Chegou';
+      case 'COMPLETED':
+        return 'Concluído';
+      case 'NO_SHOW':
+        return 'Não compareceu';
+      case 'CANCELLED':
+        return 'Cancelado';
+      default:
+        return 'Aguardando';
+    }
+  }
+}
+
+class _GuidedStatusCard extends StatelessWidget {
+  final String statusLabel;
+  final Color statusColor;
+  final String routeTitle;
+  final String nextAction;
+  final String nextActionHint;
+  final int boardedCount;
+  final int pendingCount;
+  final int missingCount;
+  final int completedCount;
+
+  const _GuidedStatusCard({
+    required this.statusLabel,
+    required this.statusColor,
+    required this.routeTitle,
+    required this.nextAction,
+    required this.nextActionHint,
+    required this.boardedCount,
+    required this.pendingCount,
+    required this.missingCount,
+    required this.completedCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: statusColor.withOpacity(0.35), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  statusLabel,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            routeTitle,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _miniStat('Embarcados', boardedCount, AppColors.primary),
+              _miniStat('Aguardando', pendingCount, AppColors.warning),
+              _miniStat('Ausentes', missingCount, AppColors.danger),
+              _miniStat('Concluídos', completedCount, AppColors.completed),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            nextAction.isEmpty ? 'Sem próxima ação' : 'Próxima ação',
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            nextAction.isEmpty ? 'Acompanhe a operação.' : nextAction,
+            style: TextStyle(
+              color: statusColor,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            nextActionHint,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniStat(String label, int value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value.toString(),
+            style: TextStyle(
+              color: color,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NextActionCard extends StatelessWidget {
+  final String currentStatus;
+  final String? nextAction;
+  final bool showScanner;
+  final VoidCallback onAcceptRoute;
+  final VoidCallback onOpenScanner;
+  final VoidCallback onStartTransit;
+  final VoidCallback onArrive;
+  final VoidCallback onComplete;
+
+  const _NextActionCard({
+    required this.currentStatus,
+    required this.nextAction,
+    required this.showScanner,
+    required this.onAcceptRoute,
+    required this.onOpenScanner,
+    required this.onStartTransit,
+    required this.onArrive,
+    required this.onComplete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final action = nextAction ?? '';
+    final child = _actionButton(
+      label: action.isEmpty ? 'Sem ação' : action,
+      onPressed: action == 'ACEITAR ROTA'
+          ? onAcceptRoute
+          : action == 'ESCANEAR PASSAGEIRO'
+              ? onOpenScanner
+              : action == 'INICIAR DESLOCAMENTO'
+                  ? onStartTransit
+                  : action == 'CHEGADA'
+                      ? onArrive
+                      : action == 'FINALIZAR ROTA'
+                          ? onComplete
+                          : null,
+      color: action == 'ACEITAR ROTA'
+          ? AppColors.warning
+          : action == 'ESCANEAR PASSAGEIRO'
+              ? AppColors.boarding
+              : action == 'INICIAR DESLOCAMENTO'
+                  ? AppColors.primary
+                  : action == 'CHEGADA'
+                      ? AppColors.info
+                      : action == 'FINALIZAR ROTA'
+                          ? AppColors.completed
+                          : AppColors.surface,
+      icon: action == 'ACEITAR ROTA'
+          ? Icons.play_arrow_rounded
+          : action == 'ESCANEAR PASSAGEIRO'
+              ? Icons.qr_code_scanner
+              : action == 'INICIAR DESLOCAMENTO'
+                  ? Icons.directions_car
+                  : action == 'CHEGADA'
+                      ? Icons.place_rounded
+                      : action == 'FINALIZAR ROTA'
+                          ? Icons.check_circle_rounded
+                          : Icons.remove_circle_outline,
+      outlined: false,
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'AÇÃO DE HOJE',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          child,
+          if (showScanner && action != 'ESCANEAR PASSAGEIRO') ...[
+            const SizedBox(height: 10),
+            _actionButton(
+              label: 'ESCANEAR PASSAGEIRO',
+              onPressed: onOpenScanner,
+              color: AppColors.boarding,
+              icon: Icons.qr_code_scanner,
+              outlined: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _actionButton({
+    required String label,
+    required VoidCallback? onPressed,
+    required Color color,
+    required IconData icon,
+    required bool outlined,
+  }) {
+    return OperationalButton(
+      label: label,
+      icon: icon,
+      onPressed: onPressed,
+      color: color,
+      outlined: outlined,
+    );
+  }
+}
+
+class _PassengerOverviewCard extends StatelessWidget {
+  final int boardedCount;
+  final int waitingCount;
+  final int missingCount;
+
+  const _PassengerOverviewCard({
+    required this.boardedCount,
+    required this.waitingCount,
+    required this.missingCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _countTile('Embarcados', boardedCount, AppColors.primary)),
+          const SizedBox(width: 8),
+          Expanded(child: _countTile('Aguardando', waitingCount, AppColors.warning)),
+          const SizedBox(width: 8),
+          Expanded(child: _countTile('Ausentes', missingCount, AppColors.danger)),
+        ],
+      ),
+    );
+  }
+
+  Widget _countTile(String label, int value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value.toString(),
+            style: TextStyle(
+              color: color,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PassengerGroupsCard extends StatelessWidget {
+  final List<Map<String, dynamic>> boarded;
+  final List<Map<String, dynamic>> waiting;
+  final List<Map<String, dynamic>> missing;
+  final List<Map<String, dynamic>> completed;
+
+  const _PassengerGroupsCard({
+    required this.boarded,
+    required this.waiting,
+    required this.missing,
+    required this.completed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'PASSAGEIROS',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (boarded.isNotEmpty) ...[
+            _section('Embarcados', boarded, AppColors.primary),
+            const SizedBox(height: 12),
+          ],
+          if (waiting.isNotEmpty) ...[
+            _section('Aguardando', waiting, AppColors.warning),
+            const SizedBox(height: 12),
+          ],
+          if (missing.isNotEmpty) ...[
+            _section('Não compareceu', missing, AppColors.danger),
+            const SizedBox(height: 12),
+          ],
+          if (completed.isNotEmpty) _section('Concluídos', completed, AppColors.completed),
+          if (boarded.isEmpty && waiting.isEmpty && missing.isEmpty && completed.isEmpty)
+            const Text(
+              'Nenhum passageiro disponível.',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _section(String title, List<Map<String, dynamic>> items, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: color,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: 6),
+            StatusBadge(label: items.length.toString(), color: color),
+          ],
+        ),
+        const SizedBox(height: 8),
+        for (final passenger in items) _PatientTile(patient: passenger),
+      ],
+    );
+  }
+}
+
+class _GpsOperationalCard extends StatelessWidget {
+  final Map<String, dynamic>? vehicle;
+  final String gpsLabel;
+  final Position? position;
+
+  const _GpsOperationalCard({
+    required this.vehicle,
+    required this.gpsLabel,
+    required this.position,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final speed = position == null ? null : (position!.speed * 3.6);
+    final accuracy = position?.accuracy;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'GEOLOCALIZAÇÃO',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            vehicle != null
+                ? '${vehicle!['plate'] ?? 'Veículo'} · ${vehicle!['model'] ?? ''}'
+                : 'Sem veículo vinculado',
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            gpsLabel,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              StatusBadge(
+                label: position == null ? 'SEM LEITURA' : 'SINAL AO VIVO',
+                color: position == null ? AppColors.warning : AppColors.primary,
+              ),
+              if (speed != null)
+                StatusBadge(
+                  label: '${speed.toStringAsFixed(0)} KM/H',
+                  color: AppColors.primary,
+                ),
+              if (accuracy != null)
+                StatusBadge(
+                  label: 'PRECISÃO ${accuracy.toStringAsFixed(0)} M',
+                  color: AppColors.boarding,
+                ),
+            ],
+          ),
+          if (position == null) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'Aguardando primeira posição do veículo.',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MapPlaceholderCard extends StatelessWidget {
+  const _MapPlaceholderCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 160,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border, style: BorderStyle.solid),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'MAPA OPERACIONAL',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          SizedBox(height: 12),
+          Expanded(
+            child: Center(
+              child: Text(
+                'Espaço reservado para o mapa operacional em tempo real.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

@@ -31,6 +31,7 @@ class AppColors {
   static const Color textSecondary = Color(0xFF8B949E);
   static const Color border = Color(0xFF30363D);
   static const Color boarding = Color(0xFF58A6FF);      // boarding / waiting
+  static const Color completed = Color(0xFF8B949E);     // gray — completed
 }
 
 // ─── Status colours by VehicleOperationalStatus ──────────────────────────────
@@ -54,10 +55,11 @@ Color statusColor(String status) {
       return AppColors.boarding;
     case 'IN_PROGRESS':
     case 'IN_TRANSIT':
+      return AppColors.primary;
     case 'ARRIVED':
       return AppColors.info;
     case 'COMPLETED':
-      return AppColors.primary;
+      return AppColors.completed;
     case 'NO_SHOW':
     case 'CANCELLED':
     case 'OFFLINE':

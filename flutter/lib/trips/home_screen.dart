@@ -690,6 +690,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     })(),
                     onTap: _changeStatus,
                   ),
+                  const SizedBox(height: 10),
+                  OperationalButton(
+                    label: 'SCAN PASSENGER QR',
+                    icon: Icons.qr_code_scanner,
+                    onPressed: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
+                    color: AppColors.info,
+                  ),
                   const SizedBox(height: 16),
 
                   // ─── Patient list ──────────────────────────────────────────

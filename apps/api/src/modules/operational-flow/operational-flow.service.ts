@@ -168,6 +168,7 @@ export class OperationalFlowService {
   }
 
   async startInTransit(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
+    await this.autoMarkNoShowBeforeTransit(tenantId, scope, context);
     return this.transitionState(tenantId, scope, 'IN_TRANSIT', context);
   }
 
@@ -611,6 +612,29 @@ export class OperationalFlowService {
     ]);
     this.logger.log(`[OPS] resolved tripId automatically routeId=${routeId} tripId=${resolved.id} status=${resolved.status}`);
     return resolved;
+  }
+
+  private async autoMarkNoShowBeforeTransit(tenantId: string, scope: FlowScope, context: FlowContext) {
+    const entity = await this.loadEntity(tenantId, scope);
+    if (!entity.trip) return;
+    const pendingTrips = await this.prisma.trip.findMany({
+      where: {
+        tenantId,
+        routeId: entity.route.id,
+        id: { not: entity.trip.id },
+        boardedAt: null,
+        status: { in: ['SCHEDULED', 'CONFIRMED'] as any[] },
+      },
+      select: { id: true },
+    });
+    for (const pending of pendingTrips) {
+      await this.transitionState(
+        tenantId,
+        { tripId: pending.id },
+        'NO_SHOW',
+        { ...context, source: context.source ?? 'AUTO_NO_SHOW_BEFORE_TRANSIT' },
+      );
+    }
   }
 
   private async findLatestQueue(tenantId: string, patientId: string) {

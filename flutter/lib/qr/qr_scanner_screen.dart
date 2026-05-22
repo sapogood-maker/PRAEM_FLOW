@@ -1,10 +1,14 @@
 // lib/qr/qr_scanner_screen.dart
 // ─────────────────────────────────────────────────────────────────────────────
-// QR scanner screen — scans patient QR token, validates with backend,
-// displays name / destination / priority. NEVER shows CPF or sensitive data.
+// Smart operational QR scanner:
+// - single-tap continuous scan flow for drivers
+// - backend resolves patient/trip/route and validates active dispatch
+// - scanner stays open for fast multi-passenger boarding
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
@@ -24,48 +28,43 @@ class QrScannerScreen extends StatefulWidget {
 }
 
 class _QrScannerScreenState extends State<QrScannerScreen> {
-
-  // ─── Camera Controller ─────────────────────────────────────────────
-  // Inicia com câmera frontal
   final _controller = MobileScannerController(
-    facing: CameraFacing.front,
+    facing: CameraFacing.back,
     detectionSpeed: DetectionSpeed.normal,
     torchEnabled: false,
   );
-
   final _dio = Dio();
 
-  bool _scanning = true;
   bool _loading = false;
-
   Map<String, dynamic>? _result;
   String? _error;
+  String? _lastToken;
+  DateTime? _lastScanAt;
+  Timer? _clearTimer;
 
-  // ───────────────────────────────────────────────────────────────────
-  // Detect QR
-  // ───────────────────────────────────────────────────────────────────
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (!_scanning || _loading) return;
-
-    final code = capture.barcodes.firstOrNull?.rawValue;
-
+    if (_loading) return;
+    final code = capture.barcodes.firstOrNull?.rawValue?.trim();
     if (code == null || code.isEmpty) return;
 
-    setState(() {
-      _scanning = false;
-      _loading = true;
-      _error = null;
-      _result = null;
-    });
+    final now = DateTime.now();
+    if (_lastToken == code && _lastScanAt != null && now.difference(_lastScanAt!) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastToken = code;
+    _lastScanAt = now;
 
+    setState(() {
+      _loading = true;
+    });
     await _validateToken(code);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+    });
   }
 
-  // ───────────────────────────────────────────────────────────────────
-  // Validate QR
-  // ───────────────────────────────────────────────────────────────────
   Future<void> _validateToken(String token) async {
-
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
     final offline = context.read<OfflineQueue>();
@@ -77,59 +76,59 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       'vehicleId': driver.vehicle?['id'],
       'routeId': driver.activeRoute?['id'],
       'deviceId': driver.deviceId,
-      'source': 'TABLET',
+      'source': 'TABLET_SMART_SCANNER',
       'timestamp': DateTime.now().toIso8601String(),
     };
 
     try {
-
       final resp = await _dio.post(
         '${AppConfig.apiBaseUrl}/patients/qr/scan',
         data: payload,
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer ${auth.token}',
-          },
-        ),
+        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
       );
-
       final data = resp.data as Map<String, dynamic>;
-
+      _clearTimer?.cancel();
+      _clearTimer = Timer(const Duration(seconds: 6), () {
+        if (!mounted) return;
+        setState(() {
+          _result = null;
+          _error = null;
+        });
+      });
+      if (!mounted) return;
       setState(() {
         _result = {
-          'name': data['patient']?['name'] ?? data['name'] ?? '—',
-          'destination': data['patient']?['destination'] ?? data['destination'] ?? '—',
-          'priority': data['patient']?['clinicalRisk'] ?? data['clinicalRisk'] ?? '—',
-          'status': data['status'] ?? 'SUCCESS',
-          'tripId': data['tripId'] ?? data['trip']?['id'],
+          'name': data['name'] ?? data['patient']?['name'] ?? '—',
+          'destination': data['destination'] ?? data['queue']?['destination'] ?? '—',
+          'status': 'SUCCESS',
+          'tripId': data['tripId'],
+          'routeId': data['routeId'],
         };
-
-        _loading = false;
+        _error = null;
       });
-
+      HapticFeedback.mediumImpact();
+      SystemSound.play(SystemSoundType.click);
     } on DioException catch (e) {
-
       if (e.response == null) {
-
-        // Offline queue
         await offline.enqueueQr({
           ...payload,
           'offline': true,
         });
-
+        if (!mounted) return;
         setState(() {
           _error = 'Sem conexão — scan salvo offline';
-          _loading = false;
+          _result = null;
         });
-
       } else {
-
+        final responseBody = e.response?.data;
+        final apiMessage = responseBody is Map ? responseBody['message']?.toString() : null;
+        if (!mounted) return;
         setState(() {
-          _error = 'QR inválido ou expirado';
-          _loading = false;
+          _error = apiMessage ?? 'QR inválido';
+          _result = null;
         });
-
       }
+      HapticFeedback.lightImpact();
     }
   }
 
@@ -155,116 +154,62 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     await offline.replaceQr(remaining);
   }
 
-  // ───────────────────────────────────────────────────────────────────
-  // Reset scanner
-  // ───────────────────────────────────────────────────────────────────
-  void _reset() {
-    setState(() {
-      _scanning = true;
-      _loading = false;
-      _result = null;
-      _error = null;
-    });
-  }
-
-  // ───────────────────────────────────────────────────────────────────
-  // Dispose
-  // ───────────────────────────────────────────────────────────────────
   @override
   void dispose() {
+    _clearTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  // ───────────────────────────────────────────────────────────────────
-  // UI
-  // ───────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
-
       backgroundColor: AppColors.background,
-
       appBar: AppBar(
-
         backgroundColor: AppColors.surface,
-
         title: const Text(
-          'Scan QR Paciente',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-          ),
+          'Scan Passenger QR',
+          style: TextStyle(color: AppColors.textPrimary),
         ),
-
-        iconTheme: const IconThemeData(
-          color: AppColors.textPrimary,
-        ),
-
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
         actions: [
-
-          // ─── Trocar câmera ────────────────────────────────────────
           IconButton(
             icon: const Icon(Icons.cameraswitch),
-            onPressed: () async {
-              await _controller.switchCamera();
-            },
+            onPressed: () async => _controller.switchCamera(),
           ),
-
-          // ─── Flash ────────────────────────────────────────────────
           IconButton(
             icon: const Icon(Icons.flash_on),
-            onPressed: () async {
-              await _controller.toggleTorch();
-            },
+            onPressed: () async => _controller.toggleTorch(),
           ),
-
         ],
       ),
-
       body: Column(
         children: [
-
-          // ─── Camera ───────────────────────────────────────────────
           Expanded(
             flex: 3,
-            child: _result != null || _loading
-                ? const SizedBox()
-                : MobileScanner(
-                    controller: _controller,
-                    onDetect: _onDetect,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                MobileScanner(
+                  controller: _controller,
+                  onDetect: _onDetect,
+                ),
+                if (_loading)
+                  const Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 16),
+                      child: CircularProgressIndicator(color: AppColors.primary),
+                    ),
                   ),
+              ],
+            ),
           ),
-
-          // ─── Result / Error ───────────────────────────────────────
           Expanded(
             flex: 2,
             child: Padding(
-              padding: const EdgeInsets.all(24),
-
-              child: _loading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        color: AppColors.primary,
-                      ),
-                    )
-
-                  : _result != null
-                      ? _buildResult()
-
-                  : _error != null
-                      ? _buildError()
-
-                  : const Center(
-                      child: Text(
-                        'Aponte a câmera para o QR do paciente',
-                        style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 16,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
+              padding: const EdgeInsets.all(16),
+              child: _buildFeedback(),
             ),
           ),
         ],
@@ -272,118 +217,101 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     );
   }
 
-  // ───────────────────────────────────────────────────────────────────
-  // Result card
-  // ───────────────────────────────────────────────────────────────────
-  Widget _buildResult() {
-
-    final status = _result!['status'] as String;
-
-    final color = status == 'SUCCESS'
-        ? AppColors.primary
-        : AppColors.warning;
-
-    return Column(
-
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-
-      children: [
-
-        Icon(
-          status == 'SUCCESS'
-              ? Icons.check_circle
-              : Icons.warning_rounded,
-          color: color,
-          size: 48,
+  Widget _buildFeedback() {
+    if (_result != null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.primary),
         ),
-
-        const SizedBox(height: 12),
-
-        _infoRow('Paciente', _result!['name'] as String),
-        _infoRow('Destino', _result!['destination'] as String),
-        _infoRow('Prioridade', _result!['priority'] as String),
-
-        const SizedBox(height: 20),
-
-        OperationalButton(
-          label: 'PRÓXIMO SCAN',
-          icon: Icons.qr_code_scanner,
-          onPressed: _reset,
-        ),
-      ],
-    );
-  }
-
-  // ───────────────────────────────────────────────────────────────────
-  // Error card
-  // ───────────────────────────────────────────────────────────────────
-  Widget _buildError() {
-
-    return Column(
-
-      mainAxisAlignment: MainAxisAlignment.center,
-
-      children: [
-
-        const Icon(
-          Icons.error_rounded,
-          color: AppColors.danger,
-          size: 48,
-        ),
-
-        const SizedBox(height: 12),
-
-        Text(
-          _error!,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 16,
-          ),
-          textAlign: TextAlign.center,
-        ),
-
-        const SizedBox(height: 20),
-
-        OperationalButton(
-          label: 'TENTAR NOVAMENTE',
-          icon: Icons.refresh,
-          onPressed: _reset,
-          color: AppColors.warning,
-        ),
-      ],
-    );
-  }
-
-  // ───────────────────────────────────────────────────────────────────
-  // Info Row
-  // ───────────────────────────────────────────────────────────────────
-  Widget _infoRow(String label, String value) {
-
-    return Padding(
-
-      padding: const EdgeInsets.symmetric(vertical: 4),
-
-      child: Row(
-
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-
-        children: [
-
-          Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 14,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.check_circle, color: AppColors.primary),
+                SizedBox(width: 8),
+                Text(
+                  'Boarding confirmed',
+                  style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ],
             ),
-          ),
+            const SizedBox(height: 12),
+            _line('Passenger', _result!['name'] as String? ?? '—'),
+            _line('Destination', _result!['destination'] as String? ?? '—'),
+            _line('Trip', (_result!['tripId'] ?? '—').toString()),
+            const SizedBox(height: 12),
+            const Text(
+              'Continue scanning next passengers...',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
 
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
+    if (_error != null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.warning),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: AppColors.warning),
+                SizedBox(width: 8),
+                Text(
+                  'Operational validation failed',
+                  style: TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+            const Spacer(),
+            OperationalButton(
+              label: 'CLEAR MESSAGE',
+              icon: Icons.clear,
+              onPressed: () => setState(() => _error = null),
+              color: AppColors.warning,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const Center(
+      child: Text(
+        'One-tap operational flow:\nOpen scanner -> scan passengers -> start transit',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: AppColors.textSecondary, fontSize: 15),
+      ),
+    );
+  }
+
+  Widget _line(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

@@ -296,32 +296,34 @@ export class PatientsService {
       data: { qrLastReadAt: new Date(), qrLastUsedAt: new Date() },
     });
 
-    let boardingFlowResult: { trip: any; route: any; queue: any } | null = null;
-    // If routeId or tripId was provided, centralize the operational boarding flow.
-    if (payload.routeId || payload.tripId) {
-      boardingFlowResult = await this.flow.confirmBoarding(tenantId, {
-        routeId: payload.routeId,
-        tripId: payload.tripId,
-        patientId: patient.id,
-      }, {
-        vehicleId: payload.vehicleId ?? null,
-        driverId: payload.operatorId ?? null,
-        deviceId: (payload as any).deviceId ?? device ?? null,
-        checkpoint: payload.checkpoint ?? 'BOARDING',
-        gpsLat: payload.gpsLat ?? null,
-        gpsLng: payload.gpsLng ?? null,
-        source: payload.source ?? 'API',
-      });
-    }
+    const resolvedBoarding = await this.resolveBoardingContext(
+      tenantId,
+      patient.id,
+      payload.operatorId,
+    );
+    const boardingFlowResult = await this.flow.confirmBoarding(tenantId, {
+      routeId: resolvedBoarding.routeId,
+      tripId: resolvedBoarding.tripId,
+      patientId: patient.id,
+    }, {
+      vehicleId: payload.vehicleId ?? null,
+      driverId: payload.operatorId ?? null,
+      deviceId: (payload as any).deviceId ?? device ?? null,
+      checkpoint: payload.checkpoint ?? 'BOARDING',
+      gpsLat: payload.gpsLat ?? null,
+      gpsLng: payload.gpsLng ?? null,
+      source: payload.source ?? 'API',
+    });
 
     const activeQueue = patient.queues[0] ?? null;
 
     return {
       valid: true,
-      tripId: boardingFlowResult?.trip?.id ?? payload.tripId ?? null,
-      routeId: boardingFlowResult?.route?.id ?? payload.routeId ?? null,
+      tripId: boardingFlowResult?.trip?.id ?? resolvedBoarding.tripId ?? null,
+      routeId: boardingFlowResult?.route?.id ?? resolvedBoarding.routeId ?? null,
       operationalState: boardingFlowResult?.trip?.status ?? null,
       name: patient.name,
+      destination: ((boardingFlowResult?.route as any)?.destination as string | undefined) ?? null,
       operationalId: patient.operationalId,
       mobility: patient.mobility,
       clinicalRisk: patient.clinicalRisk,
@@ -340,6 +342,69 @@ export class PatientsService {
             appointmentDate: activeQueue.appointmentDate,
           }
         : null,
+    };
+  }
+
+  private getTodayWindow() {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
+
+  private async resolveBoardingContext(tenantId: string, patientId: string, driverId?: string) {
+    if (!driverId) {
+      throw new BadRequestException('Driver identification is required for operational boarding');
+    }
+    const { start, end } = this.getTodayWindow();
+    const todayTrips = await this.prisma.trip.findMany({
+      where: {
+        tenantId,
+        patientId,
+        route: { is: { date: { gte: start, lt: end } } },
+      },
+      include: {
+        route: {
+          select: {
+            id: true,
+            driverId: true,
+            status: true,
+            date: true,
+            destination: true,
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    if (todayTrips.length === 0) {
+      throw new BadRequestException('Patient has no route today');
+    }
+
+    const sameDriverTrips = todayTrips.filter((t: any) => t.route?.driverId === driverId);
+    if (sameDriverTrips.length === 0) {
+      throw new BadRequestException('Patient belongs to another route');
+    }
+
+    const candidate = sameDriverTrips.find((t: any) => ['DISPATCHED', 'ACTIVE', 'RETURNING'].includes(String(t.route?.status)))
+      ?? sameDriverTrips[0];
+
+    if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(String(candidate.status))) {
+      throw new BadRequestException('Trip completed/cancelled');
+    }
+
+    if (!['DISPATCHED', 'ACTIVE', 'RETURNING'].includes(String(candidate.route?.status))) {
+      throw new BadRequestException('Patient has no route today');
+    }
+
+    if (candidate.boardedAt || ['BOARDING', 'IN_PROGRESS', 'ARRIVED'].includes(String(candidate.status))) {
+      throw new BadRequestException('Passenger already boarded');
+    }
+
+    return {
+      tripId: candidate.id as string,
+      routeId: candidate.route.id as string,
     };
   }
 

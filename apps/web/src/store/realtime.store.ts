@@ -12,6 +12,7 @@ type RealtimeState = {
   connected: boolean;
   revision: number;
   vehiclePositions: VehiclePosition[];
+  vehicleTrails: Record<string, Array<{ lat: number; lng: number; timestamp: string; speed?: number; status?: string }>>;
   activityFeed: ActivityEvent[];
   boardingEvents: BoardingEvent[];
   setConnected: (connected: boolean) => void;
@@ -21,10 +22,25 @@ type RealtimeState = {
   pushBoardingEvent: (event: BoardingEvent) => void;
 };
 
+const MAX_TRAIL_POINTS = 280;
+const MIN_POINT_DISTANCE_METERS = 5;
+
+function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const toRad = (n: number) => (n * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const aa =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+  return 6371000 * c;
+}
+
 export const useRealtimeStore = create<RealtimeState>((set) => ({
   connected: false,
   revision: 0,
   vehiclePositions: [],
+  vehicleTrails: {},
   activityFeed: [],
   boardingEvents: [],
 
@@ -80,15 +96,28 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       }
 
       const existed = state.vehiclePositions.find((v) => v.vehicleId === markerId);
+      const speed = raw.speed == null ? undefined : Number(raw.speed);
+      const speedSafe = speed == null || Number.isNaN(speed) ? undefined : speed;
+      const isStopped = speedSafe != null && speedSafe < 3;
+      const statusRaw = String(raw.operationalStatus ?? '');
+      const normalizedStatus =
+        raw.online === false
+          ? 'OFFLINE'
+          : statusRaw.toUpperCase() === 'COMPLETED'
+              ? 'COMPLETED'
+              : isStopped
+                  ? 'STOPPED'
+                  : (statusRaw || 'MOVING').toUpperCase();
       const normalized: VehiclePosition = {
         ...raw,
         vehicleId: markerId,
         lat,
         lng,
-        speed: raw.speed == null ? undefined : Number(raw.speed),
+        speed: speedSafe,
         heading: raw.heading == null ? undefined : Number(raw.heading),
         accuracy: raw.accuracy == null ? undefined : Number(raw.accuracy),
         online: raw.online ?? true,
+        operationalStatus: normalizedStatus,
       };
       console.debug('[MAP] payload accepted', {
         markerId,
@@ -107,7 +136,41 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       });
 
       const others = state.vehiclePositions.filter((v) => v.vehicleId !== markerId);
-      return { vehiclePositions: [...others, normalized] };
+      const currentTrail = state.vehicleTrails[markerId] ?? [];
+      const lastPoint = currentTrail[currentTrail.length - 1];
+      const shouldAppend =
+        !lastPoint ||
+        haversineMeters(lastPoint.lat, lastPoint.lng, normalized.lat, normalized.lng) >= MIN_POINT_DISTANCE_METERS;
+      const nextTrail = shouldAppend
+        ? [
+            ...currentTrail,
+            {
+              lat: normalized.lat,
+              lng: normalized.lng,
+              timestamp: normalized.timestamp ?? normalized.updatedAt ?? new Date().toISOString(),
+              speed: normalized.speed,
+              status: normalized.operationalStatus,
+            },
+          ].slice(-MAX_TRAIL_POINTS)
+        : currentTrail;
+
+      if (shouldAppend) {
+        console.debug('[MAP] trail point appended', {
+          markerId,
+          points: nextTrail.length,
+          lat: normalized.lat,
+          lng: normalized.lng,
+          status: normalized.operationalStatus,
+        });
+      }
+
+      return {
+        vehiclePositions: [...others, normalized],
+        vehicleTrails: {
+          ...state.vehicleTrails,
+          [markerId]: nextTrail,
+        },
+      };
     }),
 
   pushActivity: (event) =>

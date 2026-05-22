@@ -20,6 +20,7 @@ type VehicleMarkerProps = {
 const statusColors: Record<string, string> = {
   WAITING: '#d29922',
   WAITING_PATIENT: '#d29922',
+  STOPPED: '#d29922',
   BOARDING: '#388bfd',
   IN_TRANSIT: '#2da44e',
   MOVING: '#2da44e',
@@ -36,6 +37,8 @@ function getOperationalLabel(status?: string) {
       return 'Aguardando';
     case 'BOARDING':
       return 'Embarque';
+    case 'STOPPED':
+      return 'Parado';
     case 'IN_TRANSIT':
     case 'MOVING':
       return 'Em deslocamento';
@@ -75,7 +78,10 @@ export function VehicleMarker({
   updatedAt,
 }: VehicleMarkerProps) {
   const [animatedPosition, setAnimatedPosition] = useState<[number, number]>(position);
+  const [animatedHeading, setAnimatedHeading] = useState<number>(heading ?? 0);
   const animationFrameRef = useRef<number | null>(null);
+  const headingFrameRef = useRef<number | null>(null);
+  const headingRef = useRef<number>(heading ?? 0);
 
   useEffect(() => {
     const [startLat, startLng] = animatedPosition;
@@ -102,9 +108,34 @@ export function VehicleMarker({
     };
   }, [position]);
 
+  useEffect(() => {
+    const target = Number.isFinite(heading) ? heading ?? 0 : 0;
+    const start = headingRef.current;
+    const startAt = performance.now();
+    const duration = 260;
+
+    // shortest rotation direction
+    let delta = ((target - start + 540) % 360) - 180;
+    const animate = (now: number) => {
+      const t = Math.min((now - startAt) / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 2);
+      const next = (start + delta * eased + 360) % 360;
+      headingRef.current = next;
+      setAnimatedHeading(next);
+      if (t < 1) headingFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    if (headingFrameRef.current) cancelAnimationFrame(headingFrameRef.current);
+    headingFrameRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (headingFrameRef.current) cancelAnimationFrame(headingFrameRef.current);
+    };
+  }, [heading]);
+
   const color = getStatusColor(online === false ? 'OFFLINE' : operationalStatus);
   const statusLabel = getOperationalLabel(online === false ? 'OFFLINE' : operationalStatus);
-  const rotate = Number.isFinite(heading) ? heading ?? 0 : 0;
+  const rotate = animatedHeading;
   const label = plate ?? vehicleId;
   const driverLabel = driverId ?? 'Não informado';
   const speedLabel = speed == null ? '—' : `${Math.max(0, speed).toFixed(0)} km/h`;
@@ -113,8 +144,8 @@ export function VehicleMarker({
     () =>
       L.divIcon({
         className: 'vehicle-marker',
-        iconSize: [48, 48],
-        iconAnchor: [24, 24],
+        iconSize: [44, 44],
+        iconAnchor: [22, 22],
         html: `
           <style>
             @keyframes mapPulse {
@@ -123,14 +154,14 @@ export function VehicleMarker({
               100% { transform: scale(1.25); opacity: 0; }
             }
           </style>
-          <div style="position:relative;width:48px;height:48px;display:flex;align-items:center;justify-content:center;">
+          <div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center;">
             ${
               online !== false
-                ? `<span style="position:absolute;width:34px;height:34px;border-radius:9999px;background:${color};animation:mapPulse 1.6s infinite;"></span>`
+                ? `<span style="position:absolute;width:30px;height:30px;border-radius:9999px;background:${color};animation:mapPulse 1.6s infinite;"></span>`
                 : ''
             }
-            <div style="position:relative;z-index:2;transform:rotate(${rotate}deg);transition:transform 220ms linear;">
-              <svg width="34" height="34" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <div style="position:relative;z-index:2;transform-origin:center center;transform:translate(0, 0) rotate(${rotate}deg);transition:transform 180ms linear;">
+              <svg width="30" height="30" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect x="8" y="20" width="48" height="24" rx="8" fill="#0d1117" stroke="${color}" stroke-width="4"/>
                 <rect x="16" y="24" width="32" height="12" rx="4" fill="${color}" fill-opacity="0.22"/>
                 <circle cx="20" cy="48" r="6" fill="#0d1117" stroke="${color}" stroke-width="3"/>

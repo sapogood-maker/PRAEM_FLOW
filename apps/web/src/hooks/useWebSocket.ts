@@ -16,11 +16,33 @@ export function useWebSocket() {
   const pushBoardingEvent = useRealtimeStore((s) => s.pushBoardingEvent);
 
   useEffect(() => {
-    if (!token || !tenantId) return;
+    if (!token || !tenantId) {
+      console.debug('[AUTH] websocket skipped: missing token/tenant', {
+        hasToken: Boolean(token),
+        tenantId: tenantId ?? null,
+      });
+      return;
+    }
 
-    const socket = io(`${process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3010'}/operations`, {
+    const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL;
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!wsBaseUrl) {
+      console.debug('[SOCKET] websocket skipped: NEXT_PUBLIC_WS_URL missing');
+      setConnected(false);
+      return;
+    }
+    console.debug('[AUTH] websocket init', {
+      hasToken: Boolean(token),
+      tenantId,
+      wsBaseUrl,
+      apiBaseUrl: apiBaseUrl ?? 'not-set',
+      namespace: '/operations',
+    });
+
+    const socket = io(`${wsBaseUrl}/operations`, {
       auth: { token },
       transports: ['websocket'],
+      reconnection: true,
     });
 
     const record = (message: string, type: 'route' | 'trip' | 'queue' | 'vehicle' | 'alert' | 'boarding' = 'trip') => {
@@ -48,8 +70,24 @@ export function useWebSocket() {
       console.debug('[SOCKET] connected /operations', { tenantId });
       socket.emit('join:tenant', { tenantId });
       socket.emit('ops:state:request', { tenantId });
-      void api.get('/tracking/live')
+      void api.get('/tracking/live', {
+        validateStatus: () => true,
+      })
         .then((response) => {
+          if (response.status === 401 || response.status === 403) {
+            console.debug('[GPS] bootstrap tracking/live unauthorized', {
+              status: response.status,
+              tenantId,
+            });
+            return;
+          }
+          if (response.status >= 400) {
+            console.debug('[GPS] bootstrap tracking/live non-success', {
+              status: response.status,
+              tenantId,
+            });
+            return;
+          }
           const rows = Array.isArray(response.data) ? response.data : [];
           console.debug('[GPS] bootstrap tracking/live', { count: rows.length });
           for (const row of rows) {
@@ -57,12 +95,22 @@ export function useWebSocket() {
           }
         })
         .catch((error) => {
-          console.debug('[GPS] bootstrap tracking/live failed', { error: String(error) });
+          console.debug('[GPS] bootstrap tracking/live failed', {
+            error: String(error),
+            tenantId,
+          });
         });
     });
     socket.on('disconnect', () => {
       console.debug('[SOCKET] disconnected /operations', { tenantId });
       setConnected(false);
+    });
+    socket.on('connect_error', (error: unknown) => {
+      console.debug('[SOCKET] connect_error /operations', { tenantId, error: String(error) });
+      setConnected(false);
+    });
+    socket.on('error', (error: unknown) => {
+      console.debug('[SOCKET] socket error /operations', { tenantId, error: String(error) });
     });
 
     socket.on('vehicle:tracking', (data: VehiclePosition) => {
@@ -153,6 +201,7 @@ export function useWebSocket() {
     });
 
     return () => {
+      console.debug('[SOCKET] cleanup /operations', { tenantId });
       socket.disconnect();
     };
   }, [token, tenantId, setConnected, bumpRevision, pushActivity, pushBoardingEvent]);

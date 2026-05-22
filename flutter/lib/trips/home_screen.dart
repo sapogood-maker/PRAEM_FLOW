@@ -62,6 +62,26 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'OFFLINE';
   }
 
+  Future<void> _ensureGpsTracking({
+    required AuthService auth,
+    required DriverState driver,
+    required GpsTrackingService gps,
+    String? routeId,
+  }) async {
+    final vehicleId = driver.vehicle?['id'] as String? ?? auth.vehicle?['id'] as String?;
+    final deviceId = driver.deviceId;
+    if (vehicleId == null || deviceId == null || auth.token == null || auth.tenantId == null) {
+      return;
+    }
+    await gps.start(
+      vehicleId: vehicleId,
+      tenantId: auth.tenantId!,
+      deviceId: deviceId,
+      authToken: auth.token!,
+      routeId: routeId,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -101,6 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         // Reload route and auto-open trip screen
         _loadRoute(auth, driver).then((_) {
+          _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
           if (!mounted) return;
           if (driver.activeRoute != null) {
             Navigator.pushNamed(context, AppRoutes.trip);
@@ -112,6 +133,12 @@ class _HomeScreenState extends State<HomeScreen> {
     ws.on('ws:connected', (_) async {
       debugPrint('[FLUTTER] socket reconnect callback');
       await _loadRoute(auth, driver);
+      await _ensureGpsTracking(
+        auth: auth,
+        driver: driver,
+        gps: gps,
+        routeId: driver.activeRoute?['id'] as String?,
+      );
       await _syncOfflineQueues();
     });
 
@@ -159,6 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (routeId != null) {
         context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
         context.read<DriverState>().setOperationalStatus('DRIVER_ACCEPTED');
+        _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
       }
     });
 
@@ -170,6 +198,7 @@ class _HomeScreenState extends State<HomeScreen> {
         context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
       }
       context.read<DriverState>().setOperationalStatus('WAITING_PATIENT');
+      _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
     });
 
     ws.on('route.status_changed', (data) {
@@ -307,11 +336,11 @@ class _HomeScreenState extends State<HomeScreen> {
     // ─── Start GPS tracking ──────────────────────────────────────────────────
     final vehicle = driver.vehicle;
     if (vehicle != null) {
-      await gps.start(
-        vehicleId: vehicle['id'] as String,
-        tenantId: auth.tenantId!,
-        deviceId: driver.deviceId ?? 'unknown',
-        authToken: auth.token!,
+      await _ensureGpsTracking(
+        auth: auth,
+        driver: driver,
+        gps: gps,
+        routeId: driver.activeRoute?['id'] as String?,
       );
     }
     _offlineSyncTimer?.cancel();
@@ -485,6 +514,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
     final ws = context.read<WsService>();
+    final gps = context.read<GpsTrackingService>();
     final offlineQueue = context.read<OfflineQueue>();
     String? routeId = driver.activeRoute?['id'] as String?;
     Map<String, dynamic>? trip = _activeTrip(driver);
@@ -549,6 +579,14 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       debugPrint('[FLUTTER] REST response POST $actionUrl status=${resp.statusCode} data=${resp.data}');
       driver.setOperationalStatus(status);
+      if (status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') {
+        await _ensureGpsTracking(
+          auth: auth,
+          driver: driver,
+          gps: gps,
+          routeId: routeId,
+        );
+      }
     } on DioException catch (e) {
       debugPrint('[FLUTTER] REST error status=${e.response?.statusCode} data=${e.response?.data} message=${e.message}');
       if (e.response == null) {
@@ -570,6 +608,14 @@ class _HomeScreenState extends State<HomeScreen> {
           });
           debugPrint('[FLUTTER] offline queue enqueue status=$status url=$fallbackUrl');
           driver.setOperationalStatus(status);
+          if (status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') {
+            await _ensureGpsTracking(
+              auth: auth,
+              driver: driver,
+              gps: gps,
+              routeId: routeIdToUse,
+            );
+          }
         }
       }
       if (mounted) {
@@ -648,11 +694,12 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.logout, color: AppColors.textSecondary),
             tooltip: 'Sair',
             onPressed: () async {
+              final navigator = Navigator.of(context);
               context.read<GpsTrackingService>().stop();
               context.read<WsService>().disconnect();
               await context.read<AuthService>().logout();
-              if (!context.mounted) return;
-              Navigator.pushReplacementNamed(context, AppRoutes.login);
+              if (!mounted) return;
+              navigator.pushReplacementNamed(AppRoutes.login);
             },
           ),
         ],

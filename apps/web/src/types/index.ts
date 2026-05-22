@@ -29,14 +29,18 @@ export interface QueueItem {
 // ----- Vehicle Tracking -----------------------------------------------------
 export interface VehiclePosition {
   vehicleId: string;
+  driverId?: string | null;
+  routeId?: string | null;
   plate?: string;
   lat: number;
   lng: number;
   speed?: number;
   heading?: number;
+  accuracy?: number;
   ignition?: boolean;
   online?: boolean;
   updatedAt?: string;
+  timestamp?: string;
 }
 
 // ----- Activity Feed --------------------------------------------------------

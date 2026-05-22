@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { sanitizePayload } from '../../common/sanitize';
@@ -34,6 +34,8 @@ function deriveOperationalStatus(speed?: number | null, online?: boolean): strin
 
 @Injectable()
 export class TrackingService {
+  private readonly logger = new Logger(TrackingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly opsGateway: OperationsGateway,
@@ -83,6 +85,7 @@ export class TrackingService {
     });
 
     // Emit real-time location update
+    this.logger.log(`[GPS] heartbeat tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} driverId=${payload.driverId ?? '-'} routeId=${payload.routeId ?? '-'}`);
     this.opsGateway.emitToTenant(payload.tenantId, 'vehicle.location_updated', {
       vehicleId: payload.vehicleId,
       driverId: payload.driverId ?? null,
@@ -92,10 +95,26 @@ export class TrackingService {
       lng: payload.lng,
       speed: payload.speed,
       heading: payload.heading,
+      accuracy: payload.accuracy,
       operationalStatus,
       batteryLevel: payload.batteryLevel,
       timestamp: now.toISOString(),
     });
+    this.opsGateway.emitToTenant(payload.tenantId, 'driver:location:update', {
+      vehicleId: payload.vehicleId,
+      driverId: payload.driverId ?? null,
+      routeId: payload.routeId ?? null,
+      tenantId: payload.tenantId,
+      lat: payload.lat,
+      lng: payload.lng,
+      speed: payload.speed,
+      heading: payload.heading,
+      accuracy: payload.accuracy,
+      operationalStatus,
+      batteryLevel: payload.batteryLevel,
+      timestamp: now.toISOString(),
+    });
+    this.logger.log(`[MAP] broadcast tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'}`);
     await this.audit.log({
       tenantId: payload.tenantId,
       userId: payload.driverId ?? payload.vehicleId,

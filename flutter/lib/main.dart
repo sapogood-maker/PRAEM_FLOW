@@ -4,6 +4,8 @@
 // Sets up providers, initialises Hive offline queue, and starts the app.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -57,7 +59,17 @@ Future<void> main() async {
         driverId: authService.driverId,
         deviceId: driverState.deviceId,
       );
+      final vehicleId = authService.vehicle?['id'] as String?;
+      if (vehicleId != null && driverState.deviceId != null) {
+        unawaited(gpsService.start(
+          vehicleId: vehicleId,
+          tenantId: authService.tenantId!,
+          deviceId: driverState.deviceId!,
+          authToken: authService.token!,
+        ));
+      }
     } else {
+      gpsService.stop();
       wsService.disconnect();
     }
   });

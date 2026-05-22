@@ -1,11 +1,12 @@
 // lib/tracking/gps_tracking_service.dart
 // ─────────────────────────────────────────────────────────────────────────────
-// Reads GPS at ~10s intervals and sends heartbeat via WS or REST fallback.
+// Reads GPS continuously and forwards each fix to the operational socket.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:dio/dio.dart';
 import '../config/app_config.dart';
@@ -17,7 +18,7 @@ class GpsTrackingService extends ChangeNotifier {
   final OfflineQueue _offlineQueue;
   final Dio _dio = Dio();
 
-  Timer? _timer;
+  StreamSubscription<Position>? _subscription;
   Position? _lastPosition;
   bool _active = false;
 
@@ -25,6 +26,7 @@ class GpsTrackingService extends ChangeNotifier {
   String? _tenantId;
   String? _deviceId;
   String? _authToken;
+  String? _routeId;
 
   bool get active => _active;
   Position? get lastPosition => _lastPosition;
@@ -39,6 +41,14 @@ class GpsTrackingService extends ChangeNotifier {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
+
+    if (permission == LocationPermission.whileInUse) {
+      final always = await Permission.locationAlways.request();
+      if (always.isGranted) {
+        permission = LocationPermission.always;
+      }
+    }
+
     return permission == LocationPermission.always ||
         permission == LocationPermission.whileInUse;
   }
@@ -48,8 +58,19 @@ class GpsTrackingService extends ChangeNotifier {
     required String tenantId,
     required String deviceId,
     required String authToken,
+    String? routeId,
   }) async {
-    if (_active) return;
+    _vehicleId = vehicleId;
+    _tenantId = tenantId;
+    _deviceId = deviceId;
+    _authToken = authToken;
+    _routeId = routeId ?? _routeId;
+
+    if (_active && _subscription != null) {
+      debugPrint('[GPS] context updated vehicleId=$_vehicleId routeId=$_routeId');
+      return;
+    }
+
     _vehicleId = vehicleId;
     _tenantId = tenantId;
     _deviceId = deviceId;
@@ -64,74 +85,88 @@ class GpsTrackingService extends ChangeNotifier {
     _active = true;
     notifyListeners();
 
-    _timer = Timer.periodic(
-      Duration(seconds: AppConfig.gpsIntervalSeconds),
-      (_) => _tick(),
-    );
-    // Immediate first tick
-    await _tick();
+   const settings = LocationSettings(
+     accuracy: LocationAccuracy.high,
+     distanceFilter: 3,
+   );
+
+   _subscription = Geolocator.getPositionStream(locationSettings: settings).listen(
+     (pos) => _handlePosition(pos),
+     onError: (Object error, StackTrace stackTrace) {
+       debugPrint('[GPS] stream error: $error');
+     },
+     cancelOnError: false,
+   );
+
+   debugPrint('[GPS] started vehicleId=$_vehicleId routeId=$_routeId tenantId=$_tenantId');
+   await _captureCurrentFix();
   }
 
   void stop() {
-    _timer?.cancel();
-    _timer = null;
-    _active = false;
-    notifyListeners();
+   _subscription?.cancel();
+   _subscription = null;
+   _active = false;
+   notifyListeners();
   }
 
-  Future<void> _tick() async {
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 8),
-      );
-      _lastPosition = pos;
+  Future<void> _captureCurrentFix() async {
+   try {
+     final pos = await Geolocator.getCurrentPosition(
+       desiredAccuracy: LocationAccuracy.high,
+       timeLimit: const Duration(seconds: 8),
+     );
+     await _handlePosition(pos);
+   } catch (e) {
+     debugPrint('[GPS] current fix error: $e');
+   }
+  }
 
-      final batteryLevel = await _getBattery();
+  Future<void> _handlePosition(Position pos) async {
+   _lastPosition = pos;
 
-      final payload = {
-        'vehicleId': _vehicleId!,
-        'tenantId': _tenantId!,
-        'deviceId': _deviceId!,
-        'lat': pos.latitude,
-        'lng': pos.longitude,
-        'speed': pos.speed * 3.6, // m/s → km/h
-        'heading': pos.heading,
-        'accuracy': pos.accuracy,
-        'batteryLevel': batteryLevel,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
+   final batteryLevel = await _getBattery();
+   final payload = {
+     'vehicleId': _vehicleId!,
+     'tenantId': _tenantId!,
+     'deviceId': _deviceId!,
+     if (_routeId != null) 'routeId': _routeId,
+     'lat': pos.latitude,
+     'lng': pos.longitude,
+     'speed': pos.speed * 3.6,
+     'heading': pos.heading,
+     'accuracy': pos.accuracy,
+     'batteryLevel': batteryLevel,
+     'timestamp': DateTime.now().toIso8601String(),
+   };
 
-      if (_ws.connected) {
-        _ws.emitHeartbeat(
-          vehicleId: _vehicleId!,
-          lat: pos.latitude,
-          lng: pos.longitude,
-          speed: pos.speed * 3.6,
-          heading: pos.heading,
-          battery: batteryLevel.toDouble(),
-          deviceId: _deviceId!,
-        );
-        // Also persist via REST for DB storage
-        _sendRest(payload);
-      } else {
-        // Offline — queue for later sync
-        await _offlineQueue.enqueueGps(payload);
-        _tryFlush();
-      }
+   debugPrint('[GPS] fix vehicleId=${_vehicleId!} routeId=${_routeId ?? '-'} lat=${pos.latitude} lng=${pos.longitude} speed=${payload['speed']} acc=${pos.accuracy}');
 
-      notifyListeners();
-    } catch (e) {
-      debugPrint('[GpsTracking] tick error: $e');
-    }
+   if (_ws.connected) {
+     _ws.emitLocationUpdate(
+       vehicleId: _vehicleId!,
+       lat: pos.latitude,
+       lng: pos.longitude,
+       speed: pos.speed * 3.6,
+       heading: pos.heading,
+       battery: batteryLevel.toDouble(),
+       deviceId: _deviceId!,
+       accuracy: pos.accuracy,
+       routeId: _routeId,
+     );
+     await _tryFlush();
+   } else {
+     await _offlineQueue.enqueueGps(payload);
+   }
+
+   notifyListeners();
   }
 
   Future<void> _sendRest(Map<String, dynamic> payload) async {
-    try {
-      await _dio.post(
-        '${AppConfig.apiBaseUrl}/tracking/heartbeat',
-        data: payload,
-        options: Options(headers: {'x-device-token': _authToken}),
+   try {
+     await _dio.post(
+       '${AppConfig.apiBaseUrl}/tracking/heartbeat',
+       data: payload,
+       options: Options(headers: {'x-device-token': _authToken}),
       );
     } catch (e) {
       debugPrint('[GpsTracking] REST heartbeat error: $e');
@@ -142,7 +177,7 @@ class GpsTrackingService extends ChangeNotifier {
     final pending = await _offlineQueue.pendingGps();
     if (pending.isEmpty || !_ws.connected) return;
     for (final item in pending) {
-      _sendRest(item);
+      await _sendRest(item);
     }
     await _offlineQueue.clearGps();
   }

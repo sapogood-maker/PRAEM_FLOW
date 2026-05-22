@@ -145,6 +145,7 @@ class WsService extends ChangeNotifier {
     required double heading,
     required double battery,
     required String deviceId,
+    required double accuracy,
     String? routeId,
   }) {
     if (_socket == null || !_connected) return;
@@ -156,6 +157,7 @@ class WsService extends ChangeNotifier {
       'lng': lng,
       'speed': speed,
       'heading': heading,
+      'accuracy': accuracy,
       'batteryLevel': battery,
       'deviceId': deviceId,
       if (routeId != null) 'routeId': routeId,

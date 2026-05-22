@@ -224,16 +224,70 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   }
 
   @SubscribeMessage('driver:location:update')
-  onDriverLocationUpdate(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
+  async onDriverLocationUpdate(@MessageBody() payload: unknown, @ConnectedSocket() client: Socket) {
     const user = this.getSocketUser(client);
     if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
     if (!this.canEmitDriverEvent(user, safe)) return { ok: false, error: 'forbidden' };
-    const room = `tenant:${user.tenantId}`;
-    if (room) {
-      this.server.to(room).emit('driver:location:update', safe);
-      this.server.to(room).emit('vehicle.location_updated', safe);
+    const driverId = user.driverId ?? (typeof safe['driverId'] === 'string' ? safe['driverId'] : null);
+    const vehicleId = typeof safe['vehicleId'] === 'string' ? safe['vehicleId'] : null;
+    const routeId = typeof safe['routeId'] === 'string' ? safe['routeId'] : null;
+    const lat = Number(safe['lat']);
+    const lng = Number(safe['lng']);
+    const speed = safe['speed'] == null ? null : Number(safe['speed']);
+    const heading = safe['heading'] == null ? null : Number(safe['heading']);
+    const accuracy = safe['accuracy'] == null ? null : Number(safe['accuracy']);
+    const batteryLevel = safe['batteryLevel'] == null ? null : Number(safe['batteryLevel']);
+    if (!vehicleId || Number.isNaN(lat) || Number.isNaN(lng)) {
+      return { ok: false, error: 'invalid_payload' };
     }
+
+    const now = new Date();
+    const operationalStatus = speed != null && !Number.isNaN(speed) && speed >= 2 ? 'MOVING' : 'IDLE';
+
+    this.logger.log(`[GPS] driver update tenantId=${user.tenantId} driverId=${driverId ?? '-'} vehicleId=${vehicleId} routeId=${routeId ?? '-'} lat=${lat} lng=${lng}`);
+    await this.prisma.vehicleTracking.create({
+      data: {
+        tenantId: user.tenantId,
+        vehicleId,
+        driverId,
+        routeId,
+        lat,
+        lng,
+        speed: speed != null && !Number.isNaN(speed) ? speed : null,
+        heading: heading != null && !Number.isNaN(heading) ? heading : null,
+        accuracy: accuracy != null && !Number.isNaN(accuracy) ? accuracy : null,
+        batteryLevel: batteryLevel != null && !Number.isNaN(batteryLevel) ? batteryLevel : null,
+        online: true,
+        operationalStatus: operationalStatus as any,
+        lastHeartbeatAt: now,
+        timestamp: now,
+      },
+    });
+    await this.prisma.driver.updateMany({
+      where: { tenantId: user.tenantId, ...(driverId ? { id: driverId } : {}) },
+      data: { lat, lng, lastHeartbeatAt: now, wsLastSeenAt: now },
+    });
+
+    const room = `tenant:${user.tenantId}`;
+    const broadcast = {
+      vehicleId,
+      driverId,
+      routeId,
+      tenantId: user.tenantId,
+      lat,
+      lng,
+      speed,
+      heading,
+      accuracy,
+      batteryLevel,
+      operationalStatus,
+      timestamp: now.toISOString(),
+    };
+    this.logger.log(`[SOCKET] broadcast driver:location:update tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'}`);
+    this.logger.log(`[MAP] broadcast location tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'} operationalStatus=${operationalStatus}`);
+    this.server.to(room).emit('driver:location:update', broadcast);
+    this.server.to(room).emit('vehicle.location_updated', broadcast);
     return { ok: true };
   }
 

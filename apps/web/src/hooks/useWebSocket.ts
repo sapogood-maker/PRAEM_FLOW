@@ -12,7 +12,6 @@ export function useWebSocket() {
   const tenantId = useAuthStore((s) => s.user?.tenantId);
   const setConnected = useRealtimeStore((s) => s.setConnected);
   const bumpRevision = useRealtimeStore((s) => s.bumpRevision);
-  const updateVehiclePosition = useRealtimeStore((s) => s.updateVehiclePosition);
   const pushActivity = useRealtimeStore((s) => s.pushActivity);
   const pushBoardingEvent = useRealtimeStore((s) => s.pushBoardingEvent);
 
@@ -29,6 +28,21 @@ export function useWebSocket() {
       bumpRevision();
     };
 
+    const extractGpsPayload = (incoming: unknown): VehiclePosition => {
+      const data = (incoming ?? {}) as Record<string, unknown>;
+      const nested = (data.payload ?? data.location ?? data.data ?? data) as Record<string, unknown>;
+      return nested as unknown as VehiclePosition;
+    };
+
+    const dispatchGpsToStore = (event: string, incoming: unknown) => {
+      const payload = extractGpsPayload(incoming);
+      console.debug('[SOCKET] websocket event received', { event });
+      console.debug('[GPS] payload content', { event, payload });
+      useRealtimeStore.getState().updateVehiclePosition(payload);
+      const markerCount = useRealtimeStore.getState().vehiclePositions.length;
+      console.debug('[MAP] updateVehiclePosition called', { event, markerCount });
+    };
+
     socket.on('connect', () => {
       setConnected(true);
       console.debug('[SOCKET] connected /operations', { tenantId });
@@ -39,7 +53,7 @@ export function useWebSocket() {
           const rows = Array.isArray(response.data) ? response.data : [];
           console.debug('[GPS] bootstrap tracking/live', { count: rows.length });
           for (const row of rows) {
-            updateVehiclePosition(row as VehiclePosition);
+            dispatchGpsToStore('tracking/live', row);
           }
         })
         .catch((error) => {
@@ -52,33 +66,32 @@ export function useWebSocket() {
     });
 
     socket.on('vehicle:tracking', (data: VehiclePosition) => {
-      console.debug('[GPS] vehicle:tracking', data);
-      updateVehiclePosition(data);
+      dispatchGpsToStore('vehicle:tracking', data);
     });
 
     socket.on('vehicle:position', (data: VehiclePosition) => {
-      updateVehiclePosition(data);
+      dispatchGpsToStore('vehicle:position', data);
     });
 
     socket.on('vehicle.location_updated', (data: VehiclePosition) => {
-      console.debug('[GPS] vehicle.location_updated', data);
-      updateVehiclePosition(data);
+      dispatchGpsToStore('vehicle.location_updated', data);
     });
 
     socket.on('driver:location:update', (data: VehiclePosition) => {
-      console.debug('[GPS] driver:location:update', data);
-      updateVehiclePosition(data);
+      dispatchGpsToStore('driver:location:update', data);
     });
 
     socket.on('driver.gps.active', (data: VehiclePosition) => {
-      console.debug('[GPS] driver.gps.active', data);
-      updateVehiclePosition(data);
+      dispatchGpsToStore('driver.gps.active', data);
+    });
+
+    socket.on('operational:location', (data: VehiclePosition) => {
+      dispatchGpsToStore('operational:location', data);
     });
 
     socket.on('ops:state:replay', (data: { latestPosition?: VehiclePosition; route?: { id: string; status?: string }; driverId?: string }) => {
       if (data.latestPosition) {
-        console.debug('[GPS] ops:state:replay latestPosition', data.latestPosition);
-        updateVehiclePosition(data.latestPosition);
+        dispatchGpsToStore('ops:state:replay', data.latestPosition);
       }
       if (data.route?.id) {
         record(`♻️ Estado recuperado: rota ${data.route.id}`, 'route');
@@ -142,5 +155,5 @@ export function useWebSocket() {
     return () => {
       socket.disconnect();
     };
-  }, [token, tenantId, setConnected, bumpRevision, updateVehiclePosition, pushActivity, pushBoardingEvent]);
+  }, [token, tenantId, setConnected, bumpRevision, pushActivity, pushBoardingEvent]);
 }

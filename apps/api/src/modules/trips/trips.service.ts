@@ -40,21 +40,33 @@ export class TripsService {
     });
   }
 
-  async board(id: string, tenantId: string) {
+  async board(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
     this.logger.log(`[TRIP] board tenantId=${tenantId} tripId=${id}`);
-    const result = await this.flow.confirmBoarding(tenantId, { tripId: id });
+    const result = await this.flow.confirmBoarding(tenantId, { tripId: id }, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_MANUAL_BOARD',
+    });
     return result.trip;
   }
 
-  async inTransit(id: string, tenantId: string) {
+  async inTransit(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
     this.logger.log(`[TRIP] inTransit tenantId=${tenantId} tripId=${id}`);
-    const result = await this.flow.startInTransit(tenantId, { tripId: id });
+    const result = await this.flow.startInTransit(tenantId, { tripId: id }, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_IN_TRANSIT',
+    });
     return result.trip;
   }
 
-  async arrived(id: string, tenantId: string) {
+  async arrived(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
     this.logger.log(`[TRIP] arrived tenantId=${tenantId} tripId=${id}`);
-    const result = await this.flow.markArrived(tenantId, { tripId: id });
+    const result = await this.flow.markArrived(tenantId, { tripId: id }, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_ARRIVED',
+    });
     return result.trip;
   }
 

@@ -11,6 +11,7 @@ const OperationalMap = dynamic(() => import('@/components/map/OperationalMap'), 
 const EMPTY_KPIS: OperationalKpis = {
   patientsToday: 0,
   waitingPatients: 0,
+  boardedPatients: 0,
   criticalPatients: 0,
   activeRoutes: 0,
   completedTrips: 0,

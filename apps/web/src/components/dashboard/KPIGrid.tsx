@@ -9,9 +9,10 @@ export function KPIGrid({ kpis }: KPIGridProps) {
   return (
     <div className='space-y-4'>
       {/* Row 1 — Volume */}
-      <div className='grid gap-3 grid-cols-2 md:grid-cols-4'>
+      <div className='grid gap-3 grid-cols-2 md:grid-cols-5'>
         <KPICard icon='🚑' title='Pacientes Hoje' value={kpis.patientsToday} accent='info' />
         <KPICard icon='⏳' title='Aguardando' value={kpis.waitingPatients} accent='warning' />
+        <KPICard icon='🟢' title='Embarcados' value={kpis.boardedPatients} accent='ok' />
         <KPICard icon='🔴' title='Críticos' value={kpis.criticalPatients} accent='critical' />
         <KPICard icon='✅' title='Viagens Concluídas' value={kpis.completedTrips} accent='ok' />
       </div>

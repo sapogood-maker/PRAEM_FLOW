@@ -17,13 +17,15 @@ import {
 import type { Response } from 'express';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { PatientsService } from './patients.service';
 
 interface AuthRequest {
-  user: { tenantId: string; userId: string };
+  user: { tenantId: string; userId: string; role: string; driverId?: string };
 }
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('patients')
 export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
@@ -88,6 +90,7 @@ export class PatientsController {
    * Accepts extended audit fields: gpsLat, gpsLng, operatorId, tripId, routeId, source.
    */
   @Post('qr/validate')
+  @Roles('DRIVER')
   validateQr(
     @Request() req: AuthRequest,
     @Body() body: {
@@ -104,9 +107,14 @@ export class PatientsController {
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ) {
+    const safeBody = sanitizePayload(body) as any;
     return this.patientsService.validateQr(
       req.user.tenantId,
-      sanitizePayload(body) as any,
+      {
+        ...safeBody,
+        operatorId: req.user.driverId ?? req.user.userId,
+        source: safeBody.source ?? 'DRIVER_QR_VALIDATE',
+      },
       ip,
       userAgent,
     );
@@ -114,6 +122,7 @@ export class PatientsController {
 
   /** Alias for QR validation — used by Flutter driver app (POST /patients/qr/scan) */
   @Post('qr/scan')
+  @Roles('DRIVER')
   scanQr(
     @Request() req: AuthRequest,
     @Body() body: {
@@ -127,9 +136,14 @@ export class PatientsController {
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ) {
+    const safeBody = sanitizePayload({ ...body, checkpoint: 'BOARDING' }) as any;
     return this.patientsService.validateQr(
       req.user.tenantId,
-      sanitizePayload({ ...body, checkpoint: 'BOARDING' }) as any,
+      {
+        ...safeBody,
+        operatorId: req.user.driverId ?? req.user.userId,
+        source: safeBody.source ?? 'DRIVER_QR_SCAN',
+      },
       ip,
       userAgent,
     );
@@ -153,4 +167,3 @@ export class PatientsController {
     return this.patientsService.scan(req.user.tenantId, body);
   }
 }
-

@@ -1,11 +1,13 @@
 import { Body, Controller, Get, Logger, Param, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { TripsService } from './trips.service';
 
-interface AuthRequest { user: { tenantId: string } }
+interface AuthRequest { user: { tenantId: string; userId: string; driverId?: string; role: string } }
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('trips')
 export class TripsController {
   private readonly logger = new Logger(TripsController.name);
@@ -27,21 +29,31 @@ export class TripsController {
   }
 
   @Post(':id/board')
+  @Roles('DRIVER')
   board(@Request() req: AuthRequest, @Param('id') id: string) {
     this.logger.log(`[TRIP] REST board request tenantId=${req.user.tenantId} tripId=${id}`);
-    return this.tripsService.board(id, req.user.tenantId);
+    return this.tripsService.board(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
   }
 
   @Post(':id/in-transit')
   inTransit(@Request() req: AuthRequest, @Param('id') id: string) {
     this.logger.log(`[TRIP] REST in-transit request tenantId=${req.user.tenantId} tripId=${id}`);
-    return this.tripsService.inTransit(id, req.user.tenantId);
+    return this.tripsService.inTransit(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
   }
 
   @Post(':id/arrived')
   arrived(@Request() req: AuthRequest, @Param('id') id: string) {
     this.logger.log(`[TRIP] REST arrived request tenantId=${req.user.tenantId} tripId=${id}`);
-    return this.tripsService.arrived(id, req.user.tenantId);
+    return this.tripsService.arrived(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
   }
 
   @Post(':id/complete')

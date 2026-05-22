@@ -1,11 +1,13 @@
 import { Body, Controller, Delete, Get, Logger, Param, Post, Put, Query, Request, UseGuards } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { RoutesService } from './routes.service';
 
-interface AuthRequest { user: { tenantId: string } }
+interface AuthRequest { user: { tenantId: string; userId: string; driverId?: string; role: string } }
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('routes')
 export class RoutesController {
   private readonly logger = new Logger(RoutesController.name);
@@ -57,9 +59,13 @@ export class RoutesController {
   }
 
   @Post(':id/start')
+  @Roles('DRIVER')
   startRoute(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { tripId?: string; source?: string }) {
     this.logger.log(`[ROUTE] REST start request tenantId=${req.user.tenantId} routeId=${id} tripId=${body?.tripId ?? '-'} source=${body?.source ?? '-'}`);
-    return this.routesService.startRoute(id, req.user.tenantId, sanitizePayload(body));
+    return this.routesService.startRoute(id, req.user.tenantId, sanitizePayload(body), {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
   }
 
   @Post(':id/complete')

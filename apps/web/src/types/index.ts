@@ -51,6 +51,7 @@ export interface ActivityEvent {
 export interface OperationalKpis {
   patientsToday: number;
   waitingPatients: number;
+  boardedPatients: number;
   criticalPatients: number;
   activeRoutes: number;
   completedTrips: number;
@@ -64,4 +65,3 @@ export interface OperationalKpis {
   estimatedKmToday: number;
   emptyTrips: number;
 }
-

@@ -137,12 +137,12 @@ export class TripTokensService {
     const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
 
     if (record.type === 'BOARDING') {
-      // Boarding tokens valid while trip is active
+      // Boarding tokens can be validated for identity, but cannot auto-board.
       if (terminalStatuses.includes(record.trip.status)) {
         console.log(`[QR] Use rejected: trip in terminal status ${record.trip.status}, token=${token.substring(0, 8)}…`);
         throw new BadRequestException('Viagem finalizada — QR inválido');
       }
-      console.log(`[QR] Use accepted: trip status=${record.trip.status}, type=BOARDING, token=${token.substring(0, 8)}…`);
+      throw new BadRequestException('Confirmação de embarque deve ser feita pelo motorista (QR do app do motorista ou confirmação manual)');
     } else {
       // Other tokens use time-based expiration
       if (record.expiresAt < new Date()) {
@@ -183,19 +183,6 @@ export class TripTokensService {
           patientId: record.patientId,
           patientName: record.patient?.name,
           confirmedAt: now,
-        });
-        break;
-
-      case 'BOARDING':
-        await this.prisma.trip.update({
-          where: { id: tripId },
-          data: { status: 'BOARDING', boardedAt: now, qrScanned: true },
-        });
-        this.gateway.emitToTenant(tenantId, 'patient:boarded', {
-          tripId,
-          patientId: record.patientId,
-          patientName: record.patient?.name,
-          boardedAt: now,
         });
         break;
 

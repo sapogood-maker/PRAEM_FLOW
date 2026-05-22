@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 export interface OperationalKpis {
   patientsToday: number;
   waitingPatients: number;
+  boardedPatients: number;
   criticalPatients: number;
   activeRoutes: number;
   completedTrips: number;
@@ -31,6 +32,7 @@ export class DashboardService {
     const [
       patientsToday,
       waitingPatients,
+      boardedPatients,
       criticalPatients,
       activeRoutes,
       completedTrips,
@@ -45,8 +47,12 @@ export class DashboardService {
         where: { tenantId, appointmentDate: { gte: today, lt: tomorrow } },
       }),
       // Aguardando
-      this.prisma.operationalQueue.count({
-        where: { tenantId, status: 'WAITING' },
+      this.prisma.trip.count({
+        where: { tenantId, status: { in: ['SCHEDULED', 'CONFIRMED'] } },
+      }),
+      // Embarcados / em rota
+      this.prisma.trip.count({
+        where: { tenantId, status: { in: ['BOARDING', 'IN_PROGRESS'] } },
       }),
       // Críticos
       this.prisma.operationalQueue.count({
@@ -82,6 +88,7 @@ export class DashboardService {
     return {
       patientsToday,
       waitingPatients,
+      boardedPatients,
       criticalPatients,
       activeRoutes,
       completedTrips,

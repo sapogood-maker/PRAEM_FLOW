@@ -23,6 +23,7 @@ type FlowContext = {
 type OperationalState =
   | 'DISPATCHED'
   | 'DRIVER_ACCEPTED'
+  | 'WAITING_PATIENT'
   | 'BOARDING'
   | 'IN_TRANSIT'
   | 'ARRIVED'
@@ -31,7 +32,8 @@ type OperationalState =
 
 const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
   DISPATCHED: ['DRIVER_ACCEPTED', 'CANCELLED'],
-  DRIVER_ACCEPTED: ['BOARDING', 'IN_TRANSIT', 'CANCELLED'],
+  DRIVER_ACCEPTED: ['WAITING_PATIENT', 'CANCELLED'],
+  WAITING_PATIENT: ['BOARDING', 'CANCELLED'],
   BOARDING: ['IN_TRANSIT', 'CANCELLED'],
   IN_TRANSIT: ['ARRIVED', 'CANCELLED'],
   ARRIVED: ['COMPLETED', 'CANCELLED'],
@@ -89,9 +91,7 @@ export class OperationalFlowService {
     if (previousState === 'DISPATCHED') {
       nextState = 'DRIVER_ACCEPTED';
     } else if (previousState === 'DRIVER_ACCEPTED') {
-      nextState = startTrip.status === 'BOARDING' ? 'IN_TRANSIT' : 'BOARDING';
-    } else if (previousState === 'BOARDING') {
-      nextState = 'IN_TRANSIT';
+      nextState = 'WAITING_PATIENT';
     } else {
       this.logger.warn(`[OPS] transition rejected reason=invalid_start_state tenantId=${tenantId} routeId=${routeId} tripId=${startTrip.id} previous=${previousState}`);
       throw new BadRequestException(`Route start is not allowed from state ${previousState}`);
@@ -133,9 +133,34 @@ export class OperationalFlowService {
       );
     }
 
-    const refreshed = await this.loadEntity(tenantId, {
+    let stabilized = await this.loadEntity(tenantId, {
       routeId: entity.route.id,
       tripId: entity.trip?.id ?? scope.tripId,
+      patientId: scope.patientId,
+    });
+    let stabilizedState = this.deriveOperationalState(stabilized.route.status, stabilized.trip?.status ?? null);
+    if (stabilizedState === 'DRIVER_ACCEPTED') {
+      await this.transitionState(
+        tenantId,
+        {
+          routeId: stabilized.route.id,
+          tripId: stabilized.trip?.id ?? scope.tripId,
+          patientId: scope.patientId,
+        },
+        'WAITING_PATIENT',
+        { ...context, source: context.source ?? 'QR_WAITING_PATIENT' },
+      );
+      stabilized = await this.loadEntity(tenantId, {
+        routeId: stabilized.route.id,
+        tripId: stabilized.trip?.id ?? scope.tripId,
+        patientId: scope.patientId,
+      });
+      stabilizedState = this.deriveOperationalState(stabilized.route.status, stabilized.trip?.status ?? null);
+    }
+
+    const refreshed = await this.loadEntity(tenantId, {
+      routeId: stabilized.route.id,
+      tripId: stabilized.trip?.id ?? scope.tripId,
       patientId: scope.patientId,
     });
     const nextResolvedState = this.deriveOperationalState(refreshed.route.status, refreshed.trip?.status ?? null);
@@ -151,7 +176,7 @@ export class OperationalFlowService {
       return { trip: refreshed.trip, route: refreshed.route, queue };
     }
 
-    if (!['DRIVER_ACCEPTED', 'DISPATCHED'].includes(nextResolvedState)) {
+    if (!['WAITING_PATIENT'].includes(nextResolvedState)) {
       this.logger.warn(
         `[OPS] qr boarding rejected tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=invalid_qr_state previous=${nextResolvedState}`,
       );
@@ -200,6 +225,19 @@ export class OperationalFlowService {
     const entity = await this.loadEntity(tenantId, scope);
     const currentState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
     this.logger.log(`[OPS] current state tenantId=${tenantId} current=${currentState} target=${targetState} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'}`);
+    const driverOnlyStates: OperationalState[] = ['DRIVER_ACCEPTED', 'WAITING_PATIENT', 'BOARDING', 'IN_TRANSIT'];
+    if (driverOnlyStates.includes(targetState)) {
+      if (!context.driverId) {
+        this.logger.warn(`[OPS] transition rejected reason=driver_required tenantId=${tenantId} routeId=${entity.route.id} target=${targetState}`);
+        throw new BadRequestException('Only driver actions can perform this transition');
+      }
+      if (entity.route.driverId && entity.route.driverId !== context.driverId) {
+        this.logger.warn(
+          `[OPS] transition rejected reason=driver_mismatch tenantId=${tenantId} routeId=${entity.route.id} routeDriverId=${entity.route.driverId} contextDriverId=${context.driverId} target=${targetState}`,
+        );
+        throw new BadRequestException('Driver is not assigned to this route');
+      }
+    }
     if (!allowNoop && currentState === targetState) {
       this.logger.warn(`[OPS] transition rejected reason=self_transition tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} state=${currentState}`);
       throw new BadRequestException(`Transition ${currentState} -> ${targetState} is already applied`);
@@ -223,6 +261,11 @@ export class OperationalFlowService {
       route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
+    if (targetState === 'WAITING_PATIENT') {
+      route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      queueUpdate.status = 'WAITING';
+      this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
+    }
     if (targetState === 'BOARDING' && trip) {
       trip = await this.prisma.trip.update({
         where: { id: trip.id },
@@ -238,6 +281,10 @@ export class OperationalFlowService {
       queueUpdate.confirmedAt = now;
     }
     if (targetState === 'IN_TRANSIT' && trip) {
+      if (!trip.boardedAt) {
+        this.logger.warn(`[OPS] transition rejected reason=not_boarded tenantId=${tenantId} routeId=${route.id} tripId=${trip.id}`);
+        throw new BadRequestException('Only boarded passengers can enter in-transit');
+      }
       trip = await this.prisma.trip.update({
         where: { id: trip.id },
         data: { status: 'IN_PROGRESS' },
@@ -345,6 +392,12 @@ export class OperationalFlowService {
     if (tripStatus === 'ARRIVED') return 'ARRIVED';
     if (tripStatus === 'IN_PROGRESS') return 'IN_TRANSIT';
     if (tripStatus === 'BOARDING') return 'BOARDING';
+    if (
+      (routeStatus === 'ACTIVE' || routeStatus === 'RETURNING')
+      && (tripStatus === 'SCHEDULED' || tripStatus === 'CONFIRMED' || tripStatus === null)
+    ) {
+      return 'WAITING_PATIENT';
+    }
     if (routeStatus === 'ACTIVE' || routeStatus === 'RETURNING') return 'DRIVER_ACCEPTED';
     return 'DISPATCHED';
   }
@@ -357,6 +410,7 @@ export class OperationalFlowService {
   ) {
     if (state === 'DISPATCHED') this.emitToRoute(tenantId, driverId, 'route:dispatched', payload);
     if (state === 'DRIVER_ACCEPTED') this.emitToRoute(tenantId, driverId, 'route:started', payload);
+    if (state === 'WAITING_PATIENT') this.emitToRoute(tenantId, driverId, 'route:waiting_patient', payload);
     if (state === 'BOARDING') {
       this.emitToRoute(tenantId, driverId, 'trip:boarding', payload);
       this.emitToRoute(tenantId, driverId, 'patient:boarded', payload);

@@ -40,10 +40,6 @@ export default function TripsPage() {
   const items = (data?.items ?? []) as any[];
   const total: number = data?.total ?? 0;
 
-  const board = useMutation({
-    mutationFn: (id: string) => api.post(`/trips/${id}/board`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['trips'] }),
-  });
   const complete = useMutation({
     mutationFn: (id: string) => api.post(`/trips/${id}/complete`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['trips'] }),
@@ -141,9 +137,6 @@ export default function TripsPage() {
                     </td>
                     <td className='p-3 text-center'>{t.qrScanned ? '✅' : '⬜'}</td>
                     <td className='p-3 flex gap-1 flex-wrap'>
-                      {t.status === 'SCHEDULED' && (
-                        <button type='button' onClick={() => board.mutate(t.id)} className='rounded bg-blue-900/50 px-2 py-1 text-xs text-blue-300 hover:bg-blue-800 transition-colors'>Embarcar</button>
-                      )}
                       {(t.status === 'BOARDING' || t.status === 'BOARDED' || t.status === 'IN_PROGRESS' || t.status === 'ARRIVED') && (
                         <button type='button' onClick={() => complete.mutate(t.id)} className='rounded bg-emerald-900/50 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-800 transition-colors'>Concluir</button>
                       )}

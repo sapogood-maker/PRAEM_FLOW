@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, Request, UseGuards } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { QueuesService } from './queues.service';
@@ -10,10 +10,10 @@ const VALID_CONFIRMATION_STATUSES: ConfirmationStatus[] = [
 
 const VALID_QUEUE_STATUSES = [
   'WAITING', 'CALLED', 'CONFIRMED', 'CHECKED_IN', 'BOARDING',
-  'IN_TRANSIT', 'ARRIVED', 'COMPLETED', 'CANCELLED', 'NO_SHOW', 'ASSIGNED',
+  'IN_TRANSIT', 'ARRIVED', 'COMPLETED', 'CANCELLED', 'NO_SHOW', 'ASSIGNED', 'SCHEDULED',
 ];
 
-interface AuthRequest { user: { tenantId: string } }
+interface AuthRequest { user: { tenantId: string; role: string } }
 
 @UseGuards(JwtAuthGuard)
 @Controller('queue')
@@ -60,6 +60,10 @@ export class QueuesController {
   updateStatus(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { status: string; [key: string]: unknown }) {
     const { status, ...extra } = body;
     const safeStatus = VALID_QUEUE_STATUSES.includes(status) ? status : 'WAITING';
+    const driverOnlyStatuses = ['BOARDING', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED'];
+    if (driverOnlyStatuses.includes(safeStatus) && req.user.role !== 'DRIVER') {
+      throw new ForbiddenException('Dispatch can only assign/schedule passengers; boarding and trip progress are driver-only');
+    }
     return this.queuesService.updateStatus(id, req.user.tenantId, safeStatus, sanitizePayload(extra) as Record<string, unknown>);
   }
 
@@ -91,4 +95,3 @@ export class QueuesController {
     return this.queuesService.aiSuggest(req.user.tenantId);
   }
 }
-

@@ -22,6 +22,7 @@ class WsService extends ChangeNotifier {
   final Map<String, List<WsEventCallback>> _listeners = {};
 
   bool get connected => _connected;
+  String? get driverId => _driverId;
 
   /// Connect to the /operations WS namespace with driver-level auth.
   /// Joins both the tenant room and the driver-specific room.
@@ -163,6 +164,7 @@ class WsService extends ChangeNotifier {
       if (routeId != null) 'routeId': routeId,
       'timestamp': DateTime.now().toIso8601String(),
     };
+    debugPrint('[GPS] emit driver:location:update driverId=${_driverId ?? '-'} routeId=${routeId ?? '-'} lat=$lat lng=$lng speed=$speed heading=$heading');
     debugPrint('[FLUTTER][SOCKET] emit driver:location:update payload=$payload');
     _socket!.emit('driver:location:update', payload);
   }

@@ -33,8 +33,35 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
 
   updateVehiclePosition: (pos) =>
     set((state) => {
-      const others = state.vehiclePositions.filter((v) => v.vehicleId !== pos.vehicleId);
-      return { vehiclePositions: [...others, pos] };
+      const lat = Number(pos.lat);
+      const lng = Number(pos.lng);
+      const vehicleId = pos.vehicleId;
+      if (!vehicleId || Number.isNaN(lat) || Number.isNaN(lng)) {
+        console.debug('[MAP] ignore invalid GPS payload', pos);
+        return state;
+      }
+
+      const normalized: VehiclePosition = {
+        ...pos,
+        vehicleId,
+        lat,
+        lng,
+        speed: pos.speed == null ? undefined : Number(pos.speed),
+        heading: pos.heading == null ? undefined : Number(pos.heading),
+        accuracy: pos.accuracy == null ? undefined : Number(pos.accuracy),
+        online: pos.online ?? true,
+      };
+      console.debug('[MAP] marker update', {
+        vehicleId: normalized.vehicleId,
+        driverId: normalized.driverId,
+        routeId: normalized.routeId,
+        lat: normalized.lat,
+        lng: normalized.lng,
+        speed: normalized.speed,
+      });
+
+      const others = state.vehiclePositions.filter((v) => v.vehicleId !== normalized.vehicleId);
+      return { vehiclePositions: [...others, normalized] };
     }),
 
   pushActivity: (event) =>

@@ -35,17 +35,25 @@ class GpsTrackingService extends ChangeNotifier {
 
   Future<bool> requestPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return false;
+    if (!serviceEnabled) {
+      debugPrint('[GPS] location service disabled');
+      return false;
+    }
 
     LocationPermission permission = await Geolocator.checkPermission();
+    debugPrint('[GPS] permission before request=$permission');
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
+      debugPrint('[GPS] permission after request=$permission');
     }
 
     if (permission == LocationPermission.whileInUse) {
       final always = await Permission.locationAlways.request();
       if (always.isGranted) {
         permission = LocationPermission.always;
+        debugPrint('[GPS] background permission granted');
+      } else {
+        debugPrint('[GPS] background permission not granted (using whileInUse)');
       }
     }
 
@@ -78,7 +86,7 @@ class GpsTrackingService extends ChangeNotifier {
 
     final ok = await requestPermission();
     if (!ok) {
-      debugPrint('[GpsTracking] location permission denied');
+      debugPrint('[GPS] location permission denied');
       return;
     }
 
@@ -139,7 +147,7 @@ class GpsTrackingService extends ChangeNotifier {
      'timestamp': DateTime.now().toIso8601String(),
    };
 
-   debugPrint('[GPS] fix vehicleId=${_vehicleId!} routeId=${_routeId ?? '-'} lat=${pos.latitude} lng=${pos.longitude} speed=${payload['speed']} acc=${pos.accuracy}');
+   debugPrint('[GPS] fix driverId=${_ws.driverId ?? '-'} routeId=${_routeId ?? '-'} lat=${pos.latitude} lng=${pos.longitude} speed=${payload['speed']} heading=${pos.heading} acc=${pos.accuracy}');
 
    if (_ws.connected) {
      _ws.emitLocationUpdate(
@@ -155,6 +163,7 @@ class GpsTrackingService extends ChangeNotifier {
      );
      await _tryFlush();
    } else {
+     debugPrint('[GPS] socket offline, queueing GPS payload');
      await _offlineQueue.enqueueGps(payload);
    }
 

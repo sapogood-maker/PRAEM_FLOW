@@ -115,13 +115,34 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
     const tenantId = user.tenantId;
-    const driverId = typeof safe['driverId'] === 'string'
+    let driverId = typeof safe['driverId'] === 'string'
       ? safe['driverId']
       : (user.driverId ?? null);
     const deviceId = safe['deviceId'];
-    if (user.role === 'DRIVER' && user.driverId && driverId !== user.driverId) {
-      this.logger.warn(`[SOCKET] join:driver forbidden socketId=${client.id} userDriverId=${user.driverId} requestedDriverId=${driverId ?? '-'}`);
-      return { ok: false, error: 'forbidden' };
+    if (user.role === 'DRIVER') {
+      if (!driverId) {
+        const ownDriver = await this.prisma.driver.findFirst({
+          where: { tenantId, userId: user.userId },
+          select: { id: true },
+        });
+        driverId = ownDriver?.id ?? null;
+      }
+
+      if (user.driverId && driverId !== user.driverId) {
+        this.logger.warn(`[SOCKET] join:driver forbidden socketId=${client.id} userDriverId=${user.driverId} requestedDriverId=${driverId ?? '-'}`);
+        return { ok: false, error: 'forbidden' };
+      }
+
+      if (driverId) {
+        const belongsToUser = await this.prisma.driver.findFirst({
+          where: { id: driverId, tenantId, userId: user.userId },
+          select: { id: true },
+        });
+        if (!belongsToUser) {
+          this.logger.warn(`[SOCKET] join:driver forbidden ownership socketId=${client.id} userId=${user.userId} requestedDriverId=${driverId}`);
+          return { ok: false, error: 'forbidden' };
+        }
+      }
     }
     this.logger.log(`[SOCKET] join:driver socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} deviceId=${typeof deviceId === 'string' ? deviceId : '-'}`);
 
@@ -131,6 +152,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     // Record WS connection timestamp for operational status tracking
     if (typeof driverId === 'string') {
+      this.socketUsers.set(client.id, { ...user, driverId });
       this.driverSockets.set(client.id, { driverId, tenantId });
       const now = new Date();
       try {
@@ -228,8 +250,12 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     const user = this.getSocketUser(client);
     if (!user) return { ok: false, error: 'unauthorized' };
     const safe = sanitizePayload(payload) as Record<string, unknown>;
-    if (!this.canEmitDriverEvent(user, safe)) return { ok: false, error: 'forbidden' };
-    const driverId = user.driverId ?? (typeof safe['driverId'] === 'string' ? safe['driverId'] : null);
+    if (!this.canEmitDriverEvent(user, safe)) {
+      this.logger.warn(`[SOCKET] forbidden driver:location:update socketId=${client.id} tenantId=${user.tenantId} userDriverId=${user.driverId ?? '-'} payloadDriverId=${typeof safe['driverId'] === 'string' ? safe['driverId'] : '-'}`);
+      return { ok: false, error: 'forbidden' };
+    }
+    const boundDriverId = this.driverSockets.get(client.id)?.driverId ?? null;
+    const driverId = user.driverId ?? (typeof safe['driverId'] === 'string' ? safe['driverId'] : null) ?? boundDriverId;
     const vehicleId = typeof safe['vehicleId'] === 'string' ? safe['vehicleId'] : null;
     const routeId = typeof safe['routeId'] === 'string' ? safe['routeId'] : null;
     const lat = Number(safe['lat']);
@@ -264,10 +290,12 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
         timestamp: now,
       },
     });
-    await this.prisma.driver.updateMany({
-      where: { tenantId: user.tenantId, ...(driverId ? { id: driverId } : {}) },
-      data: { lat, lng, lastHeartbeatAt: now, wsLastSeenAt: now },
-    });
+    if (driverId) {
+      await this.prisma.driver.updateMany({
+        where: { tenantId: user.tenantId, id: driverId },
+        data: { lat, lng, lastHeartbeatAt: now, wsLastSeenAt: now },
+      });
+    }
 
     const room = `tenant:${user.tenantId}`;
     const broadcast = {
@@ -281,6 +309,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       heading,
       accuracy,
       batteryLevel,
+      online: true,
       operationalStatus,
       timestamp: now.toISOString(),
     };
@@ -288,6 +317,17 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     this.logger.log(`[MAP] broadcast location tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'} operationalStatus=${operationalStatus}`);
     this.server.to(room).emit('driver:location:update', broadcast);
     this.server.to(room).emit('vehicle.location_updated', broadcast);
+    if (driverId) {
+      this.server.to(room).emit('driver.gps.active', sanitizePayload({
+        driverId,
+        tenantId: user.tenantId,
+        routeId,
+        vehicleId,
+        lat,
+        lng,
+        timestamp: now.toISOString(),
+      }));
+    }
     return { ok: true };
   }
 
@@ -485,7 +525,8 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     const payloadDriverId = typeof payload['driverId'] === 'string' ? payload['driverId'] : null;
     if (payloadTenantId !== user.tenantId) return false;
     if (user.role === 'DRIVER') {
-      if (!user.driverId || !payloadDriverId) return false;
+      if (!user.driverId) return payloadDriverId !== null;
+      if (!payloadDriverId) return true;
       return payloadDriverId === user.driverId;
     }
     return true;

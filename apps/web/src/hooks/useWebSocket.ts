@@ -30,10 +30,14 @@ export function useWebSocket() {
 
     socket.on('connect', () => {
       setConnected(true);
+      console.debug('[SOCKET] connected /operations', { tenantId });
       socket.emit('join:tenant', { tenantId });
       socket.emit('ops:state:request', { tenantId });
     });
-    socket.on('disconnect', () => setConnected(false));
+    socket.on('disconnect', () => {
+      console.debug('[SOCKET] disconnected /operations', { tenantId });
+      setConnected(false);
+    });
 
     socket.on('vehicle:tracking', (data: VehiclePosition) => {
       updateVehiclePosition(data);
@@ -44,10 +48,12 @@ export function useWebSocket() {
     });
 
     socket.on('vehicle.location_updated', (data: VehiclePosition) => {
+      console.debug('[GPS] vehicle.location_updated', data);
       updateVehiclePosition(data);
     });
 
     socket.on('driver:location:update', (data: VehiclePosition) => {
+      console.debug('[GPS] driver:location:update', data);
       updateVehiclePosition(data);
     });
 

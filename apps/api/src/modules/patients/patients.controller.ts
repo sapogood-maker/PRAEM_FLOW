@@ -113,7 +113,7 @@ export class PatientsController {
       {
         ...safeBody,
         operatorId: req.user.driverId ?? req.user.userId,
-        source: safeBody.source ?? 'DRIVER_QR_VALIDATE',
+        source: safeBody.source ?? 'TABLET',
       },
       ip,
       userAgent,
@@ -142,7 +142,7 @@ export class PatientsController {
       {
         ...safeBody,
         operatorId: req.user.driverId ?? req.user.userId,
-        source: safeBody.source ?? 'DRIVER_QR_SCAN',
+        source: safeBody.source ?? 'TABLET',
       },
       ip,
       userAgent,

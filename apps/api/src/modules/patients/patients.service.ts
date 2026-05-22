@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { QrScanSource } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -35,6 +36,8 @@ const SAFE_SELECT = {
   lat: true,
   lng: true,
 };
+
+const VALID_QR_SOURCES = new Set<QrScanSource>(['TABLET', 'TABLET_SMART_SCANNER', 'TOTEM', 'MOBILE', 'API']);
 
 /** Strip CPF and other PII before returning to caller */
 function stripSensitive(patient: Record<string, unknown>) {
@@ -239,7 +242,8 @@ export class PatientsService {
       },
     });
 
-    const source = (payload.source as any) ?? 'API';
+    const rawSource = typeof payload.source === 'string' ? (payload.source as QrScanSource) : 'API';
+    const source: QrScanSource = VALID_QR_SOURCES.has(rawSource) ? rawSource : 'API';
     const logBase = {
       tenantId,
       patientId: patient?.id ?? 'unknown',

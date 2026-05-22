@@ -672,6 +672,7 @@ enum QrScanStatus {
 
 enum QrScanSource {
   TABLET
+  TABLET_SMART_SCANNER
   TOTEM
   MOBILE
   API

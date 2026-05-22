@@ -6,12 +6,26 @@ import { MapContainer, TileLayer } from 'react-leaflet';
 import { VehicleMarker } from './VehicleMarker';
 import { useRealtimeStore } from '@/store/realtime.store';
 
-const statusBadge = (online: boolean | undefined) =>
-  online ? (
-    <span className='rounded bg-emerald-900 px-2 py-0.5 text-xs text-emerald-300'>ON_ROUTE</span>
-  ) : (
-    <span className='rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-400'>OFFLINE</span>
-  );
+function statusView(status?: string, online?: boolean) {
+  const current = online === false ? 'OFFLINE' : (status ?? 'ONLINE').toUpperCase();
+  switch (current) {
+    case 'WAITING':
+    case 'WAITING_PATIENT':
+      return { label: 'Aguardando', className: 'bg-amber-900 text-amber-300' };
+    case 'BOARDING':
+      return { label: 'Embarque', className: 'bg-blue-900 text-blue-300' };
+    case 'IN_TRANSIT':
+    case 'MOVING':
+    case 'ONLINE':
+      return { label: 'Em deslocamento', className: 'bg-emerald-900 text-emerald-300' };
+    case 'CRITICAL':
+    case 'GPS_LOST':
+      return { label: 'Crítico', className: 'bg-red-900 text-red-300' };
+    case 'OFFLINE':
+    default:
+      return { label: 'Offline', className: 'bg-slate-800 text-slate-300' };
+  }
+}
 
 export default function OperationalMap() {
   const vehicles = useRealtimeStore((s) => s.vehiclePositions);
@@ -51,7 +65,15 @@ export default function OperationalMap() {
           <VehicleMarker
             key={v.vehicleId}
             position={[v.lat, v.lng]}
-            label={`${v.plate ?? v.vehicleId}${v.driverId ? ` | ${v.driverId}` : ''} | ${v.speed ?? 0} km/h`}
+            vehicleId={v.vehicleId}
+            driverId={v.driverId}
+            plate={v.plate}
+            vehicleModel={v.vehicleModel}
+            speed={v.speed}
+            heading={v.heading}
+            operationalStatus={v.operationalStatus}
+            online={v.online}
+            updatedAt={v.timestamp ?? v.updatedAt}
           />
         ))}
       </MapContainer>
@@ -72,11 +94,14 @@ export default function OperationalMap() {
               <li key={v.vehicleId} className='rounded-lg bg-slate-900 p-3 text-sm'>
                 <div className='flex items-center justify-between'>
                   <span className='font-medium'>{v.plate ?? v.vehicleId}</span>
-                  {statusBadge(v.online)}
+                  <span className={`rounded px-2 py-0.5 text-xs ${statusView(v.operationalStatus, v.online).className}`}>
+                    {statusView(v.operationalStatus, v.online).label}
+                  </span>
                 </div>
                 {v.speed !== undefined && (
-                  <p className='mt-1 text-xs text-slate-400'>{v.speed} km/h</p>
+                  <p className='mt-1 text-xs text-slate-400'>{Math.max(0, v.speed).toFixed(0)} km/h</p>
                 )}
+                <p className='mt-1 text-xs text-slate-500'>Atualização: {v.timestamp ? new Date(v.timestamp).toLocaleTimeString('pt-BR') : 'agora'}</p>
               </li>
             ))}
           </ul>

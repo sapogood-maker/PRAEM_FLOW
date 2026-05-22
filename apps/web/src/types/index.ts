@@ -30,8 +30,10 @@ export interface QueueItem {
 export interface VehiclePosition {
   vehicleId: string;
   driverId?: string | null;
+  driverName?: string | null;
   routeId?: string | null;
   plate?: string;
+  vehicleModel?: string;
   lat: number;
   lng: number;
   speed?: number;
@@ -39,6 +41,7 @@ export interface VehiclePosition {
   accuracy?: number;
   ignition?: boolean;
   online?: boolean;
+  operationalStatus?: string;
   updatedAt?: string;
   timestamp?: string;
 }

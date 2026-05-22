@@ -1,8 +1,9 @@
 'use client';
 
 import 'leaflet/dist/leaflet.css';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Polyline, TileLayer, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import { VehicleMarker } from './VehicleMarker';
 import { useRealtimeStore } from '@/store/realtime.store';
 
@@ -71,20 +72,61 @@ function calcTrailDistanceKm(points: Array<{ lat: number; lng: number }>) {
   return meters / 1000;
 }
 
-function AutoCenter({
-  enabled,
-  lat,
-  lng,
+const DEFAULT_CITY_CENTER: [number, number] = [-25.5163, -54.5854];
+const DEFAULT_CITY_ZOOM = 13;
+const SINGLE_VEHICLE_FOCUS_ZOOM = 17;
+
+function MapAutoFocus({
+  followVehicle,
+  vehicles,
 }: {
-  enabled: boolean;
-  lat: number;
-  lng: number;
+  followVehicle: boolean;
+  vehicles: Array<{ vehicleId: string; lat: number; lng: number }>;
 }) {
   const map = useMap();
+  const hadVehiclesRef = useRef(false);
+
   useEffect(() => {
-    if (!enabled) return;
-    map.flyTo([lat, lng], map.getZoom(), { duration: 0.8 });
-  }, [enabled, lat, lng, map]);
+    if (vehicles.length === 0) {
+      if (!hadVehiclesRef.current) {
+        map.setView(DEFAULT_CITY_CENTER, DEFAULT_CITY_ZOOM);
+      }
+      hadVehiclesRef.current = false;
+      console.debug('[MAP] autofocus fallback city', {
+        center: DEFAULT_CITY_CENTER,
+        zoom: DEFAULT_CITY_ZOOM,
+      });
+      return;
+    }
+
+    const firstVehicleAppeared = !hadVehiclesRef.current;
+    hadVehiclesRef.current = true;
+    if (!followVehicle && !firstVehicleAppeared) return;
+
+    if (vehicles.length === 1) {
+      const single = vehicles[0];
+      const targetZoom = Math.max(16, Math.min(18, map.getZoom() || SINGLE_VEHICLE_FOCUS_ZOOM));
+      map.setView([single.lat, single.lng], targetZoom);
+      console.debug('[MAP] autofocus single vehicle', {
+        vehicleId: single.vehicleId,
+        lat: single.lat,
+        lng: single.lng,
+        zoom: targetZoom,
+        followVehicle,
+        firstVehicleAppeared,
+      });
+      return;
+    }
+
+    const bounds = L.latLngBounds(vehicles.map((v) => [v.lat, v.lng] as [number, number]));
+    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+    console.debug('[MAP] autofocus multiple vehicles', {
+      vehicles: vehicles.length,
+      followVehicle,
+      firstVehicleAppeared,
+    });
+  }, [vehicles, followVehicle, map]);
+
   return null;
 }
 
@@ -96,7 +138,10 @@ export default function OperationalMap() {
     () => vehicles.filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lng)),
     [vehicles],
   );
-  const primaryVehicle = validVehicles[validVehicles.length - 1] ?? null;
+  const focusVehicles = useMemo(
+    () => validVehicles.map((v) => ({ vehicleId: v.vehicleId, lat: v.lat, lng: v.lng })),
+    [validVehicles],
+  );
   const onlineCount = useMemo(() => validVehicles.filter((v) => v.online !== false).length, [validVehicles]);
 
   useEffect(() => {
@@ -123,11 +168,13 @@ export default function OperationalMap() {
 
   return (
     <div className='grid gap-4 lg:grid-cols-[1fr_300px]'>
-      <MapContainer center={[-25.5163, -54.5854]} zoom={12} className='h-[520px] rounded-xl border border-border'>
+      <MapContainer
+        center={DEFAULT_CITY_CENTER}
+        zoom={DEFAULT_CITY_ZOOM}
+        className='h-[520px] rounded-xl border border-border'
+      >
         <TileLayer url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png' attribution='&copy; OpenStreetMap contributors' />
-        {primaryVehicle && (
-          <AutoCenter enabled={followActive} lat={primaryVehicle.lat} lng={primaryVehicle.lng} />
-        )}
+        <MapAutoFocus followVehicle={followActive} vehicles={focusVehicles} />
         {validVehicles.map((v) => {
           const points = trails[v.vehicleId] ?? [];
           const oldTrail = points.slice(0, Math.max(0, points.length - 24));
@@ -177,7 +224,7 @@ export default function OperationalMap() {
             onClick={() => setFollowActive((v) => !v)}
             className={`rounded px-2 py-1 text-[10px] font-semibold ${followActive ? 'bg-cyan-900 text-cyan-300' : 'bg-slate-700 text-slate-300'}`}
           >
-            {followActive ? 'Auto-centralizar: ON' : 'Auto-centralizar: OFF'}
+            {followActive ? 'Seguir veículos: ON' : 'Seguir veículos: OFF'}
           </button>
         </div>
         {validVehicles.length === 0 ? (

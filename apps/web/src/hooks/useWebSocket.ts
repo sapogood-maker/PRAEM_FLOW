@@ -5,6 +5,7 @@ import { io } from 'socket.io-client';
 import { useRealtimeStore } from '@/store/realtime.store';
 import { useAuthStore } from '@/store/auth.store';
 import type { VehiclePosition } from '@/types';
+import { api } from '@/services/api';
 
 export function useWebSocket() {
   const token = useAuthStore((s) => s.token);
@@ -33,6 +34,17 @@ export function useWebSocket() {
       console.debug('[SOCKET] connected /operations', { tenantId });
       socket.emit('join:tenant', { tenantId });
       socket.emit('ops:state:request', { tenantId });
+      void api.get('/tracking/live')
+        .then((response) => {
+          const rows = Array.isArray(response.data) ? response.data : [];
+          console.debug('[GPS] bootstrap tracking/live', { count: rows.length });
+          for (const row of rows) {
+            updateVehiclePosition(row as VehiclePosition);
+          }
+        })
+        .catch((error) => {
+          console.debug('[GPS] bootstrap tracking/live failed', { error: String(error) });
+        });
     });
     socket.on('disconnect', () => {
       console.debug('[SOCKET] disconnected /operations', { tenantId });
@@ -57,8 +69,14 @@ export function useWebSocket() {
       updateVehiclePosition(data);
     });
 
+    socket.on('driver.gps.active', (data: VehiclePosition) => {
+      console.debug('[GPS] driver.gps.active', data);
+      updateVehiclePosition(data);
+    });
+
     socket.on('ops:state:replay', (data: { latestPosition?: VehiclePosition; route?: { id: string; status?: string }; driverId?: string }) => {
       if (data.latestPosition) {
+        console.debug('[GPS] ops:state:replay latestPosition', data.latestPosition);
         updateVehiclePosition(data.latestPosition);
       }
       if (data.route?.id) {

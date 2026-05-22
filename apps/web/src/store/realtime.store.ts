@@ -35,15 +35,20 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
     set((state) => {
       const lat = Number(pos.lat);
       const lng = Number(pos.lng);
-      const vehicleId = pos.vehicleId;
-      if (!vehicleId || Number.isNaN(lat) || Number.isNaN(lng)) {
-        console.debug('[MAP] ignore invalid GPS payload', pos);
+      const fallbackId = pos.driverId ? `driver:${pos.driverId}` : undefined;
+      const markerId = pos.vehicleId ?? fallbackId;
+      if (!markerId || Number.isNaN(lat) || Number.isNaN(lng)) {
+        console.debug('[MAP] filtered payload', {
+          reason: !markerId ? 'missing vehicleId/driverId' : 'invalid coordinates',
+          payload: pos,
+        });
         return state;
       }
 
+      const existed = state.vehiclePositions.find((v) => v.vehicleId === markerId);
       const normalized: VehiclePosition = {
         ...pos,
-        vehicleId,
+        vehicleId: markerId,
         lat,
         lng,
         speed: pos.speed == null ? undefined : Number(pos.speed),
@@ -51,7 +56,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         accuracy: pos.accuracy == null ? undefined : Number(pos.accuracy),
         online: pos.online ?? true,
       };
-      console.debug('[MAP] marker update', {
+      console.debug(existed ? '[MAP] marker updated' : '[MAP] marker created', {
         vehicleId: normalized.vehicleId,
         driverId: normalized.driverId,
         routeId: normalized.routeId,
@@ -60,7 +65,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         speed: normalized.speed,
       });
 
-      const others = state.vehiclePositions.filter((v) => v.vehicleId !== normalized.vehicleId);
+      const others = state.vehiclePositions.filter((v) => v.vehicleId !== markerId);
       return { vehiclePositions: [...others, normalized] };
     }),
 

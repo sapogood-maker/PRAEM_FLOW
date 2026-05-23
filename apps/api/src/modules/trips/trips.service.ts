@@ -91,6 +91,16 @@ export class TripsService {
     return result.trip;
   }
 
+  async reinstate(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+    this.logger.log(`[TRIP] reinstate tenantId=${tenantId} tripId=${id}`);
+    const result = await this.flow.reinstateTrip(tenantId, id, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_REINSTATE',
+    });
+    return result.trip;
+  }
+
   async cancel(id: string, tenantId: string) {
     const result = await this.flow.cancel(tenantId, { tripId: id });
     return result.trip;

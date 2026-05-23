@@ -26,26 +26,31 @@ type OperationalState =
   | 'DRIVER_ACCEPTED'
   | 'WAITING_PATIENT'
   | 'BOARDING'
+  | 'BOARDED'
   | 'IN_TRANSIT'
   | 'ARRIVED'
   | 'COMPLETED'
   | 'NO_SHOW'
   | 'CANCELLED';
 
+// Transition graph updated to explicitly model BOARDED and allow NO_SHOW reversal
 const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
   CREATED: ['DISPATCHED', 'CANCELLED'],
   DISPATCHED: ['DRIVER_ACCEPTED', 'NO_SHOW', 'CANCELLED'],
   DRIVER_ACCEPTED: ['WAITING_PATIENT', 'NO_SHOW', 'CANCELLED'],
   WAITING_PATIENT: ['BOARDING', 'NO_SHOW', 'CANCELLED'],
-  BOARDING: ['IN_TRANSIT', 'NO_SHOW', 'CANCELLED'],
+  BOARDING: ['BOARDED', 'NO_SHOW', 'CANCELLED'],
+  BOARDED: ['IN_TRANSIT', 'NO_SHOW', 'CANCELLED'],
   IN_TRANSIT: ['ARRIVED', 'CANCELLED'],
   ARRIVED: ['COMPLETED', 'CANCELLED'],
   COMPLETED: [],
-  NO_SHOW: ['CANCELLED'],
+  // NO_SHOW is now reversible (e.g., supervisor reinstate)
+  NO_SHOW: ['WAITING_PATIENT', 'CANCELLED'],
   CANCELLED: [],
 };
 
-const TERMINAL_TRIP_STATUSES = ['COMPLETED', 'CANCELLED', 'NO_SHOW'];
+// Terminal trip statuses exclude NO_SHOW so that it can be reversed by supervisors
+const TERMINAL_TRIP_STATUSES = ['COMPLETED', 'CANCELLED'];
 
 type FlowTrip = {
   id: string;
@@ -168,7 +173,10 @@ export class OperationalFlowService {
   }
 
   async startInTransit(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
-    await this.autoMarkNoShowBeforeTransit(tenantId, scope, context);
+    // Auto-marking no-show is now opt-in to allow partial boarding/no-show flows.
+    if ((context as any).autoNoShow === true) {
+      await this.autoMarkNoShowBeforeTransit(tenantId, scope, context);
+    }
     return this.transitionState(tenantId, scope, 'IN_TRANSIT', context);
   }
 
@@ -186,6 +194,85 @@ export class OperationalFlowService {
 
   async cancel(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
     return this.transitionState(tenantId, scope, 'CANCELLED', context, true);
+  }
+
+  /**
+   * Supervisor override: reinstate a trip previously marked as NO_SHOW.
+   * This makes NO_SHOW reversible for operational recovery and auditing.
+   */
+  async reinstateTrip(tenantId: string, tripId: string, context: FlowContext = {}) {
+    const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, include: { route: true } });
+    if (!trip) throw new NotFoundException('Trip not found');
+    if (trip.status !== 'NO_SHOW') {
+      throw new BadRequestException('Only NO_SHOW trips can be reinstated');
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.trip.update({
+      where: { id: trip.id },
+      data: { status: 'CONFIRMED', boardedAt: null },
+      include: { route: true },
+    });
+
+    // sync queue if present
+    const queue = await this.findLatestQueue(tenantId, trip.patientId);
+    if (queue) {
+      await this.prisma.operationalQueue.update({ where: { id: queue.id }, data: { status: 'CONFIRMED', noShowAt: null, noShowReason: null } });
+    }
+
+    const payload = this.buildPayload({
+      trip: updated,
+      route: updated.route,
+      queueStatus: 'CONFIRMED',
+      patientName: (await this.prisma.patient.findUnique({ where: { id: trip.patientId } }))?.name ?? null,
+      operationalId: (await this.prisma.patient.findUnique({ where: { id: trip.patientId } }))?.operationalId ?? null,
+      operationalState: 'WAITING_PATIENT',
+      timestamp: now,
+      context,
+    });
+
+    this.emitToRoute(tenantId, context.driverId ?? updated.route.driverId ?? null, 'trip:reinstate', payload);
+    this.emitToRoute(tenantId, context.driverId ?? updated.route.driverId ?? null, 'operational:state_changed', payload);
+
+    await this.audit.log({
+      tenantId,
+      userId: context.actorUserId ?? context.driverId ?? 'system',
+      action: 'OPERATIONAL_STATE_TRANSITION',
+      entity: 'trip',
+      entityId: trip.id,
+      after: {
+        fromState: 'NO_SHOW',
+        toState: 'CONFIRMED',
+        source: context.source ?? 'SUPERVISOR_REINSTATE',
+      },
+    });
+
+    return { trip: updated };
+  }
+
+  /**
+   * Recover stale/overnight trips: mark unboarded trips older than cutoffHours as NO_SHOW.
+   * Keeps audit trail and allows later supervisor reinstatement if needed.
+   */
+  async recoverStaleTrips(tenantId: string, cutoffHours = 12, context: FlowContext = {}) {
+    const cutoff = new Date(Date.now() - cutoffHours * 3600 * 1000);
+    this.logger.log(`[RECOVERY] scanning stale trips tenantId=${tenantId} cutoff=${cutoff.toISOString()}`);
+    const staleTrips = await this.prisma.trip.findMany({
+      where: {
+        tenantId,
+        boardedAt: null,
+        status: { in: ['SCHEDULED', 'CONFIRMED', 'BOARDING'] as any[] },
+        route: { date: { lt: cutoff as any } },
+      },
+      include: { route: true, patient: true },
+    });
+    const processed: string[] = [];
+    for (const t of staleTrips) {
+      await this.transitionState(tenantId, { tripId: t.id }, 'NO_SHOW', { ...context, source: 'RECOVERY_STALE_TRIPS' });
+      processed.push(t.id);
+    }
+    this.logger.log(`[RECOVERY] marked ${processed.length} stale trips as NO_SHOW`);
+    return { processed };
   }
 
   /**
@@ -399,9 +486,24 @@ export class OperationalFlowService {
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
     if (targetState === 'BOARDING' && trip) {
+      // Mark passenger as in the process of boarding. Actual boardedAt is set when BOARDED state is applied.
       trip = await this.prisma.trip.update({
         where: { id: trip.id },
-        data: { status: 'BOARDING', qrScanned: true, boardedAt: now },
+        data: { status: 'BOARDING', qrScanned: false },
+        include: { route: true },
+      });
+      route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
+      this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
+      queueUpdate.status = 'BOARDING';
+      queueUpdate.confirmationStatus = 'CONFIRMED';
+      queueUpdate.confirmedAt = now;
+    }
+    if (targetState === 'BOARDED' && trip) {
+      // Passenger confirmed aboard the vehicle
+      trip = await this.prisma.trip.update({
+        where: { id: trip.id },
+        data: { status: 'BOARDED', qrScanned: true, boardedAt: now },
         include: { route: true },
       });
       route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
@@ -412,14 +514,16 @@ export class OperationalFlowService {
       queueUpdate.confirmationStatus = 'CONFIRMED';
       queueUpdate.confirmedAt = now;
     }
+
     if (targetState === 'IN_TRANSIT' && trip) {
+      // Allow transition to IN_TRANSIT from BOARDED (or legacy IN_PROGRESS)
       if (!trip.boardedAt) {
         this.logger.warn(`[OPS] transition rejected reason=not_boarded tenantId=${tenantId} routeId=${route.id} tripId=${trip.id}`);
         throw new BadRequestException('Only boarded passengers can enter in-transit');
       }
       trip = await this.prisma.trip.update({
         where: { id: trip.id },
-        data: { status: 'IN_PROGRESS' },
+        data: { status: 'IN_TRANSIT' },
         include: { route: true },
       });
       queueUpdate.status = 'IN_TRANSIT';
@@ -526,7 +630,9 @@ export class OperationalFlowService {
         'SCHEDULED',
         'CONFIRMED',
         'BOARDING',
+        'BOARDED',
         'IN_PROGRESS',
+        'IN_TRANSIT',
         'ARRIVED',
         'COMPLETED',
         'NO_SHOW',
@@ -546,7 +652,8 @@ export class OperationalFlowService {
     if (tripStatus === 'NO_SHOW') return 'NO_SHOW';
     if (tripStatus === 'COMPLETED') return 'COMPLETED';
     if (tripStatus === 'ARRIVED') return 'ARRIVED';
-    if (tripStatus === 'IN_PROGRESS') return 'IN_TRANSIT';
+    if (tripStatus === 'IN_PROGRESS' || tripStatus === 'IN_TRANSIT') return 'IN_TRANSIT';
+    if (tripStatus === 'BOARDED') return 'BOARDED';
     if (tripStatus === 'BOARDING') return 'BOARDING';
     if (routeStatus === 'SCHEDULED' || routeStatus === 'PLANNED' || routeStatus === 'PENDING' || routeStatus === 'PREPARING') {
       return 'CREATED';
@@ -670,7 +777,7 @@ export class OperationalFlowService {
   }
 
   private async resolveStartTrip(tenantId: string, routeId: string, requestedTripId?: string): Promise<FlowTrip | null> {
-    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS'] as any[];
+    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_PROGRESS', 'IN_TRANSIT'] as any[];
     const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,WAITING_PATIENT,BOARDING,IN_PROGRESS';
 
     const routeAnyTenant = await this.prisma.route.findUnique({
@@ -723,23 +830,9 @@ export class OperationalFlowService {
     }
 
     const autoCandidates = routeTrips.filter((t: { id: string; tenantId: string; status: string; patientId: string }) => activeStatuses.includes(t.status as any));
-    if (routeTrips.length === 1 && autoCandidates.length === 0) {
-      const onlyTrip = routeTrips[0];
-      if (!['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(String(onlyTrip.status))) {
-        const resolvedSingle = await this.findTrip(tenantId, { routeId, tripId: onlyTrip.id }, [
-          'SCHEDULED',
-          'CONFIRMED',
-          'BOARDING',
-          'IN_PROGRESS',
-          'ARRIVED',
-          'COMPLETED',
-          'NO_SHOW',
-          'CANCELLED',
-        ]);
-        this.logger.log(`[OPS] resolved tripId safely by single-route-trip routeId=${routeId} tripId=${onlyTrip.id} status=${onlyTrip.status}`);
-        return resolvedSingle;
-      }
-    }
+    // Do NOT auto-resolve a single trip as the route's active trip. Routes are multi-passenger
+    // and should not be tightly coupled to a single Trip. Require explicit trip selection or
+    // rely on active candidate selection below.
 
     if (autoCandidates.length === 0) {
       this.logger.error(`[OPS] active trip resolution failed reason=no_candidate routeId=${routeId} tenantId=${tenantId} totalTrips=${routeTrips.length} candidateTrips=${autoCandidates.length}`);
@@ -765,6 +858,11 @@ export class OperationalFlowService {
   }
 
   private async autoMarkNoShowBeforeTransit(tenantId: string, scope: FlowScope, context: FlowContext) {
+    // Auto no-show marking is opt-in via context.autoNoShow to support partial boarding/no-show flows.
+    if (!(context as any).autoNoShow) {
+      this.logger.log(`[OPS] auto no-show disabled for tenant=${tenantId} scope=${JSON.stringify(scope)}`);
+      return;
+    }
     const entity = await this.loadEntity(tenantId, scope);
     if (!entity.trip) return;
     const pendingTrips = await this.prisma.trip.findMany({

@@ -50,6 +50,16 @@ export class TripsService {
     return result.trip;
   }
 
+  async boarded(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+    this.logger.log(`[TRIP] boarded tenantId=${tenantId} tripId=${id}`);
+    const result = await this.flow.markBoarded(tenantId, { tripId: id }, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_BOARDED',
+    });
+    return result.trip;
+  }
+
   async inTransit(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
     this.logger.log(`[TRIP] inTransit tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.startInTransit(tenantId, { tripId: id }, {
@@ -99,6 +109,14 @@ export class TripsService {
       source: 'TRIP_REINSTATE',
     });
     return result.trip;
+  }
+
+  async recoverStale(tenantId: string, cutoffHours?: number, context?: { driverId?: string; actorUserId?: string }) {
+    return this.flow.recoverStaleTrips(tenantId, cutoffHours ?? 12, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'TRIP_RECOVERY_STALE',
+    });
   }
 
   async cancel(id: string, tenantId: string) {

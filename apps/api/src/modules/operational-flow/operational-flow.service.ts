@@ -172,6 +172,10 @@ export class OperationalFlowService {
     );
   }
 
+  async markBoarded(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
+    return this.transitionState(tenantId, scope, 'BOARDED', context);
+  }
+
   async startInTransit(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
     // Auto-marking no-show is now opt-in to allow partial boarding/no-show flows.
     if ((context as any).autoNoShow === true) {
@@ -440,13 +444,22 @@ export class OperationalFlowService {
       'DRIVER_ACCEPTED',
       'WAITING_PATIENT',
       'BOARDING',
+      'BOARDED',
       'IN_TRANSIT',
       'ARRIVED',
       'COMPLETED',
       'NO_SHOW',
     ];
     if (driverOnlyStates.includes(targetState)) {
-      if (!context.driverId) {
+      const supervisorOverride =
+        !context.driverId &&
+        !!context.actorUserId &&
+        (
+          (context.source ?? '').startsWith('RECOVERY_')
+          || (context.source ?? '').startsWith('SUPERVISOR_')
+          || (context.source ?? '').startsWith('TRIP_RECOVERY_')
+        );
+      if (!context.driverId && !supervisorOverride) {
         this.logger.warn(`[OPS] transition rejected reason=driver_required tenantId=${tenantId} routeId=${entity.route.id} target=${targetState}`);
         throw new BadRequestException('Only driver actions can perform this transition');
       }
@@ -681,6 +694,9 @@ export class OperationalFlowService {
     if (state === 'WAITING_PATIENT') this.emitToRoute(tenantId, driverId, 'route:waiting_patient', payload);
     if (state === 'BOARDING') {
       this.emitToRoute(tenantId, driverId, 'trip:boarding', payload);
+    }
+    if (state === 'BOARDED') {
+      this.emitToRoute(tenantId, driverId, 'trip:boarded', payload);
       this.emitToRoute(tenantId, driverId, 'patient:boarded', payload);
     }
     if (state === 'IN_TRANSIT') {
@@ -778,7 +794,7 @@ export class OperationalFlowService {
 
   private async resolveStartTrip(tenantId: string, routeId: string, requestedTripId?: string): Promise<FlowTrip | null> {
     const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_PROGRESS', 'IN_TRANSIT'] as any[];
-    const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,WAITING_PATIENT,BOARDING,IN_PROGRESS';
+    const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,WAITING_PATIENT,BOARDING,BOARDED,IN_TRANSIT,IN_PROGRESS';
 
     const routeAnyTenant = await this.prisma.route.findUnique({
       where: { id: routeId },
@@ -818,6 +834,8 @@ export class OperationalFlowService {
           'SCHEDULED',
           'CONFIRMED',
           'BOARDING',
+          'BOARDED',
+          'IN_TRANSIT',
           'IN_PROGRESS',
           'ARRIVED',
           'COMPLETED',
@@ -847,6 +865,8 @@ export class OperationalFlowService {
       'SCHEDULED',
       'CONFIRMED',
       'BOARDING',
+      'BOARDED',
+      'IN_TRANSIT',
       'IN_PROGRESS',
       'ARRIVED',
       'COMPLETED',

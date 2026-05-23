@@ -52,7 +52,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final tripStatus = activeTrip['status'] as String?;
 
     if (tripStatus == 'BOARDING') return 'BOARDING';
-    if (tripStatus == 'IN_PROGRESS') return 'IN_TRANSIT';
+    if (tripStatus == 'BOARDED') return 'BOARDED';
+    if (tripStatus == 'IN_TRANSIT' || tripStatus == 'IN_PROGRESS') return 'IN_TRANSIT';
     if (tripStatus == 'ARRIVED') return 'ARRIVED';
     if (tripStatus == 'COMPLETED') return 'COMPLETED';
     if (tripStatus == 'NO_SHOW') return 'NO_SHOW';
@@ -100,6 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'AGUARDANDO PASSAGEIRO';
       case 'BOARDING':
         return 'EMBARQUE';
+      case 'BOARDED':
+        return 'EMBARCADO';
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
         return 'EM DESLOCAMENTO';
@@ -122,6 +125,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return AppColors.warning;
       case 'BOARDING':
         return AppColors.boarding;
+      case 'BOARDED':
+        return AppColors.info;
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
         return AppColors.primary;
@@ -149,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isBoardedPassenger(Map<String, dynamic> patient) {
     final status = (patient['status'] as String? ?? '').toUpperCase();
     return patient['boardedAt'] != null ||
-        status == 'BOARDING' ||
+        status == 'BOARDED' ||
         status == 'IN_PROGRESS' ||
         status == 'IN_TRANSIT' ||
         status == 'ARRIVED' ||
@@ -175,7 +180,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'ESCANEAR PASSAGEIRO';
       case 'BOARDING':
         if (pendingCount > 0) return 'ESCANEAR PASSAGEIRO';
-        return boardedCount > 0 ? 'INICIAR DESLOCAMENTO' : 'ESCANEAR PASSAGEIRO';
+        return boardedCount > 0 ? 'CONFIRMAR EMBARCADO' : 'ESCANEAR PASSAGEIRO';
+      case 'BOARDED':
+        return 'INICIAR DESLOCAMENTO';
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
         return 'CHEGADA';
@@ -204,9 +211,11 @@ class _HomeScreenState extends State<HomeScreen> {
           return 'Escaneie o primeiro passageiro.';
         }
         if (pendingCount > 0) {
-          return 'Confira os embarques e siga para a saída.';
+          return 'Confirme os passageiros já embarcados.';
         }
-        return 'Todos os passageiros embarcados.';
+        return 'Pronto para confirmar embarque.';
+      case 'BOARDED':
+        return 'Todos os passageiros confirmados. Inicie o deslocamento.';
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
         return 'Siga até o destino da rota.';
@@ -414,8 +423,18 @@ class _HomeScreenState extends State<HomeScreen> {
       final event = data as Map?;
       final tripId = event?['tripId'] as String?;
       if (tripId != null) {
-        context.read<DriverState>().updateTripStatus(tripId, 'IN_PROGRESS');
+        context.read<DriverState>().updateTripStatus(tripId, 'IN_TRANSIT');
         context.read<DriverState>().setOperationalStatus('IN_TRANSIT');
+      }
+    });
+
+    ws.on('trip:boarded', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final tripId = event?['tripId'] as String?;
+      if (tripId != null) {
+        context.read<DriverState>().updateTripStatus(tripId, 'BOARDED');
+        context.read<DriverState>().setOperationalStatus('BOARDED');
       }
     });
 
@@ -424,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final event = data as Map?;
       final tripId = event?['tripId'] as String?;
       if (tripId != null) {
-        context.read<DriverState>().updateTripStatus(tripId, 'IN_PROGRESS');
+        context.read<DriverState>().updateTripStatus(tripId, 'IN_TRANSIT');
         context.read<DriverState>().setOperationalStatus('IN_TRANSIT');
       }
     });
@@ -444,8 +463,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final event = data as Map?;
       final tripId = event?['tripId'] as String?;
       if (tripId != null) {
-        context.read<DriverState>().updateTripStatus(tripId, 'BOARDING');
-        context.read<DriverState>().setOperationalStatus('BOARDING');
+        context.read<DriverState>().updateTripStatus(tripId, 'BOARDED');
+        context.read<DriverState>().setOperationalStatus('BOARDED');
       }
     });
 
@@ -811,6 +830,9 @@ class _HomeScreenState extends State<HomeScreen> {
       } else if (status == 'BOARDING') {
         if (trip == null) return;
         actionUrl = '/trips/${trip['id']}/board';
+      } else if (status == 'BOARDED') {
+        if (trip == null) return;
+        actionUrl = '/trips/${trip['id']}/boarded';
       } else if (status == 'IN_TRANSIT') {
         if (trip == null) return;
         actionUrl = '/trips/${trip['id']}/in-transit';
@@ -861,6 +883,7 @@ class _HomeScreenState extends State<HomeScreen> {
         String? fallbackUrl;
         if ((status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') && routeIdToUse.isNotEmpty) fallbackUrl = '/routes/$routeIdToUse/start';
         if (status == 'BOARDING' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/board';
+        if (status == 'BOARDED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/boarded';
         if (status == 'IN_TRANSIT' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/in-transit';
         if (status == 'ARRIVED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/arrived';
         if (status == 'COMPLETED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/complete';
@@ -944,10 +967,10 @@ class _HomeScreenState extends State<HomeScreen> {
       pendingCount: waitingPatients.length,
     );
     final showScanner = nextAction == 'ESCANEAR PASSAGEIRO';
-    // Show emergency finalize for overnight routes, stuck BOARDING, or active IN_TRANSIT
+    // Show emergency finalize for overnight routes, boarded passengers, or active IN_TRANSIT
     final showForceFinalize = _isOvernightRoute ||
         currentStatus == 'IN_TRANSIT' ||
-        (currentStatus == 'BOARDING' && boardedPatients.isNotEmpty);
+        (currentStatus == 'BOARDED' && boardedPatients.isNotEmpty);
     final statusColor = _displayStatusColor(currentStatus);
     final routeTitle = route == null
         ? 'Sem rota ativa'
@@ -1248,14 +1271,15 @@ class _StatusButtons extends StatelessWidget {
     const statuses = [
       ('ACEITAR ROTA', 'DRIVER_ACCEPTED', Icons.play_arrow_rounded),
       ('AGUARDAR PACIENTE', 'WAITING_PATIENT', Icons.person_search_rounded),
-      ('CONFIRMAR EMBARQUE', 'BOARDING', Icons.people_rounded),
+      ('INICIAR EMBARQUE', 'BOARDING', Icons.people_rounded),
+      ('CONFIRMAR EMBARCADO', 'BOARDED', Icons.verified_user_rounded),
       ('INICIAR TRÂNSITO', 'IN_TRANSIT', Icons.directions_car),
       ('CHEGADA', 'ARRIVED', Icons.local_hospital_rounded),
       ('FINALIZAR', 'COMPLETED', Icons.check_circle_rounded),
     ];
     bool enabledFor(String target) {
       if (!hasActiveRoute) return false;
-      if ((target == 'BOARDING' || target == 'IN_TRANSIT' || target == 'ARRIVED' || target == 'COMPLETED') && !hasActiveTrip) {
+      if ((target == 'BOARDING' || target == 'BOARDED' || target == 'IN_TRANSIT' || target == 'ARRIVED' || target == 'COMPLETED') && !hasActiveTrip) {
         return false;
       }
       switch (target) {
@@ -1265,8 +1289,10 @@ class _StatusButtons extends StatelessWidget {
           return currentStatus == 'DRIVER_ACCEPTED';
         case 'BOARDING':
           return currentStatus == 'WAITING_PATIENT';
-        case 'IN_TRANSIT':
+        case 'BOARDED':
           return currentStatus == 'BOARDING' && hasBoardedPassenger;
+        case 'IN_TRANSIT':
+          return currentStatus == 'BOARDED' && hasBoardedPassenger;
         case 'ARRIVED':
           return currentStatus == 'IN_TRANSIT';
         case 'COMPLETED':
@@ -1371,9 +1397,11 @@ class _PatientTile extends StatelessWidget {
     switch (status.toUpperCase()) {
       case 'BOARDING':
         return 'Embarcando';
+      case 'BOARDED':
+        return 'EMBARCADO';
       case 'IN_PROGRESS':
       case 'IN_TRANSIT':
-        return 'Em deslocamento';
+        return 'EM DESLOCAMENTO';
       case 'ARRIVED':
         return 'Chegou';
       case 'COMPLETED':

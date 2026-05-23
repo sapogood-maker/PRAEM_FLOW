@@ -18,7 +18,7 @@ class DriverState extends ChangeNotifier {
   Map<String, dynamic>? _activeRoute;
   List<Map<String, dynamic>> _patients = [];
   List<Map<String, dynamic>> _stops = [];
-  String _operationalStatus = 'OFFLINE'; // CREATED | DISPATCHED | DRIVER_ACCEPTED | WAITING_PATIENT | BOARDING | IN_TRANSIT | ARRIVED | COMPLETED
+  String _operationalStatus = 'OFFLINE'; // CREATED | DISPATCHED | DRIVER_ACCEPTED | WAITING_PATIENT | BOARDING | BOARDED | IN_TRANSIT | ARRIVED | COMPLETED
 
   String? get deviceId => _deviceId;
   Map<String, dynamic>? get vehicle => _vehicle;

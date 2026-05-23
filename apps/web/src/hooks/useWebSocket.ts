@@ -176,6 +176,16 @@ export function useWebSocket(enabled = true) {
       record(`🟡 Embarque iniciado: ${data.patientName ?? data.patientId}`, 'boarding');
     });
 
+    socket.on('trip:boarded', (data: { tripId: string; patientId: string; patientName?: string; boardedAt?: string }) => {
+      record(`🟢 Embarcado: ${data.patientName ?? data.patientId}`, 'boarding');
+      useRealtimeStore.getState().pushBoardingEvent({
+        tripId: data.tripId,
+        patientId: data.patientId,
+        patientName: data.patientName,
+        boardedAt: data.boardedAt ?? new Date().toISOString(),
+      });
+    });
+
     socket.on('trip:started', (data: { tripId: string; patientId?: string }) => {
       record(`🚀 Viagem iniciada: ${data.tripId}`, 'trip');
     });

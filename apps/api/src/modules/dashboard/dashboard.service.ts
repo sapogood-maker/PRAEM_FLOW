@@ -56,11 +56,11 @@ export class DashboardService {
       }),
       // Embarque em andamento
       this.prisma.trip.count({
-        where: { tenantId, status: 'BOARDING' },
+        where: { tenantId, status: { in: ['BOARDING', 'BOARDED'] as any[] } },
       }),
       // Em trânsito
       this.prisma.trip.count({
-        where: { tenantId, status: 'IN_PROGRESS' },
+        where: { tenantId, status: { in: ['IN_TRANSIT', 'IN_PROGRESS'] as any[] } },
       }),
       // Chegou ao destino
       this.prisma.trip.count({

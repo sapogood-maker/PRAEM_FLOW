@@ -251,6 +251,7 @@ class WsService extends ChangeNotifier {
     'vehicle.status_changed',
     'vehicle.heartbeat',
     'trip:boarding',
+    'trip:boarded',
     'trip:started',
     'trip:in_transit',
     'trip:arrived',

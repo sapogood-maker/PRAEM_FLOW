@@ -38,6 +38,16 @@ export class TripsController {
     });
   }
 
+  @Post(':id/boarded')
+  @Roles('DRIVER')
+  boarded(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[TRIP] REST boarded request tenantId=${req.user.tenantId} tripId=${id}`);
+    return this.tripsService.boarded(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
+  }
+
   @Post(':id/in-transit')
   @Roles('DRIVER')
   inTransit(@Request() req: AuthRequest, @Param('id') id: string) {
@@ -73,6 +83,22 @@ export class TripsController {
   noShow(@Request() req: AuthRequest, @Param('id') id: string) {
     return this.tripsService.noShow(id, req.user.tenantId, {
       driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
+  }
+
+  @Post(':id/reinstate')
+  @Roles('SUPERVISOR', 'ADMIN', 'COORDINATOR')
+  reinstate(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.tripsService.reinstate(id, req.user.tenantId, {
+      actorUserId: req.user.userId,
+    });
+  }
+
+  @Post('recovery/stale')
+  @Roles('SUPERVISOR', 'ADMIN', 'COORDINATOR')
+  recoverStale(@Request() req: AuthRequest, @Body() body: { cutoffHours?: number }) {
+    return this.tripsService.recoverStale(req.user.tenantId, body?.cutoffHours, {
       actorUserId: req.user.userId,
     });
   }

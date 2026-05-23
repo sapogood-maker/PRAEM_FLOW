@@ -88,7 +88,7 @@ export class TripTokensService {
     if (record.usedAt) throw new BadRequestException('Token já utilizado');
 
     // [QR] Validate token based on trip status and token type
-    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS', 'ARRIVED'];
+    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'];
     const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
 
     if (record.type === 'BOARDING') {
@@ -133,7 +133,7 @@ export class TripTokensService {
     if (record.usedAt) throw new BadRequestException('Token já utilizado');
 
     // [QR] Validate token based on trip status and token type
-    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'IN_PROGRESS', 'ARRIVED'];
+    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'];
     const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
 
     if (record.type === 'BOARDING') {

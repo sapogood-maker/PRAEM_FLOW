@@ -402,7 +402,7 @@ export class PatientsService {
       throw new BadRequestException('Patient has no route today');
     }
 
-    if (candidate.boardedAt || ['BOARDING', 'IN_PROGRESS', 'ARRIVED'].includes(String(candidate.status))) {
+    if (candidate.boardedAt || ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'].includes(String(candidate.status))) {
       throw new BadRequestException('Passenger already boarded');
     }
 

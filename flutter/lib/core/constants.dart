@@ -53,6 +53,8 @@ Color statusColor(String status) {
       return AppColors.warning;
     case 'BOARDING':
       return AppColors.boarding;
+    case 'BOARDED':
+      return AppColors.info;
     case 'IN_PROGRESS':
     case 'IN_TRANSIT':
       return AppColors.primary;

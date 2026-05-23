@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { sanitizePayload } from '../../common/sanitize';
 import { AuditService } from '../audit/audit.service';
+import { OperationalFlowService } from '../operational-flow/operational-flow.service';
 import {
   distanceMeters,
   loadTrackingPolicy,
@@ -43,11 +44,15 @@ export class TrackingService {
   private readonly trackingPolicy = loadTrackingPolicy();
   private readonly lastIngestByKey = new Map<string, number>();
   private readonly lastPersistedPointByKey = new Map<string, { lat: number; lng: number; heading: number | null; timestamp: Date }>();
+  private readonly lastGeoEvalByKey = new Map<string, number>();
+  private readonly lastGeoAlertByKey = new Map<string, number>();
+  private readonly lastMovingByKey = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly opsGateway: OperationsGateway,
     private readonly audit: AuditService,
+    private readonly flow: OperationalFlowService,
   ) {}
 
   /**
@@ -569,6 +574,160 @@ export class TrackingService {
     );
   }
 
+  private async tryAutoArrive(
+    tenantId: string,
+    input: { routeId: string | null; driverId: string | null; vehicleId: string; timestamp: Date },
+  ) {
+    if (!this.trackingPolicy.geofenceAutoArrived || !input.routeId) return;
+    const activeTrip = await this.prisma.trip.findFirst({
+      where: {
+        tenantId,
+        routeId: input.routeId,
+        status: { in: ['IN_TRANSIT', 'IN_PROGRESS'] as any[] },
+      },
+      orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+      select: { id: true },
+    });
+    if (!activeTrip) return;
+    try {
+      await this.flow.markArrived(tenantId, { routeId: input.routeId, tripId: activeTrip.id }, {
+        source: 'GEOFENCE_AUTO_ARRIVED',
+        driverId: input.driverId,
+      });
+      this.logger.log(`[TRACKING] [GEOFENCE] auto arrived routeId=${input.routeId} tripId=${activeTrip.id} vehicleId=${input.vehicleId}`);
+      if (this.trackingPolicy.geofenceAutoProgression) {
+        this.opsGateway.emitToTenant(tenantId, 'route:progression_suggestion', {
+          routeId: input.routeId,
+          vehicleId: input.vehicleId,
+          suggestedState: 'COMPLETED',
+          reason: 'AUTO_ARRIVED_COMPLETED_PENDING',
+          timestamp: input.timestamp.toISOString(),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`[TRACKING] [GEOFENCE] auto-arrive skipped routeId=${input.routeId} tripId=${activeTrip.id} reason=${(err as Error).message}`);
+    }
+  }
+
+  private async detectLongStopAndDeviation(
+    tenantId: string,
+    input: {
+      routeId: string | null;
+      vehicleId: string;
+      driverId: string | null;
+      lat: number;
+      lng: number;
+      speed: number | null;
+      timestamp: Date;
+    },
+    nearest: { id: string; name: string; distance: number; type: string } | null,
+    key: string,
+  ) {
+    const nowMs = input.timestamp.getTime();
+    const cooldownMs = this.trackingPolicy.geofenceAlertCooldownSeconds * 1000;
+    const lastMovingAtMs = this.lastMovingByKey.get(key) ?? nowMs;
+    const speed = input.speed ?? 0;
+    const isStopped = speed < 2.5;
+    const longStopSeconds = Math.max(0, (nowMs - lastMovingAtMs) / 1000);
+
+    if (isStopped && longStopSeconds >= this.trackingPolicy.geofenceLongStopSeconds) {
+      const alertKey = `${key}:LONG_STOP`;
+      const lastAlert = this.lastGeoAlertByKey.get(alertKey) ?? 0;
+      if (nowMs - lastAlert >= cooldownMs) {
+        this.lastGeoAlertByKey.set(alertKey, nowMs);
+        this.logger.warn(`[TRACKING] [GEOFENCE] long stop routeId=${input.routeId ?? '-'} vehicleId=${input.vehicleId} seconds=${longStopSeconds.toFixed(0)}`);
+        await this.registerGeoFenceEvent(tenantId, {
+          vehicleId: input.vehicleId,
+          eventType: 'LONG_STOP',
+          lat: input.lat,
+          lng: input.lng,
+          routeId: input.routeId ?? undefined,
+        });
+        this.opsGateway.emitToTenant(tenantId, 'geofence:long_stop', {
+          routeId: input.routeId,
+          vehicleId: input.vehicleId,
+          driverId: input.driverId,
+          longStopSeconds: Math.round(longStopSeconds),
+          timestamp: input.timestamp.toISOString(),
+        });
+        if (this.trackingPolicy.geofenceAlertsEnabled) {
+          this.opsGateway.emitAlert(tenantId, {
+            type: 'LONG_STOP',
+            message: `Parada longa detectada (${Math.round(longStopSeconds / 60)} min).`,
+            severity: 'warning',
+            data: { routeId: input.routeId, vehicleId: input.vehicleId, longStopSeconds: Math.round(longStopSeconds) },
+          });
+        }
+      }
+    }
+
+    if (!input.routeId) return;
+
+    const route = await this.prisma.route.findFirst({
+      where: { id: input.routeId, tenantId },
+      include: {
+        trips: {
+          where: { status: { in: ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'] as any[] } },
+          include: {
+            stops: {
+              where: { status: { in: ['PENDING', 'EN_ROUTE', 'ARRIVED', 'BOARDING'] as any[] } },
+              orderBy: { sequence: 'asc' },
+              take: 1,
+            },
+          },
+          orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+          take: 1,
+        },
+      },
+    });
+    const targetTrip = route?.trips?.[0];
+    const targetStop = targetTrip?.stops?.[0];
+    if (targetStop?.lat == null || targetStop.lng == null) return;
+    const distanceToStop = distanceMeters(input.lat, input.lng, targetStop.lat, targetStop.lng);
+    if (distanceToStop <= this.trackingPolicy.geofenceDeviationMeters) return;
+    if ((input.speed ?? 0) < 8) return;
+
+    const deviationKey = `${key}:ROUTE_DEVIATION`;
+    const lastDeviationAlert = this.lastGeoAlertByKey.get(deviationKey) ?? 0;
+    if (nowMs - lastDeviationAlert < cooldownMs) return;
+    this.lastGeoAlertByKey.set(deviationKey, nowMs);
+    this.logger.warn(
+      `[TRACKING] [GEOFENCE] route deviation routeId=${input.routeId} vehicleId=${input.vehicleId} distanceToNextStop=${Math.round(distanceToStop)}m stop=${targetStop.name}`,
+    );
+    await this.registerGeoFenceEvent(tenantId, {
+      vehicleId: input.vehicleId,
+      eventType: 'ROUTE_DEVIATION',
+      lat: input.lat,
+      lng: input.lng,
+      routeId: input.routeId,
+      locationName: targetStop.name,
+    });
+    this.opsGateway.emitToTenant(tenantId, 'route:deviation', {
+      routeId: input.routeId,
+      vehicleId: input.vehicleId,
+      driverId: input.driverId,
+      targetStopId: targetStop.id,
+      targetStopName: targetStop.name,
+      distanceMeters: Math.round(distanceToStop),
+      nearestHospitalDistanceMeters: nearest == null ? null : Math.round(nearest.distance),
+      timestamp: input.timestamp.toISOString(),
+    });
+    if (this.trackingPolicy.geofenceAlertsEnabled) {
+      this.opsGateway.emitAlert(tenantId, {
+        type: 'ROUTE_DEVIATION',
+        message: `Desvio de rota detectado (${Math.round(distanceToStop)}m da próxima parada).`,
+        severity: 'warning',
+        data: {
+          routeId: input.routeId,
+          vehicleId: input.vehicleId,
+          targetStopId: targetStop.id,
+          targetStopName: targetStop.name,
+          distanceMeters: Math.round(distanceToStop),
+        },
+      });
+    }
+  }
+
   private downsampleReplayPoints<T extends { timestamp: Date }>(points: T[], maxPoints: number): T[] {
     if (points.length <= maxPoints) return points;
     if (maxPoints <= 2) return [points[0], points[points.length - 1]];
@@ -634,6 +793,16 @@ export class TrackingService {
     speed: number | null;
     timestamp: Date;
   }) {
+    const key = this.gpsCacheKey(tenantId, input.vehicleId, input.routeId);
+    const nowMs = input.timestamp.getTime();
+    const evalMinMs = this.trackingPolicy.geofenceMinEvaluationMs;
+    const lastEval = this.lastGeoEvalByKey.get(key);
+    if (lastEval != null && nowMs - lastEval < evalMinMs) return;
+    this.lastGeoEvalByKey.set(key, nowMs);
+    if ((input.speed ?? 0) >= 3) {
+      this.lastMovingByKey.set(key, nowMs);
+    }
+
     const nearby = await this.prisma.healthcareLocation.findMany({
       where: {
         tenantId,
@@ -652,9 +821,23 @@ export class TrackingService {
         nearest = { id: loc.id, name: loc.name, distance: dist, type: loc.type };
       }
     }
-    if (!nearest) return;
-    if (nearest.distance <= 250) {
-      this.logger.log(`[TRACKING] [OPS] geofence proximity routeId=${input.routeId ?? '-'} vehicleId=${input.vehicleId} location=${nearest.name} distance=${nearest.distance.toFixed(0)}m`);
+    if (!nearest) {
+      await this.detectLongStopAndDeviation(tenantId, input, null, key);
+      return;
+    }
+
+    const arrivalRadius = this.trackingPolicy.geofenceArrivalRadiusMeters;
+    const departureRadius = this.trackingPolicy.geofenceDepartureRadiusMeters;
+    const isNearHospital = nearest.distance <= arrivalRadius;
+    const isAwayFromHospital = nearest.distance >= departureRadius;
+    const lastGeoEvent = await this.prisma.geoFenceEvent.findFirst({
+      where: { tenantId, vehicleId: input.vehicleId, routeId: input.routeId ?? undefined },
+      orderBy: { detectedAt: 'desc' },
+      select: { eventType: true, locationId: true, detectedAt: true },
+    });
+
+    if (isNearHospital) {
+      this.logger.log(`[TRACKING] [OPS] [GEOFENCE] hospital proximity routeId=${input.routeId ?? '-'} vehicleId=${input.vehicleId} location=${nearest.name} distance=${nearest.distance.toFixed(0)}m`);
       this.opsGateway.emitToTenant(tenantId, 'geofence:hospital_proximity', {
         routeId: input.routeId,
         vehicleId: input.vehicleId,
@@ -665,7 +848,32 @@ export class TrackingService {
         distanceMeters: Math.round(nearest.distance),
         timestamp: input.timestamp.toISOString(),
       });
-      if ((input.speed ?? 0) < 5) {
+
+      const shouldMarkArrival =
+        lastGeoEvent?.eventType !== 'ARRIVED_AT_DESTINATION'
+        || lastGeoEvent.locationId !== nearest.id;
+      if (shouldMarkArrival) {
+        await this.registerGeoFenceEvent(tenantId, {
+          vehicleId: input.vehicleId,
+          eventType: 'ARRIVED_AT_DESTINATION',
+          lat: input.lat,
+          lng: input.lng,
+          routeId: input.routeId ?? undefined,
+          locationId: nearest.id,
+          locationName: nearest.name,
+        });
+        this.opsGateway.emitToTenant(tenantId, 'geofence:arrival', {
+          routeId: input.routeId,
+          vehicleId: input.vehicleId,
+          driverId: input.driverId,
+          locationId: nearest.id,
+          locationName: nearest.name,
+          distanceMeters: Math.round(nearest.distance),
+          timestamp: input.timestamp.toISOString(),
+        });
+      }
+
+      if ((input.speed ?? 0) < 6) {
         this.opsGateway.emitToTenant(tenantId, 'route:progression_suggestion', {
           routeId: input.routeId,
           vehicleId: input.vehicleId,
@@ -674,7 +882,43 @@ export class TrackingService {
           distanceMeters: Math.round(nearest.distance),
           timestamp: input.timestamp.toISOString(),
         });
+        if (this.trackingPolicy.geofenceAlertsEnabled) {
+          this.opsGateway.emitAlert(tenantId, {
+            type: 'HOSPITAL_PROXIMITY',
+            message: `Sugestão operacional: confirmar CHEGADA em ${nearest.name}.`,
+            severity: 'info',
+            data: {
+              routeId: input.routeId,
+              vehicleId: input.vehicleId,
+              locationName: nearest.name,
+              distanceMeters: Math.round(nearest.distance),
+            },
+          });
+        }
+        await this.tryAutoArrive(tenantId, input);
       }
+    } else if (isAwayFromHospital && lastGeoEvent?.eventType === 'ARRIVED_AT_DESTINATION') {
+      await this.registerGeoFenceEvent(tenantId, {
+        vehicleId: input.vehicleId,
+        eventType: 'LEFT_DESTINATION',
+        lat: input.lat,
+        lng: input.lng,
+        routeId: input.routeId ?? undefined,
+        locationId: nearest.id,
+        locationName: nearest.name,
+      });
+      this.logger.log(`[TRACKING] [OPS] [GEOFENCE] departure detected routeId=${input.routeId ?? '-'} vehicleId=${input.vehicleId} location=${nearest.name} distance=${nearest.distance.toFixed(0)}m`);
+      this.opsGateway.emitToTenant(tenantId, 'geofence:departure', {
+        routeId: input.routeId,
+        vehicleId: input.vehicleId,
+        driverId: input.driverId,
+        locationId: nearest.id,
+        locationName: nearest.name,
+        distanceMeters: Math.round(nearest.distance),
+        timestamp: input.timestamp.toISOString(),
+      });
     }
+
+    await this.detectLongStopAndDeviation(tenantId, input, nearest, key);
   }
 }

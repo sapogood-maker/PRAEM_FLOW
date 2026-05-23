@@ -7,6 +7,15 @@ export type TrackingPolicy = {
   staleRetentionHours: number;
   snapshotRetentionHours: number;
   archiveEnabled: boolean;
+  geofenceArrivalRadiusMeters: number;
+  geofenceDepartureRadiusMeters: number;
+  geofenceLongStopSeconds: number;
+  geofenceDeviationMeters: number;
+  geofenceMinEvaluationMs: number;
+  geofenceAlertCooldownSeconds: number;
+  geofenceAutoArrived: boolean;
+  geofenceAutoProgression: boolean;
+  geofenceAlertsEnabled: boolean;
 };
 
 export type GpsPointLike = {
@@ -32,7 +41,7 @@ function getEnvNumber(name: string, fallback: number, min: number, max: number) 
   return Math.max(min, Math.min(max, parsed));
 }
 
-function getEnvBoolean(name: string, fallback: boolean) {
+export function getEnvBoolean(name: string, fallback: boolean) {
   const raw = process.env[name];
   if (!raw) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
@@ -48,6 +57,15 @@ export function loadTrackingPolicy(): TrackingPolicy {
     staleRetentionHours: getEnvNumber('TRACKING_STALE_RETENTION_HOURS', 24, 1, 24 * 365),
     snapshotRetentionHours: getEnvNumber('TRACKING_SNAPSHOT_RETENTION_HOURS', 24, 1, 24 * 365),
     archiveEnabled: getEnvBoolean('TRACKING_ARCHIVE_ENABLED', true),
+    geofenceArrivalRadiusMeters: getEnvNumber('OPS_GEOFENCE_ARRIVAL_RADIUS_METERS', 180, 20, 2000),
+    geofenceDepartureRadiusMeters: getEnvNumber('OPS_GEOFENCE_DEPARTURE_RADIUS_METERS', 320, 30, 4000),
+    geofenceLongStopSeconds: getEnvNumber('OPS_GEOFENCE_LONG_STOP_SECONDS', 240, 30, 60 * 60),
+    geofenceDeviationMeters: getEnvNumber('OPS_GEOFENCE_DEVIATION_METERS', 3000, 200, 50_000),
+    geofenceMinEvaluationMs: getEnvNumber('OPS_GEOFENCE_MIN_EVALUATION_MS', 5000, 500, 120_000),
+    geofenceAlertCooldownSeconds: getEnvNumber('OPS_GEOFENCE_ALERT_COOLDOWN_SECONDS', 180, 10, 3600),
+    geofenceAutoArrived: getEnvBoolean('OPS_GEOFENCE_AUTO_ARRIVED', false),
+    geofenceAutoProgression: getEnvBoolean('OPS_GEOFENCE_AUTO_ROUTE_PROGRESSION', false),
+    geofenceAlertsEnabled: getEnvBoolean('OPS_GEOFENCE_ALERTS_ENABLED', true),
   };
 }
 

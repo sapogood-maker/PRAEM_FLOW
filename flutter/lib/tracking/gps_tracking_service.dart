@@ -27,6 +27,13 @@ class GpsTrackingService extends ChangeNotifier {
   String? _deviceId;
   String? _authToken;
   String? _routeId;
+  DateTime? _lastEmitAt;
+  Position? _lastEmitPosition;
+  DateTime? _lastHeartbeatAt;
+
+  static const int _emitMinIntervalMs = 900;
+  static const double _emitMinDistanceMeters = 4;
+  static const int _heartbeatIntervalSeconds = 20;
 
   bool get active => _active;
   Position? get lastPosition => _lastPosition;
@@ -131,6 +138,11 @@ class GpsTrackingService extends ChangeNotifier {
 
   Future<void> _handlePosition(Position pos) async {
    _lastPosition = pos;
+   final now = DateTime.now();
+   if (!_shouldEmitPosition(pos, now)) {
+     notifyListeners();
+     return;
+   }
 
    final batteryLevel = await _getBattery();
    final payload = {
@@ -144,7 +156,7 @@ class GpsTrackingService extends ChangeNotifier {
      'heading': pos.heading,
      'accuracy': pos.accuracy,
      'batteryLevel': batteryLevel,
-     'timestamp': DateTime.now().toIso8601String(),
+     'timestamp': now.toIso8601String(),
    };
 
    debugPrint('[GPS] fix driverId=${_ws.driverId ?? '-'} routeId=${_routeId ?? '-'} lat=${pos.latitude} lng=${pos.longitude} speed=${payload['speed']} heading=${pos.heading} acc=${pos.accuracy}');
@@ -161,6 +173,21 @@ class GpsTrackingService extends ChangeNotifier {
        accuracy: pos.accuracy,
        routeId: _routeId,
      );
+     if (_lastHeartbeatAt == null ||
+         now.difference(_lastHeartbeatAt!).inSeconds >= _heartbeatIntervalSeconds) {
+       _lastHeartbeatAt = now;
+       _ws.emitHeartbeat(
+         vehicleId: _vehicleId!,
+         lat: pos.latitude,
+         lng: pos.longitude,
+         speed: pos.speed * 3.6,
+         heading: pos.heading,
+         battery: batteryLevel.toDouble(),
+         deviceId: _deviceId!,
+         routeId: _routeId,
+         operationalStatus: (pos.speed * 3.6) >= 2 ? 'MOVING' : 'IDLE',
+       );
+     }
      await _tryFlush();
    } else {
      debugPrint('[GPS] socket offline, queueing GPS payload');
@@ -168,6 +195,27 @@ class GpsTrackingService extends ChangeNotifier {
    }
 
    notifyListeners();
+  }
+
+  bool _shouldEmitPosition(Position pos, DateTime now) {
+   if (_lastEmitAt == null || _lastEmitPosition == null) {
+     _lastEmitAt = now;
+     _lastEmitPosition = pos;
+     return true;
+   }
+   final elapsedMs = now.difference(_lastEmitAt!).inMilliseconds;
+   final moved = Geolocator.distanceBetween(
+     _lastEmitPosition!.latitude,
+     _lastEmitPosition!.longitude,
+     pos.latitude,
+     pos.longitude,
+   );
+   if (elapsedMs >= _emitMinIntervalMs || moved >= _emitMinDistanceMeters) {
+     _lastEmitAt = now;
+     _lastEmitPosition = pos;
+     return true;
+   }
+   return false;
   }
 
   Future<void> _sendRest(Map<String, dynamic> payload) async {

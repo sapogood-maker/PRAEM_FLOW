@@ -32,6 +32,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _offlineSyncTimer;
   bool _dioLoggingConfigured = false;
   bool _isOvernightRoute = false;
+  final List<Map<String, dynamic>> _opsNotifications = [];
+  bool _wsDisconnected = false;
 
   Map<String, dynamic>? _activeTrip(DriverState driver) {
     for (final trip in driver.patients) {
@@ -243,6 +245,31 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Atualizado agora';
   }
 
+  void _pushOpsNotification(
+    String message, {
+    Color color = AppColors.info,
+    String tag = 'OPS',
+  }) {
+    debugPrint('[$tag] [OPS] $message');
+    if (!mounted) return;
+    setState(() {
+      _opsNotifications.insert(0, {
+        'message': message,
+        'color': color.toARGB32(),
+        'at': DateTime.now().toIso8601String(),
+      });
+      if (_opsNotifications.length > 12) {
+        _opsNotifications.removeRange(12, _opsNotifications.length);
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -288,7 +315,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     ws.on('ws:connected', (_) async {
-      debugPrint('[FLUTTER] socket reconnect callback');
+      debugPrint('[OPS] [GPS] socket reconnect callback');
+      if (mounted) {
+        setState(() => _wsDisconnected = false);
+      }
+      _pushOpsNotification('Conexão operacional restabelecida.', color: AppColors.primary, tag: 'OPS');
       await _loadRoute(auth, driver);
       await _ensureGpsTracking(
         auth: auth,
@@ -300,7 +331,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     ws.on('ws:disconnected', (_) {
-      debugPrint('[FLUTTER] socket disconnected callback');
+      debugPrint('[OPS] [GPS] socket disconnected callback');
+      if (mounted) {
+        setState(() => _wsDisconnected = true);
+      }
+      _pushOpsNotification('Sem conexão com a central. Operando em modo offline.', color: AppColors.warning, tag: 'GPS');
     });
 
     ws.on('ops:state:replay', (data) {
@@ -363,6 +398,7 @@ class _HomeScreenState extends State<HomeScreen> {
         context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
       }
       context.read<DriverState>().setOperationalStatus('WAITING_PATIENT');
+      _pushOpsNotification('Paciente aguardando embarque.', color: AppColors.warning, tag: 'OPS');
       _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
     });
 
@@ -404,10 +440,68 @@ class _HomeScreenState extends State<HomeScreen> {
     ws.on('operational.alert', (data) {
       if (!mounted) return;
       final alert = data as Map?;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(alert?['message']?.toString() ?? 'Alerta operacional'),
-        backgroundColor: AppColors.warning,
-      ));
+      _pushOpsNotification(
+        alert?['message']?.toString() ?? 'Alerta operacional',
+        color: AppColors.warning,
+        tag: 'OPS',
+      );
+    });
+
+    ws.on('vehicle.offline', (data) {
+      final event = data as Map?;
+      _pushOpsNotification(
+        'GPS offline do veículo ${event?['vehicleId'] ?? ''}.',
+        color: AppColors.danger,
+        tag: 'GPS',
+      );
+    });
+
+    ws.on('geofence:arrival', (data) {
+      final event = data as Map?;
+      _pushOpsNotification(
+        'Chegada detectada automaticamente em ${event?['locationName'] ?? 'destino'}.',
+        color: AppColors.info,
+        tag: 'GEOFENCE',
+      );
+    });
+
+    ws.on('geofence:departure', (data) {
+      final event = data as Map?;
+      _pushOpsNotification(
+        'Saída detectada de ${event?['locationName'] ?? 'destino'}.',
+        color: AppColors.info,
+        tag: 'GEOFENCE',
+      );
+    });
+
+    ws.on('geofence:long_stop', (data) {
+      final event = data as Map?;
+      final seconds = (event?['longStopSeconds'] as num?)?.round() ?? 0;
+      _pushOpsNotification(
+        'Parada longa detectada (${(seconds / 60).toStringAsFixed(0)} min).',
+        color: AppColors.warning,
+        tag: 'GEOFENCE',
+      );
+    });
+
+    ws.on('route:deviation', (data) {
+      final event = data as Map?;
+      final meters = (event?['distanceMeters'] as num?)?.round() ?? 0;
+      _pushOpsNotification(
+        'Possível desvio de rota (${meters}m da próxima parada).',
+        color: AppColors.warning,
+        tag: 'GEOFENCE',
+      );
+    });
+
+    ws.on('route:progression_suggestion', (data) {
+      final event = data as Map?;
+      final suggested = event?['suggestedState']?.toString() ?? 'ação';
+      _pushOpsNotification(
+        'Sugestão operacional: confirmar $suggested.',
+        color: AppColors.info,
+        tag: 'OPS',
+      );
     });
 
     ws.on('operational:state_changed', (data) {
@@ -1041,6 +1135,13 @@ class _HomeScreenState extends State<HomeScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                _ConnectionAndGpsCard(
+                  wsConnected: ws.connected,
+                  wsDisconnected: _wsDisconnected,
+                  gpsActive: gps.active,
+                  gpsLabel: gpsLabel,
+                ),
+                const SizedBox(height: 12),
                 _GuidedStatusCard(
                   statusLabel: _displayStatusLabel(currentStatus),
                   statusColor: statusColor,
@@ -1068,26 +1169,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   onForceFinalize: showForceFinalize ? _forceFinalize : null,
                 ),
                 const SizedBox(height: 12),
-                _PassengerOverviewCard(
-                  boardedCount: boardedPatients.length,
-                  waitingCount: waitingPatients.length,
-                  missingCount: missingPatients.length,
+                _OpsNotificationsCard(
+                  items: _opsNotifications,
                 ),
-                const SizedBox(height: 12),
-                _PassengerGroupsCard(
-                  boarded: boardedPatients,
-                  waiting: waitingPatients,
-                  missing: missingPatients,
-                  completed: completedPatients,
-                ),
-                const SizedBox(height: 12),
-                _GpsOperationalCard(
-                  vehicle: driver.vehicle,
-                  gpsLabel: gpsLabel,
-                  position: gps.lastPosition,
-                ),
-                const SizedBox(height: 12),
-                const _MapPlaceholderCard(),
               ],
             ),
     );
@@ -1698,63 +1782,127 @@ class _NextActionCard extends StatelessWidget {
   }
 }
 
-class _PassengerOverviewCard extends StatelessWidget {
-  final int boardedCount;
-  final int waitingCount;
-  final int missingCount;
+class _ConnectionAndGpsCard extends StatelessWidget {
+  final bool wsConnected;
+  final bool wsDisconnected;
+  final bool gpsActive;
+  final String gpsLabel;
 
-  const _PassengerOverviewCard({
-    required this.boardedCount,
-    required this.waitingCount,
-    required this.missingCount,
+  const _ConnectionAndGpsCard({
+    required this.wsConnected,
+    required this.wsDisconnected,
+    required this.gpsActive,
+    required this.gpsLabel,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: _countTile('Embarcados', boardedCount, AppColors.primary)),
-          const SizedBox(width: 8),
-          Expanded(child: _countTile('Aguardando', waitingCount, AppColors.warning)),
-          const SizedBox(width: 8),
-          Expanded(child: _countTile('Ausentes', missingCount, AppColors.danger)),
+          const Text(
+            'DIAGNÓSTICO OPERACIONAL',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              StatusBadge(
+                label: wsConnected ? 'ONLINE' : 'OFFLINE',
+                color: wsConnected ? AppColors.primary : AppColors.danger,
+              ),
+              StatusBadge(
+                label: gpsActive ? 'GPS ATIVO' : 'GPS INATIVO',
+                color: gpsActive ? AppColors.info : AppColors.warning,
+              ),
+              if (wsDisconnected)
+                const StatusBadge(
+                  label: 'RECONECTANDO',
+                  color: AppColors.warning,
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            gpsLabel,
+            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _countTile(String label, int value, Color color) {
+class _OpsNotificationsCard extends StatelessWidget {
+  final List<Map<String, dynamic>> items;
+  const _OpsNotificationsCard({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(14),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            value.toString(),
+          const Text(
+            'NOTIFICAÇÕES OPERACIONAIS',
             style: TextStyle(
-              color: color,
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: const TextStyle(
               color: AppColors.textSecondary,
               fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
             ),
           ),
+          const SizedBox(height: 8),
+          if (items.isEmpty)
+            const Text(
+              'Sem alertas no momento.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          for (final item in items.take(6))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    margin: const EdgeInsets.only(top: 5),
+                    decoration: BoxDecoration(
+                      color: Color((item['color'] as int?) ?? AppColors.info.toARGB32()),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      item['message']?.toString() ?? '',
+                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

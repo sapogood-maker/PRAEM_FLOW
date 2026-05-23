@@ -23,6 +23,7 @@ const statusColors: Record<string, string> = {
   STOPPED: '#d29922',
   BOARDING: '#388bfd',
   BOARDED: '#388bfd',
+  PASSENGERS_ONBOARD: '#388bfd',
   IN_TRANSIT: '#2da44e',
   MOVING: '#2da44e',
   ONLINE: '#2da44e',
@@ -40,6 +41,8 @@ function getOperationalLabel(status?: string) {
       return 'Embarque';
     case 'BOARDED':
       return 'EMBARCADO';
+    case 'PASSENGERS_ONBOARD':
+      return 'PASSAGEIROS EMBARCADOS';
     case 'STOPPED':
       return 'Parado';
     case 'IN_TRANSIT':

@@ -159,12 +159,24 @@ export function useWebSocket(enabled = true) {
       dispatchGpsToStore('operational:location', data);
     });
 
-    socket.on('ops:state:replay', (data: { latestPosition?: VehiclePosition; route?: { id: string; status?: string }; driverId?: string }) => {
+    socket.on('ops:state:replay', (data: { latestPosition?: VehiclePosition; route?: { id: string; status?: string; operationalState?: string }; driverId?: string; trackingPoints?: Array<{ lat: number; lng: number }> }) => {
       if (data.latestPosition) {
         dispatchGpsToStore('ops:state:replay', data.latestPosition);
       }
       if (data.route?.id) {
-        record(`♻️ Estado recuperado: rota ${data.route.id}`, 'route');
+        record(`♻️ Estado recuperado: rota ${data.route.id}${data.route.operationalState ? ` (${data.route.operationalState})` : ''}`, 'route');
+      }
+      if ((data.trackingPoints?.length ?? 0) > 0) {
+        if (data.latestPosition?.vehicleId) {
+          for (const p of data.trackingPoints ?? []) {
+            dispatchGpsToStore('ops:state:replay:tracking', {
+              ...data.latestPosition,
+              lat: p.lat,
+              lng: p.lng,
+            } as VehiclePosition);
+          }
+        }
+        record(`📍 Replay de rastreio: ${data.trackingPoints?.length ?? 0} pontos`, 'vehicle');
       }
     });
 
@@ -230,6 +242,10 @@ export function useWebSocket(enabled = true) {
 
     socket.on('route.status_changed', (data: { routeId: string; status: string }) => {
       record(`Rota ${data.routeId} → ${data.status}`, 'route');
+    });
+
+    socket.on('route:operational_state', (data: { routeId: string; operationalState: string }) => {
+      record(`🧭 Rota ${data.routeId} → ${data.operationalState}`, 'route');
     });
 
     socket.on('operational:state_changed', (data: { routeId?: string; tripId?: string; operationalState: string }) => {

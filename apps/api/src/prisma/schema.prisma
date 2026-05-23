@@ -28,6 +28,8 @@ model Tenant {
   dailyOperations      DailyOperation[]
   operationShifts      OperationShift[]
   vehicleTrackings     VehicleTracking[]
+  trackingPoints       TrackingPoint[]
+  operationalTimelines OperationalTimeline[]
   healthcareLocations  HealthcareLocation[]
   devices              Device[]
   geoFenceEvents       GeoFenceEvent[]
@@ -330,12 +332,16 @@ model Route {
   estimatedFuelCost       Float?
   routeOptimizationScore  Float?
   occupancyPrediction     Float?
+  operationalState        RouteOperationalState @default(CREATED)
+  operationalVersion      Int          @default(1)
   createdAt               DateTime     @default(now())
   tenant                  Tenant       @relation(fields: [tenantId], references: [id])
   driver                  Driver?      @relation(fields: [driverId], references: [id])
   vehicle                 Vehicle?     @relation(fields: [vehicleId], references: [id])
   trips                   Trip[]
   checkpoints             Checkpoint[]
+  timelines               OperationalTimeline[]
+  trackingPoints          TrackingPoint[]
 
   @@index([tenantId])
   @@index([scheduledAt])
@@ -351,6 +357,20 @@ enum RouteStatus {
   WAITING_CONSULTATION
   RETURNING
   COMPLETED
+  CANCELLED
+}
+
+enum RouteOperationalState {
+  CREATED
+  DISPATCHED
+  DRIVER_ACCEPTED
+  WAITING_PATIENT
+  BOARDING
+  PASSENGERS_ONBOARD
+  IN_TRANSIT
+  ARRIVED
+  COMPLETED
+  NO_SHOW
   CANCELLED
 }
 
@@ -381,6 +401,7 @@ model Trip {
   boardedAt   DateTime?
   completedAt DateTime?
   qrScanned   Boolean    @default(false)
+  version     Int        @default(1)
   notes       String?
   tenant      Tenant     @relation(fields: [tenantId], references: [id])
   route       Route      @relation(fields: [routeId], references: [id])
@@ -388,6 +409,7 @@ model Trip {
   checkpoints Checkpoint[]
   tokens      TripToken[]
   stops       TripStop[]
+  timelines   OperationalTimeline[]
 
   @@index([tenantId])
 }
@@ -520,6 +542,53 @@ model GeoFenceEvent {
   @@index([tenantId])
   @@index([vehicleId])
   @@index([routeId])
+}
+
+model TrackingPoint {
+  id         String   @id @default(uuid())
+  tenantId   String
+  routeId    String?
+  driverId   String?
+  vehicleId  String
+  lat        Float
+  lng        Float
+  speed      Float?
+  heading    Float?
+  timestamp  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  route      Route?   @relation(fields: [routeId], references: [id])
+
+  @@index([tenantId])
+  @@index([routeId])
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([timestamp])
+}
+
+model OperationalTimeline {
+  id            String   @id @default(uuid())
+  tenantId      String
+  routeId       String?
+  tripId        String?
+  patientId     String?
+  driverId      String?
+  vehicleId     String?
+  eventType     String
+  fromState     String?
+  toState       String?
+  source        String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  route         Route?   @relation(fields: [routeId], references: [id])
+  trip          Trip?    @relation(fields: [tripId], references: [id])
+
+  @@index([tenantId])
+  @@index([routeId])
+  @@index([tripId])
+  @@index([patientId])
+  @@index([eventType])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------

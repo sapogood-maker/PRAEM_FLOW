@@ -32,6 +32,14 @@ function deriveOperationalStatus(speed?: number | null, online?: boolean): strin
   return 'MOVING';
 }
 
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const toRad = (n: number) => (n * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
 @Injectable()
 export class TrackingService {
   private readonly logger = new Logger(TrackingService.name);
@@ -83,9 +91,39 @@ export class TrackingService {
         timestamp: now,
       },
     });
+    await this.prisma.trackingPoint.create({
+      data: {
+        tenantId: payload.tenantId,
+        routeId: payload.routeId ?? null,
+        driverId: payload.driverId ?? null,
+        vehicleId: payload.vehicleId,
+        lat: payload.lat,
+        lng: payload.lng,
+        speed: payload.speed ?? null,
+        heading: payload.heading ?? null,
+        timestamp: now,
+      },
+    });
+    await this.prisma.operationalTimeline.create({
+      data: {
+        tenantId: payload.tenantId,
+        routeId: payload.routeId ?? null,
+        driverId: payload.driverId ?? null,
+        vehicleId: payload.vehicleId,
+        eventType: 'GPS_CHECKPOINT',
+        source: 'TRACKING_HEARTBEAT',
+        metadata: {
+          lat: payload.lat,
+          lng: payload.lng,
+          speed: payload.speed ?? null,
+          heading: payload.heading ?? null,
+          timestamp: now.toISOString(),
+        } as any,
+      },
+    });
 
     // Emit real-time location update
-    this.logger.log(`[GPS] heartbeat tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} driverId=${payload.driverId ?? '-'} routeId=${payload.routeId ?? '-'}`);
+    this.logger.log(`[TRACKING] [OPS] heartbeat tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} driverId=${payload.driverId ?? '-'} routeId=${payload.routeId ?? '-'}`);
     this.opsGateway.emitToTenant(payload.tenantId, 'vehicle.location_updated', {
       vehicleId: payload.vehicleId,
       driverId: payload.driverId ?? null,
@@ -114,7 +152,7 @@ export class TrackingService {
       batteryLevel: payload.batteryLevel,
       timestamp: now.toISOString(),
     });
-    this.logger.log(`[MAP] broadcast tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'}`);
+    this.logger.log(`[TRACKING] [OPS] broadcast tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'}`);
     await this.audit.log({
       tenantId: payload.tenantId,
       userId: payload.driverId ?? payload.vehicleId,
@@ -143,6 +181,15 @@ export class TrackingService {
       });
     }
 
+    await this.evaluateGeofenceIntelligence(payload.tenantId, {
+      routeId: payload.routeId ?? null,
+      vehicleId: payload.vehicleId,
+      driverId: payload.driverId ?? null,
+      lat: payload.lat,
+      lng: payload.lng,
+      speed: payload.speed ?? null,
+      timestamp: now,
+    });
     return record;
   }
 
@@ -244,7 +291,7 @@ export class TrackingService {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const threshold = new Date(Date.now() - OFFLINE_THRESHOLD_SECONDS * 1000);
 
-    const [totalRecords, onlineCount, offlineCount, movingCount, geofenceArrivals] = await Promise.all([
+    const [totalRecords, onlineCount, offlineCount, movingCount, geofenceArrivals, trackingPoints24h] = await Promise.all([
       this.prisma.vehicleTracking.count({ where: { tenantId, timestamp: { gte: since24h } } }),
       this.prisma.vehicleTracking.count({
         where: { tenantId, online: true, lastHeartbeatAt: { gte: threshold } },
@@ -258,6 +305,9 @@ export class TrackingService {
       this.prisma.geoFenceEvent.count({
         where: { tenantId, eventType: 'ARRIVED_AT_DESTINATION', detectedAt: { gte: since24h } },
       }),
+      this.prisma.trackingPoint.count({
+        where: { tenantId, timestamp: { gte: since24h } },
+      }),
     ]);
 
     return {
@@ -266,7 +316,34 @@ export class TrackingService {
       offlineNow: offlineCount,
       movingRecords24h: movingCount,
       geofenceArrivals24h: geofenceArrivals,
+      trackingPoints24h,
     };
+  }
+
+  async getTrackingHistory(tenantId: string, routeId?: string, vehicleId?: string, limit = 1000) {
+    const items = await this.prisma.trackingPoint.findMany({
+      where: {
+        tenantId,
+        ...(routeId ? { routeId } : {}),
+        ...(vehicleId ? { vehicleId } : {}),
+      },
+      orderBy: { timestamp: 'desc' },
+      take: Math.min(Math.max(limit, 50), 5000),
+    });
+    return { items: items.reverse() };
+  }
+
+  async getOperationalTimeline(tenantId: string, routeId?: string, tripId?: string, limit = 500) {
+    const items = await this.prisma.operationalTimeline.findMany({
+      where: {
+        tenantId,
+        ...(routeId ? { routeId } : {}),
+        ...(tripId ? { tripId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(limit, 50), 5000),
+    });
+    return { items };
   }
 
   /**
@@ -292,8 +369,14 @@ export class TrackingService {
         id: { notIn: keepIds },
       },
     });
+    const trackingPointDeleted = await this.prisma.trackingPoint.deleteMany({
+      where: {
+        tenantId,
+        timestamp: { lt: cutoff },
+      },
+    });
 
-    return { deletedRows: deleted.count, cutoff: cutoff.toISOString() };
+    return { deletedRows: deleted.count, deletedTrackingPoints: trackingPointDeleted.count, cutoff: cutoff.toISOString() };
   }
 
   // Legacy in-memory methods kept for backward-compat
@@ -303,5 +386,58 @@ export class TrackingService {
 
   vehicleById(_vehicleId: string) {
     return null;
+  }
+
+  private async evaluateGeofenceIntelligence(tenantId: string, input: {
+    routeId: string | null;
+    vehicleId: string;
+    driverId: string | null;
+    lat: number;
+    lng: number;
+    speed: number | null;
+    timestamp: Date;
+  }) {
+    const nearby = await this.prisma.healthcareLocation.findMany({
+      where: {
+        tenantId,
+        active: true,
+        latitude: { not: null, gte: input.lat - 0.02, lte: input.lat + 0.02 },
+        longitude: { not: null, gte: input.lng - 0.02, lte: input.lng + 0.02 },
+      },
+      select: { id: true, name: true, latitude: true, longitude: true, type: true },
+      take: 25,
+    });
+    let nearest: { id: string; name: string; distance: number; type: string } | null = null;
+    for (const loc of nearby) {
+      if (loc.latitude == null || loc.longitude == null) continue;
+      const dist = distanceMeters(input.lat, input.lng, loc.latitude, loc.longitude);
+      if (!nearest || dist < nearest.distance) {
+        nearest = { id: loc.id, name: loc.name, distance: dist, type: loc.type };
+      }
+    }
+    if (!nearest) return;
+    if (nearest.distance <= 250) {
+      this.logger.log(`[TRACKING] [OPS] geofence proximity routeId=${input.routeId ?? '-'} vehicleId=${input.vehicleId} location=${nearest.name} distance=${nearest.distance.toFixed(0)}m`);
+      this.opsGateway.emitToTenant(tenantId, 'geofence:hospital_proximity', {
+        routeId: input.routeId,
+        vehicleId: input.vehicleId,
+        driverId: input.driverId,
+        locationId: nearest.id,
+        locationName: nearest.name,
+        locationType: nearest.type,
+        distanceMeters: Math.round(nearest.distance),
+        timestamp: input.timestamp.toISOString(),
+      });
+      if ((input.speed ?? 0) < 5) {
+        this.opsGateway.emitToTenant(tenantId, 'route:progression_suggestion', {
+          routeId: input.routeId,
+          vehicleId: input.vehicleId,
+          suggestedState: 'ARRIVED',
+          reason: 'HOSPITAL_PROXIMITY',
+          distanceMeters: Math.round(nearest.distance),
+          timestamp: input.timestamp.toISOString(),
+        });
+      }
+    }
   }
 }

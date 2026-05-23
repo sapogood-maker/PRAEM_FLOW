@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Request, UseGuards, Headers } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Request, UseGuards, Headers } from '@nestjs/common';
 import { sanitizePayload } from '../../common/sanitize';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TrackingService, VehicleTrackingPayload } from './tracking.service';
@@ -33,6 +33,28 @@ export class TrackingController {
   @Get('live')
   getLive(@Request() req: AuthRequest) {
     return this.trackingService.getLiveVehicles(req.user.tenantId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('history')
+  history(
+    @Request() req: AuthRequest,
+    @Query('routeId') routeId?: string,
+    @Query('vehicleId') vehicleId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.trackingService.getTrackingHistory(req.user.tenantId, routeId, vehicleId, limit ? Number(limit) : undefined);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('timeline')
+  timeline(
+    @Request() req: AuthRequest,
+    @Query('routeId') routeId?: string,
+    @Query('tripId') tripId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.trackingService.getOperationalTimeline(req.user.tenantId, routeId, tripId, limit ? Number(limit) : undefined);
   }
 
   /**
@@ -90,4 +112,3 @@ export class TrackingController {
     return this.trackingService.vehicleById(id);
   }
 }
-

@@ -103,6 +103,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'EMBARQUE';
       case 'BOARDED':
         return 'EMBARCADO';
+      case 'PASSENGERS_ONBOARD':
+        return 'PASSAGEIROS EMBARCADOS';
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
         return 'EM DESLOCAMENTO';
@@ -126,6 +128,8 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'BOARDING':
         return AppColors.boarding;
       case 'BOARDED':
+        return AppColors.info;
+      case 'PASSENGERS_ONBOARD':
         return AppColors.info;
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
@@ -183,6 +187,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return boardedCount > 0 ? 'CONFIRMAR EMBARCADO' : 'ESCANEAR PASSAGEIRO';
       case 'BOARDED':
         return 'INICIAR DESLOCAMENTO';
+      case 'PASSENGERS_ONBOARD':
+        return 'INICIAR DESLOCAMENTO';
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
         return 'CHEGADA';
@@ -216,6 +222,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'Pronto para confirmar embarque.';
       case 'BOARDED':
         return 'Todos os passageiros confirmados. Inicie o deslocamento.';
+      case 'PASSENGERS_ONBOARD':
+        return 'Existem passageiros embarcados. Siga para o deslocamento.';
       case 'IN_TRANSIT':
       case 'IN_PROGRESS':
         return 'Siga até o destino da rota.';
@@ -302,6 +310,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final route = replay['route'];
       if (route is Map) {
         driver.setActiveRoute(Map<String, dynamic>.from(route));
+        final routeOperationalState = route['operationalState'] as String?;
+        if (routeOperationalState != null && routeOperationalState.isNotEmpty) {
+          driver.setOperationalStatus(routeOperationalState);
+        }
         final trips = (route['trips'] as List?) ?? [];
         driver.setPatients(trips.map((t) => Map<String, dynamic>.from(t as Map)).toList());
         final allStops = <Map<String, dynamic>>[];
@@ -312,6 +324,10 @@ class _HomeScreenState extends State<HomeScreen> {
         allStops.sort((a, b) =>
             ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
         driver.setStops(allStops);
+      }
+      final trackingPoints = replay['trackingPoints'] as List?;
+      if (trackingPoints != null && trackingPoints.isNotEmpty) {
+        debugPrint('[FLUTTER] replay tracking points=${trackingPoints.length}');
       }
     });
 
@@ -363,6 +379,15 @@ class _HomeScreenState extends State<HomeScreen> {
         if (status == 'COMPLETED') {
           context.read<DriverState>().setOperationalStatus('COMPLETED');
         }
+      }
+    });
+
+    ws.on('route:operational_state', (data) {
+      if (!mounted) return;
+      final event = data as Map?;
+      final operationalState = event?['operationalState'] as String?;
+      if (operationalState != null && operationalState.isNotEmpty) {
+        context.read<DriverState>().setOperationalStatus(operationalState);
       }
     });
 
@@ -966,11 +991,10 @@ class _HomeScreenState extends State<HomeScreen> {
       boardedCount: boardedPatients.length,
       pendingCount: waitingPatients.length,
     );
-    final showScanner = nextAction == 'ESCANEAR PASSAGEIRO';
     // Show emergency finalize for overnight routes, boarded passengers, or active IN_TRANSIT
     final showForceFinalize = _isOvernightRoute ||
         currentStatus == 'IN_TRANSIT' ||
-        (currentStatus == 'BOARDED' && boardedPatients.isNotEmpty);
+        ((currentStatus == 'BOARDED' || currentStatus == 'PASSENGERS_ONBOARD') && boardedPatients.isNotEmpty);
     final statusColor = _displayStatusColor(currentStatus);
     final routeTitle = route == null
         ? 'Sem rota ativa'
@@ -1036,7 +1060,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 _NextActionCard(
                   currentStatus: currentStatus,
                   nextAction: nextAction,
-                  showScanner: showScanner,
                   onAcceptRoute: () => _changeStatus('DRIVER_ACCEPTED'),
                   onOpenScanner: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
                   onStartTransit: () => _changeStatus('IN_TRANSIT'),
@@ -1399,6 +1422,8 @@ class _PatientTile extends StatelessWidget {
         return 'Embarcando';
       case 'BOARDED':
         return 'EMBARCADO';
+      case 'PASSENGERS_ONBOARD':
+        return 'PASSAGEIROS EMBARCADOS';
       case 'IN_PROGRESS':
       case 'IN_TRANSIT':
         return 'EM DESLOCAMENTO';
@@ -1561,7 +1586,6 @@ class _GuidedStatusCard extends StatelessWidget {
 class _NextActionCard extends StatelessWidget {
   final String currentStatus;
   final String? nextAction;
-  final bool showScanner;
   final VoidCallback onAcceptRoute;
   final VoidCallback onOpenScanner;
   final VoidCallback onStartTransit;
@@ -1572,7 +1596,6 @@ class _NextActionCard extends StatelessWidget {
   const _NextActionCard({
     required this.currentStatus,
     required this.nextAction,
-    required this.showScanner,
     required this.onAcceptRoute,
     required this.onOpenScanner,
     required this.onStartTransit,
@@ -1633,7 +1656,7 @@ class _NextActionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text(
-            'AÇÃO DE HOJE',
+            'AÇÃO GUIADA',
             style: TextStyle(
               color: AppColors.textSecondary,
               fontSize: 11,
@@ -1643,16 +1666,6 @@ class _NextActionCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           child,
-          if (showScanner && action != 'ESCANEAR PASSAGEIRO') ...[
-            const SizedBox(height: 10),
-            _actionButton(
-              label: 'ESCANEAR PASSAGEIRO',
-              onPressed: onOpenScanner,
-              color: AppColors.boarding,
-              icon: Icons.qr_code_scanner,
-              outlined: true,
-            ),
-          ],
           if (onForceFinalize != null) ...[
             const SizedBox(height: 10),
             _actionButton(

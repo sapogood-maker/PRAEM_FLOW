@@ -87,4 +87,13 @@ export class RoutesController {
       actorUserId: req.user.userId,
     });
   }
+
+  @Post('recovery/stale')
+  @Roles('SUPERVISOR', 'ADMIN', 'COORDINATOR')
+  recoverStaleRoutes(@Request() req: AuthRequest, @Body() body: { cutoffHours?: number }) {
+    this.logger.log(`[ROUTE] REST recovery stale tenantId=${req.user.tenantId} cutoffHours=${body?.cutoffHours ?? 12}`);
+    return this.routesService.recoverStaleRoutes(req.user.tenantId, body?.cutoffHours, {
+      actorUserId: req.user.userId,
+    });
+  }
 }

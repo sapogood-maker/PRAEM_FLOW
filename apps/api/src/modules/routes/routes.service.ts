@@ -40,13 +40,17 @@ export class RoutesService {
         include: {
           driver: { include: { user: { select: { name: true } } } },
           vehicle: { select: { id: true, plate: true, model: true, capacity: true } },
-          trips: { select: { id: true, status: true } },
+          trips: { select: { id: true, status: true, boardedAt: true } },
         },
         orderBy: { date: 'desc' },
       }),
       this.prisma.route.count({ where }),
     ]);
-    return { items, total, page, limit, pages: Math.ceil(total / limit) };
+    const mapped = items.map((r: any) => ({
+      ...r,
+      operationalStateDerived: this.deriveRouteOperationalStateFromTrips(r.trips ?? [], r.status),
+    }));
+    return { items: mapped, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
   async findOne(id: string, tenantId: string) {
@@ -59,7 +63,10 @@ export class RoutesService {
       },
     });
     if (!route) throw new NotFoundException('Route not found');
-    return route;
+    return {
+      ...route,
+      operationalStateDerived: this.deriveRouteOperationalStateFromTrips(route.trips ?? [], route.status),
+    };
   }
 
   async diagnostics(id: string, tenantId: string) {
@@ -90,6 +97,7 @@ export class RoutesService {
       vehicleId: route.vehicleId,
       totalTrips: route.trips.length,
       tripStatuses: route.trips.map((t: { status: string }) => t.status),
+      operationalStateDerived: this.deriveRouteOperationalStateFromTrips(route.trips, route.status),
       trips: route.trips,
     };
   }
@@ -177,5 +185,26 @@ export class RoutesService {
 
   optimize(id: string) {
     return { routeId: id, optimized: true, message: 'Rota otimizada por heurística de distância' };
+  }
+
+  async recoverStaleRoutes(tenantId: string, cutoffHours?: number, context?: { driverId?: string; actorUserId?: string }) {
+    return this.flow.recoverStaleRoutes(tenantId, cutoffHours ?? 12, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'routes.recovery-stale',
+    });
+  }
+
+  private deriveRouteOperationalStateFromTrips(trips: Array<{ status: string; boardedAt?: Date | null }>, routeStatus: string) {
+    const statuses = trips.map((t) => String(t.status));
+    if (statuses.length === 0) return routeStatus;
+    const hasTransit = statuses.some((s) => s === 'IN_TRANSIT' || s === 'IN_PROGRESS');
+    const hasBoarded = statuses.some((s) => s === 'BOARDED' || s === 'ARRIVED' || s === 'COMPLETED') || trips.some((t) => !!t.boardedAt);
+    const hasPending = statuses.some((s) => ['SCHEDULED', 'CONFIRMED', 'BOARDING'].includes(s));
+    if (hasTransit) return 'IN_TRANSIT';
+    if (hasBoarded && hasPending) return 'PASSENGERS_ONBOARD';
+    if (hasBoarded) return 'PASSENGERS_ONBOARD';
+    if (statuses.every((s) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(s))) return 'COMPLETED';
+    return routeStatus;
   }
 }

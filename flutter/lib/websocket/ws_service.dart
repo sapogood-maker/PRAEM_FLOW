@@ -271,6 +271,7 @@ class WsService extends ChangeNotifier {
     'operational.alert',
     'route:started',
     'route:waiting_patient',
+    'route:operational_state',
     'route.status_changed',
     'route:completed',
     'route:dispatched',

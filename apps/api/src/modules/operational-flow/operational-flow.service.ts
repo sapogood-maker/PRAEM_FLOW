@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { AuditService } from '../audit/audit.service';
@@ -33,6 +33,19 @@ type OperationalState =
   | 'NO_SHOW'
   | 'CANCELLED';
 
+type RouteDerivedOperationalState =
+  | 'CREATED'
+  | 'DISPATCHED'
+  | 'DRIVER_ACCEPTED'
+  | 'WAITING_PATIENT'
+  | 'BOARDING'
+  | 'PASSENGERS_ONBOARD'
+  | 'IN_TRANSIT'
+  | 'ARRIVED'
+  | 'COMPLETED'
+  | 'NO_SHOW'
+  | 'CANCELLED';
+
 // Transition graph updated to explicitly model BOARDED and allow NO_SHOW reversal
 const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
   CREATED: ['DISPATCHED', 'CANCELLED'],
@@ -60,12 +73,15 @@ type FlowTrip = {
   status: string;
   boardedAt: Date | null;
   completedAt: Date | null;
+  version: number;
   route: {
     id: string;
     tenantId: string;
     driverId: string | null;
     vehicleId: string | null;
     status: string;
+    operationalVersion: number;
+    operationalState?: string | null;
   };
 };
 
@@ -212,11 +228,7 @@ export class OperationalFlowService {
     }
 
     const now = new Date();
-    const updated = await this.prisma.trip.update({
-      where: { id: trip.id },
-      data: { status: 'CONFIRMED', boardedAt: null },
-      include: { route: true },
-    });
+    const updated = await this.updateTripWithVersion(trip.id, trip.version ?? 1, { status: 'CONFIRMED', boardedAt: null });
 
     // sync queue if present
     const queue = await this.findLatestQueue(tenantId, trip.patientId);
@@ -250,6 +262,19 @@ export class OperationalFlowService {
         source: context.source ?? 'SUPERVISOR_REINSTATE',
       },
     });
+    await this.persistTimeline({
+      tenantId,
+      routeId: updated.routeId,
+      tripId: trip.id,
+      patientId: trip.patientId,
+      driverId: context.driverId ?? updated.route.driverId ?? null,
+      vehicleId: context.vehicleId ?? updated.route.vehicleId ?? null,
+      eventType: 'SUPERVISOR_OVERRIDE',
+      fromState: 'NO_SHOW',
+      toState: 'CONFIRMED',
+      source: context.source ?? 'SUPERVISOR_REINSTATE',
+      metadata: { reason: 'MANUAL_REINSTATE' },
+    });
 
     return { trip: updated };
   }
@@ -260,7 +285,7 @@ export class OperationalFlowService {
    */
   async recoverStaleTrips(tenantId: string, cutoffHours = 12, context: FlowContext = {}) {
     const cutoff = new Date(Date.now() - cutoffHours * 3600 * 1000);
-    this.logger.log(`[RECOVERY] scanning stale trips tenantId=${tenantId} cutoff=${cutoff.toISOString()}`);
+    this.logger.log(`[RECOVERY] [OPS] scanning stale trips tenantId=${tenantId} cutoff=${cutoff.toISOString()}`);
     const staleTrips = await this.prisma.trip.findMany({
       where: {
         tenantId,
@@ -275,8 +300,45 @@ export class OperationalFlowService {
       await this.transitionState(tenantId, { tripId: t.id }, 'NO_SHOW', { ...context, source: 'RECOVERY_STALE_TRIPS' });
       processed.push(t.id);
     }
-    this.logger.log(`[RECOVERY] marked ${processed.length} stale trips as NO_SHOW`);
+    this.logger.log(`[RECOVERY] [OPS] marked ${processed.length} stale trips as NO_SHOW`);
     return { processed };
+  }
+
+  async recoverStaleRoutes(tenantId: string, cutoffHours = 12, context: FlowContext = {}) {
+    const cutoff = new Date(Date.now() - cutoffHours * 3600 * 1000);
+    this.logger.log(`[RECOVERY] [OPS] scanning stale routes tenantId=${tenantId} cutoff=${cutoff.toISOString()}`);
+    const staleRoutes = await this.prisma.route.findMany({
+      where: {
+        tenantId,
+        status: { in: ['DISPATCHED', 'ACTIVE', 'RETURNING'] as any[] },
+        date: { lt: cutoff },
+      },
+      include: {
+        trips: { select: { id: true, status: true, boardedAt: true } },
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    const diagnostics: Array<{ routeId: string; action: string; activeTrips: number; boardedTrips: number }> = [];
+    for (const route of staleRoutes) {
+      const activeTrips = route.trips.filter((t) => !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(String(t.status)));
+      const boardedTrips = activeTrips.filter((t) => !!t.boardedAt || ['BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'].includes(String(t.status)));
+      if (activeTrips.length === 0) {
+        await this.updateRouteWithVersion(route.id, route.operationalVersion ?? 1, {
+          status: 'COMPLETED',
+          operationalState: 'COMPLETED',
+        });
+        diagnostics.push({ routeId: route.id, action: 'MARK_COMPLETED_NO_ACTIVE_TRIPS', activeTrips: 0, boardedTrips: 0 });
+      } else {
+        await this.forceCompleteRoute(tenantId, route.id, {
+          ...context,
+          source: context.source ?? 'RECOVERY_STALE_ROUTES',
+        });
+        diagnostics.push({ routeId: route.id, action: 'FORCE_COMPLETE_ROUTE', activeTrips: activeTrips.length, boardedTrips: boardedTrips.length });
+      }
+    }
+    this.logger.log(`[RECOVERY] [OPS] stale routes processed=${diagnostics.length}`);
+    return { processed: diagnostics.length, diagnostics };
   }
 
   /**
@@ -311,10 +373,7 @@ export class OperationalFlowService {
     for (const trip of pendingTrips) {
       const isBoarded = !!trip.boardedAt;
       if (isBoarded) {
-        await this.prisma.trip.update({
-          where: { id: trip.id },
-          data: { status: 'COMPLETED', completedAt: now },
-        });
+        await this.updateTripWithVersion(trip.id, trip.version ?? 1, { status: 'COMPLETED', completedAt: now });
         completedTripIds.push(trip.id);
         this.logger.log(`[FINALIZE] trip forced COMPLETED tripId=${trip.id} boardedAt=${trip.boardedAt}`);
 
@@ -331,10 +390,7 @@ export class OperationalFlowService {
         this.emitToRoute(tenantId, context.driverId ?? null, 'trip:completed', payload);
         this.emitToRoute(tenantId, context.driverId ?? null, 'patient.completed', payload);
       } else {
-        await this.prisma.trip.update({
-          where: { id: trip.id },
-          data: { status: 'NO_SHOW' },
-        });
+        await this.updateTripWithVersion(trip.id, trip.version ?? 1, { status: 'NO_SHOW' });
         noShowTripIds.push(trip.id);
         this.logger.log(`[FINALIZE] trip forced NO_SHOW tripId=${trip.id}`);
 
@@ -377,12 +433,25 @@ export class OperationalFlowService {
           forceComplete: true,
         },
       });
+      await this.persistTimeline({
+        tenantId,
+        routeId,
+        tripId: trip.id,
+        patientId: trip.patientId,
+        driverId: context.driverId ?? route.driverId ?? null,
+        vehicleId: context.vehicleId ?? route.vehicleId ?? null,
+        eventType: 'RECOVERY_ACTION',
+        fromState: trip.status,
+        toState: isBoarded ? 'COMPLETED' : 'NO_SHOW',
+        source: context.source ?? 'FORCE_COMPLETE',
+        metadata: { forceComplete: true },
+      });
     }
 
     // Force-complete the route regardless of current status
-    await this.prisma.route.update({
-      where: { id: routeId },
-      data: { status: 'COMPLETED' },
+    await this.updateRouteWithVersion(routeId, route.operationalVersion ?? 1, {
+      status: 'COMPLETED',
+      operationalState: 'COMPLETED',
     });
 
     const routeWithRelations = await this.findRoute(tenantId, routeId);
@@ -421,6 +490,17 @@ export class OperationalFlowService {
         completedTripIds,
         noShowTripIds,
       },
+    });
+    await this.persistTimeline({
+      tenantId,
+      routeId,
+      driverId: context.driverId ?? route.driverId ?? null,
+      vehicleId: context.vehicleId ?? route.vehicleId ?? null,
+      eventType: 'RECOVERY_ROUTE_FINALIZED',
+      fromState: route.status,
+      toState: 'COMPLETED',
+      source: context.source ?? 'FORCE_COMPLETE',
+      metadata: { completedTripIds, noShowTripIds },
     });
 
     this.logger.log(
@@ -483,29 +563,32 @@ export class OperationalFlowService {
     const queue = entity.trip ? await this.findLatestQueue(tenantId, entity.trip.patientId) : null;
     let route = entity.route;
     let trip = entity.trip ?? null;
+    let routeVersion = route.operationalVersion ?? 1;
+    let tripVersion = trip?.version ?? 1;
     const queueUpdate: Record<string, unknown> = {};
 
     if (targetState === 'DISPATCHED') {
-      route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'DISPATCHED' } });
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'DISPATCHED', operationalState: 'DISPATCHED' });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
     if (targetState === 'DRIVER_ACCEPTED') {
-      route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'DRIVER_ACCEPTED' });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
     if (targetState === 'WAITING_PATIENT') {
-      route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'WAITING_PATIENT' });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
       queueUpdate.status = 'WAITING';
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
     if (targetState === 'BOARDING' && trip) {
       // Mark passenger as in the process of boarding. Actual boardedAt is set when BOARDED state is applied.
-      trip = await this.prisma.trip.update({
-        where: { id: trip.id },
-        data: { status: 'BOARDING', qrScanned: false },
-        include: { route: true },
-      });
-      route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'BOARDING', qrScanned: false });
+      tripVersion = trip?.version ?? (tripVersion + 1);
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'BOARDING' });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
       this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       queueUpdate.status = 'BOARDING';
@@ -514,12 +597,10 @@ export class OperationalFlowService {
     }
     if (targetState === 'BOARDED' && trip) {
       // Passenger confirmed aboard the vehicle
-      trip = await this.prisma.trip.update({
-        where: { id: trip.id },
-        data: { status: 'BOARDED', qrScanned: true, boardedAt: now },
-        include: { route: true },
-      });
-      route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'ACTIVE' } });
+      trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'BOARDED', qrScanned: true, boardedAt: now });
+      tripVersion = trip?.version ?? (tripVersion + 1);
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'PASSENGERS_ONBOARD' });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
       this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       queueUpdate.status = 'BOARDING';
@@ -534,32 +615,27 @@ export class OperationalFlowService {
         this.logger.warn(`[OPS] transition rejected reason=not_boarded tenantId=${tenantId} routeId=${route.id} tripId=${trip.id}`);
         throw new BadRequestException('Only boarded passengers can enter in-transit');
       }
-      trip = await this.prisma.trip.update({
-        where: { id: trip.id },
-        data: { status: 'IN_TRANSIT' },
-        include: { route: true },
-      });
+      trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'IN_TRANSIT' });
+      tripVersion = trip?.version ?? (tripVersion + 1);
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { operationalState: 'IN_TRANSIT' });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
       queueUpdate.status = 'IN_TRANSIT';
       queueUpdate.departedAt = now;
       this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
     }
     if (targetState === 'ARRIVED' && trip) {
-      trip = await this.prisma.trip.update({
-        where: { id: trip.id },
-        data: { status: 'ARRIVED' },
-        include: { route: true },
-      });
+      trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'ARRIVED' });
+      tripVersion = trip?.version ?? (tripVersion + 1);
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { operationalState: 'ARRIVED' });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
       queueUpdate.status = 'ARRIVED';
       queueUpdate.arrivedAt = now;
       this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
     }
     if (targetState === 'COMPLETED') {
       if (trip) {
-        trip = await this.prisma.trip.update({
-          where: { id: trip.id },
-          data: { status: 'COMPLETED', completedAt: now },
-          include: { route: true },
-        });
+        trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'COMPLETED', completedAt: now });
+        tripVersion = trip?.version ?? (tripVersion + 1);
         queueUpdate.status = 'COMPLETED';
         this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       }
@@ -571,16 +647,14 @@ export class OperationalFlowService {
         },
       });
       if (remaining === 0) {
-        route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'COMPLETED' } });
+        route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'COMPLETED', operationalState: 'COMPLETED' });
+        routeVersion = route.operationalVersion ?? routeVersion + 1;
         this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       }
     }
     if (targetState === 'NO_SHOW' && trip) {
-      trip = await this.prisma.trip.update({
-        where: { id: trip.id },
-        data: { status: 'NO_SHOW' },
-        include: { route: true },
-      });
+      trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'NO_SHOW' });
+      tripVersion = trip?.version ?? (tripVersion + 1);
       queueUpdate.status = 'NO_SHOW';
       queueUpdate.noShowAt = now;
       queueUpdate.noShowReason = 'NOT_FOUND';
@@ -593,21 +667,20 @@ export class OperationalFlowService {
         },
       });
       if (remaining === 0) {
-        route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'COMPLETED' } });
+        route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'COMPLETED', operationalState: 'COMPLETED' });
+        routeVersion = route.operationalVersion ?? routeVersion + 1;
         this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       }
     }
     if (targetState === 'CANCELLED') {
       if (trip) {
-        trip = await this.prisma.trip.update({
-          where: { id: trip.id },
-          data: { status: 'CANCELLED' },
-          include: { route: true },
-        });
+        trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'CANCELLED' });
+        tripVersion = trip?.version ?? (tripVersion + 1);
         queueUpdate.status = 'CANCELLED';
         this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       } else {
-        route = await this.prisma.route.update({ where: { id: route.id }, data: { status: 'CANCELLED' } });
+        route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'CANCELLED', operationalState: 'CANCELLED' });
+        routeVersion = route.operationalVersion ?? routeVersion + 1;
         this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
       }
     }
@@ -616,6 +689,11 @@ export class OperationalFlowService {
       await this.prisma.operationalQueue.update({ where: { id: queue.id }, data: queueUpdate });
     }
 
+    const routeOperationalState = await this.deriveRouteOperationalState(tenantId, route.id);
+    if ((route.operationalState ?? null) !== routeOperationalState) {
+      route = await this.updateRouteWithVersion(route.id, routeVersion, { operationalState: routeOperationalState });
+      routeVersion = route.operationalVersion ?? routeVersion + 1;
+    }
     const routeWithRelations = await this.findRoute(tenantId, route.id);
     const patient = trip ? await this.prisma.patient.findUnique({ where: { id: trip.patientId } }) : null;
     const payload = this.buildPayload({
@@ -628,11 +706,25 @@ export class OperationalFlowService {
       patientName: patient?.name,
       operationalId: patient?.operationalId,
       operationalState: targetState,
+      routeOperationalState,
     });
-    this.logger.log(`[OPS] broadcasting transition state=${targetState} routeId=${payload.routeId} tripId=${payload.tripId} tenantId=${routeWithRelations.tenantId} driverId=${routeWithRelations.driverId ?? '-'}`);
+    this.logger.log(`[OPS] broadcasting transition state=${targetState} routeState=${routeOperationalState} routeId=${payload.routeId} tripId=${payload.tripId} tenantId=${routeWithRelations.tenantId} driverId=${routeWithRelations.driverId ?? '-'}`);
 
     this.emitTransitionEvents(targetState, routeWithRelations.tenantId, routeWithRelations.driverId, payload);
     await this.logTransitionAudit(tenantId, scope, currentState, targetState, payload, context);
+    await this.persistTimeline({
+      tenantId,
+      routeId: route.id,
+      tripId: trip?.id ?? scope.tripId ?? null,
+      patientId: trip?.patientId ?? null,
+      driverId: context.driverId ?? route.driverId ?? null,
+      vehicleId: context.vehicleId ?? route.vehicleId ?? null,
+      eventType: 'STATE_TRANSITION',
+      fromState: currentState,
+      toState: targetState,
+      source: context.source ?? 'api',
+      metadata: payload,
+    });
 
     return { trip, route: routeWithRelations, queue };
   }
@@ -724,7 +816,12 @@ export class OperationalFlowService {
     this.emitToRoute(tenantId, driverId, 'route.status_changed', {
       routeId: payload.routeId,
       status: payload.routeStatus,
-      operationalState: payload.operationalState,
+      operationalState: payload.routeOperationalState ?? payload.operationalState,
+      timestamp: payload.timestamp,
+    });
+    this.emitToRoute(tenantId, driverId, 'route:operational_state', {
+      routeId: payload.routeId,
+      operationalState: payload.routeOperationalState ?? payload.operationalState,
       timestamp: payload.timestamp,
     });
   }
@@ -912,9 +1009,91 @@ export class OperationalFlowService {
     });
   }
 
+  private async deriveRouteOperationalState(tenantId: string, routeId: string): Promise<RouteDerivedOperationalState> {
+    const trips = await this.prisma.trip.findMany({
+      where: { tenantId, routeId },
+      select: { status: true, boardedAt: true },
+    });
+    if (trips.length === 0) return 'CREATED';
+    const statuses = trips.map((t) => String(t.status));
+    const hasTransit = statuses.some((s) => s === 'IN_TRANSIT' || s === 'IN_PROGRESS');
+    const hasBoarded = statuses.some((s) => s === 'BOARDED' || s === 'BOARDING' || s === 'ARRIVED' || s === 'COMPLETED') || trips.some((t) => !!t.boardedAt);
+    const hasPending = statuses.some((s) => ['SCHEDULED', 'CONFIRMED', 'BOARDING'].includes(s));
+    const allCompleted = statuses.every((s) => s === 'COMPLETED' || s === 'CANCELLED' || s === 'NO_SHOW');
+    const allNoShowOrCancelled = statuses.every((s) => s === 'NO_SHOW' || s === 'CANCELLED');
+
+    if (allCompleted) return 'COMPLETED';
+    if (allNoShowOrCancelled) return 'NO_SHOW';
+    if (hasTransit) return 'IN_TRANSIT';
+    if (hasBoarded && hasPending) return 'PASSENGERS_ONBOARD';
+    if (hasBoarded) return 'PASSENGERS_ONBOARD';
+    if (hasPending) return 'WAITING_PATIENT';
+    return 'DRIVER_ACCEPTED';
+  }
+
+  private async updateRouteWithVersion(routeId: string, expectedVersion: number, data: Record<string, unknown>) {
+    const result = await this.prisma.route.updateMany({
+      where: { id: routeId, operationalVersion: expectedVersion },
+      data: { ...data, operationalVersion: { increment: 1 } as any },
+    });
+    if (result.count === 0) {
+      this.logger.warn(`[CONFLICT] route stale update rejected routeId=${routeId} expectedVersion=${expectedVersion}`);
+      throw new ConflictException('Route was updated by another operator. Refresh and retry.');
+    }
+    const updated = await this.prisma.route.findUnique({ where: { id: routeId } });
+    if (!updated) throw new NotFoundException('Route not found');
+    return updated;
+  }
+
+  private async updateTripWithVersion(tripId: string, expectedVersion: number, data: Record<string, unknown>) {
+    const result = await this.prisma.trip.updateMany({
+      where: { id: tripId, version: expectedVersion },
+      data: { ...data, version: { increment: 1 } as any },
+    });
+    if (result.count === 0) {
+      this.logger.warn(`[CONFLICT] trip stale update rejected tripId=${tripId} expectedVersion=${expectedVersion}`);
+      throw new ConflictException('Trip was updated by another operator. Refresh and retry.');
+    }
+    const updated = await this.prisma.trip.findUnique({ where: { id: tripId }, include: { route: true } });
+    if (!updated) throw new NotFoundException('Trip not found');
+    return updated as any;
+  }
+
+  private async persistTimeline(params: {
+    tenantId: string;
+    routeId?: string | null;
+    tripId?: string | null;
+    patientId?: string | null;
+    driverId?: string | null;
+    vehicleId?: string | null;
+    eventType: string;
+    fromState?: string | null;
+    toState?: string | null;
+    source?: string | null;
+    metadata?: Record<string, unknown>;
+  }) {
+    this.logger.log(`[TIMELINE] persist event=${params.eventType} routeId=${params.routeId ?? '-'} tripId=${params.tripId ?? '-'} to=${params.toState ?? '-'}`);
+    await this.prisma.operationalTimeline.create({
+      data: {
+        tenantId: params.tenantId,
+        routeId: params.routeId ?? null,
+        tripId: params.tripId ?? null,
+        patientId: params.patientId ?? null,
+        driverId: params.driverId ?? null,
+        vehicleId: params.vehicleId ?? null,
+        eventType: params.eventType,
+        fromState: params.fromState ?? null,
+        toState: params.toState ?? null,
+        source: params.source ?? null,
+        metadata: (params.metadata ?? {}) as any,
+      },
+    });
+  }
+
   private buildPayload(params: {
     trip: { id: string; routeId: string; patientId: string; status: string; boardedAt?: Date | null; completedAt?: Date | null } | null;
     route: { id: string; tenantId: string; driverId: string | null; vehicleId: string | null; status: string };
+    routeOperationalState?: RouteDerivedOperationalState | null;
     queueStatus: string | null;
     queueId?: string | null;
     patientName?: string | null;
@@ -933,6 +1112,7 @@ export class OperationalFlowService {
       vehicleId: params.context.vehicleId ?? params.route.vehicleId,
       status: params.trip?.status ?? params.route.status,
       operationalState: params.operationalState,
+      routeOperationalState: params.routeOperationalState ?? null,
       routeStatus: params.route.status,
       queueStatus: params.queueStatus,
       queueId: params.queueId ?? null,

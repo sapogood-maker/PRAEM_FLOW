@@ -267,11 +267,26 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     if (!vehicleId || Number.isNaN(lat) || Number.isNaN(lng)) {
       return { ok: false, error: 'invalid_payload' };
     }
+    const payloadTimestamp = typeof safe['timestamp'] === 'string' ? new Date(safe['timestamp']) : null;
+    const latestForVehicle = await this.prisma.vehicleTracking.findFirst({
+      where: { tenantId: user.tenantId, vehicleId },
+      orderBy: { timestamp: 'desc' },
+      select: { timestamp: true },
+    });
+    if (
+      payloadTimestamp
+      && !Number.isNaN(payloadTimestamp.getTime())
+      && latestForVehicle?.timestamp
+      && payloadTimestamp.getTime() + 5_000 < new Date(latestForVehicle.timestamp).getTime()
+    ) {
+      this.logger.warn(`[CONFLICT] stale gps update rejected tenantId=${user.tenantId} vehicleId=${vehicleId} incoming=${payloadTimestamp.toISOString()} latest=${new Date(latestForVehicle.timestamp).toISOString()}`);
+      return { ok: false, error: 'stale_update' };
+    }
 
     const now = new Date();
     const operationalStatus = speed != null && !Number.isNaN(speed) && speed >= 2 ? 'MOVING' : 'IDLE';
 
-    this.logger.log(`[GPS] driver update tenantId=${user.tenantId} driverId=${driverId ?? '-'} vehicleId=${vehicleId} routeId=${routeId ?? '-'} lat=${lat} lng=${lng}`);
+    this.logger.log(`[TRACKING] [OPS] driver update tenantId=${user.tenantId} driverId=${driverId ?? '-'} vehicleId=${vehicleId} routeId=${routeId ?? '-'} lat=${lat} lng=${lng}`);
     await this.prisma.vehicleTracking.create({
       data: {
         tenantId: user.tenantId,
@@ -288,6 +303,30 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
         operationalStatus: operationalStatus as any,
         lastHeartbeatAt: now,
         timestamp: now,
+      },
+    });
+    await this.prisma.trackingPoint.create({
+      data: {
+        tenantId: user.tenantId,
+        routeId,
+        driverId,
+        vehicleId,
+        lat,
+        lng,
+        speed: speed != null && !Number.isNaN(speed) ? speed : null,
+        heading: heading != null && !Number.isNaN(heading) ? heading : null,
+        timestamp: now,
+      },
+    });
+    await this.prisma.operationalTimeline.create({
+      data: {
+        tenantId: user.tenantId,
+        routeId,
+        driverId,
+        vehicleId,
+        eventType: 'GPS_CHECKPOINT',
+        source: 'WS_DRIVER_LOCATION',
+        metadata: { lat, lng, speed, heading, timestamp: now.toISOString() } as any,
       },
     });
     if (driverId) {
@@ -567,12 +606,20 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       },
       orderBy: { timestamp: 'desc' },
     });
+    const trackingPoints = activeRoute
+      ? await this.prisma.trackingPoint.findMany({
+        where: { tenantId, routeId: activeRoute.id },
+        orderBy: { timestamp: 'desc' },
+        take: 200,
+      })
+      : [];
 
     client.emit('ops:state:replay', sanitizePayload({
       tenantId,
       driverId,
       route: activeRoute,
       latestPosition,
+      trackingPoints: trackingPoints.reverse(),
       replayedAt: new Date().toISOString(),
     }));
     this.logger.log(`[SOCKET] replay sent socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} routeId=${activeRoute?.id ?? '-'} vehicleId=${latestPosition?.vehicleId ?? '-'}`);

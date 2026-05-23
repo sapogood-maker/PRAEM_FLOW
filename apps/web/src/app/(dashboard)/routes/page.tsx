@@ -65,11 +65,12 @@ export default function RoutesPage() {
                 <th className='p-3 text-left'>Agendado</th>
                 <th className='p-3 text-left'>Pacientes</th>
                 <th className='p-3 text-left'>Status</th>
+                <th className='p-3 text-left'>Estado Operacional</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
-                <tr><td colSpan={7} className='p-6 text-center text-slate-500'>Nenhuma rota para esta data</td></tr>
+                <tr><td colSpan={8} className='p-6 text-center text-slate-500'>Nenhuma rota para esta data</td></tr>
               )}
               {items.map((r: any) => (
                 <tr key={r.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
@@ -86,6 +87,11 @@ export default function RoutesPage() {
                   <td className='p-3'>
                     <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[r.status] ?? 'text-slate-400'}`}>{getRouteStatusLabel(r.status)}</span>
                   </td>
+                  <td className='p-3'>
+                    <span className='rounded px-2 py-0.5 text-xs font-medium bg-slate-800 text-cyan-300'>
+                      {getRouteStatusLabel(r.operationalStateDerived ?? r.operationalState ?? r.status)}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -95,5 +101,4 @@ export default function RoutesPage() {
     </section>
   );
 }
-
 

@@ -35,6 +35,7 @@ export const ROUTE_STATUS_LABEL: Record<string, string> = {
   RETURNING:             'Retornando',
   COMPLETED:             'Finalizado',
   CANCELLED:             'Cancelado',
+  PASSENGERS_ONBOARD:    'PASSAGEIROS EMBARCADOS',
 };
 
 export function getRouteStatusLabel(status: string): string {

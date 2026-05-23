@@ -17,6 +17,8 @@ function statusView(status?: string, online?: boolean) {
       return { label: 'Embarque', className: 'bg-blue-900 text-blue-300' };
     case 'BOARDED':
       return { label: 'EMBARCADO', className: 'bg-blue-900 text-blue-300' };
+    case 'PASSENGERS_ONBOARD':
+      return { label: 'PASSAGEIROS EMBARCADOS', className: 'bg-cyan-900 text-cyan-300' };
     case 'STOPPED':
       return { label: 'Parado', className: 'bg-amber-900 text-amber-300' };
     case 'IN_TRANSIT':
@@ -45,6 +47,7 @@ function trailStyle(status?: string) {
     case 'MOVING':
     case 'IN_TRANSIT':
     case 'BOARDED':
+    case 'PASSENGERS_ONBOARD':
     case 'ONLINE':
     default:
       return { color: '#2da44e', opacity: 0.95 };

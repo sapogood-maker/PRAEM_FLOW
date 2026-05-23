@@ -57,6 +57,16 @@ export class TrackingController {
     return this.trackingService.getOperationalTimeline(req.user.tenantId, routeId, tripId, limit ? Number(limit) : undefined);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('replay')
+  replay(
+    @Request() req: AuthRequest,
+    @Query('routeId') routeId: string,
+    @Query('maxPoints') maxPoints?: string,
+  ) {
+    return this.trackingService.getRouteReplay(req.user.tenantId, routeId, maxPoints ? Number(maxPoints) : undefined);
+  }
+
   /**
    * POST /tracking/offline-check — triggers offline vehicle detection for this tenant.
    */

@@ -346,6 +346,41 @@ export class TrackingService {
     return { items };
   }
 
+  async getRouteReplay(tenantId: string, routeId: string, maxPoints = 3000) {
+    const route = await this.prisma.route.findFirst({
+      where: { tenantId, id: routeId },
+      include: {
+        driver: { include: { user: { select: { name: true } } } },
+        vehicle: { select: { id: true, plate: true, model: true } },
+        trips: {
+          include: {
+            patient: { select: { id: true, name: true } },
+          },
+          orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+        },
+      },
+    });
+    if (!route) return { route: null, points: [], timeline: [], metrics: null };
+
+    const pointsRaw = await this.prisma.trackingPoint.findMany({
+      where: { tenantId, routeId },
+      orderBy: { timestamp: 'asc' },
+      take: 20000,
+    });
+
+    const points = this.downsampleReplayPoints(pointsRaw, Math.min(Math.max(maxPoints, 200), 10000));
+
+    const timeline = await this.prisma.operationalTimeline.findMany({
+      where: { tenantId, routeId },
+      orderBy: { createdAt: 'asc' },
+      take: 2000,
+    });
+
+    const metrics = this.computeReplayMetrics(route, pointsRaw);
+    this.logger.log(`[TRACKING] replay routeId=${routeId} rawPoints=${pointsRaw.length} sampled=${points.length} events=${timeline.length}`);
+    return { route, points, timeline, metrics };
+  }
+
   /**
    * Smart retention — delete tracking rows older than TRACKING_RETENTION_HOURS.
    * Keeps the most recent record per vehicle as a snapshot.
@@ -386,6 +421,62 @@ export class TrackingService {
 
   vehicleById(_vehicleId: string) {
     return null;
+  }
+
+  private downsampleReplayPoints<T extends { timestamp: Date }>(points: T[], maxPoints: number): T[] {
+    if (points.length <= maxPoints) return points;
+    if (maxPoints <= 2) return [points[0], points[points.length - 1]];
+    const sampled: T[] = [];
+    const step = (points.length - 1) / (maxPoints - 1);
+    for (let i = 0; i < maxPoints; i += 1) {
+      const idx = Math.round(i * step);
+      sampled.push(points[Math.min(idx, points.length - 1)]);
+    }
+    return sampled;
+  }
+
+  private computeReplayMetrics(
+    route: { scheduledAt: Date | null; date: Date },
+    points: Array<{ timestamp: Date; speed: number | null }>,
+  ) {
+    if (points.length === 0) {
+      return {
+        pointCount: 0,
+        durationSeconds: 0,
+        stoppedSeconds: 0,
+        stoppedMinutes: 0,
+        gpsGapCount: 0,
+        gpsGapSeconds: 0,
+        delayMinutes: 0,
+      };
+    }
+    const firstTs = new Date(points[0].timestamp).getTime();
+    const lastTs = new Date(points[points.length - 1].timestamp).getTime();
+    let stoppedSeconds = 0;
+    let gpsGapCount = 0;
+    let gpsGapSeconds = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const prev = points[i - 1];
+      const cur = points[i];
+      const dt = Math.max(0, (new Date(cur.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 1000);
+      if ((prev.speed ?? 0) < 2) stoppedSeconds += dt;
+      if (dt > 90) {
+        gpsGapCount += 1;
+        gpsGapSeconds += dt;
+      }
+    }
+    const scheduledBase = route.scheduledAt ? new Date(route.scheduledAt).getTime() : new Date(route.date).getTime();
+    const delayMinutes = Math.max(0, Math.round((firstTs - scheduledBase) / 60000));
+
+    return {
+      pointCount: points.length,
+      durationSeconds: Math.max(0, Math.round((lastTs - firstTs) / 1000)),
+      stoppedSeconds: Math.round(stoppedSeconds),
+      stoppedMinutes: Math.round(stoppedSeconds / 60),
+      gpsGapCount,
+      gpsGapSeconds: Math.round(gpsGapSeconds),
+      delayMinutes,
+    };
   }
 
   private async evaluateGeofenceIntelligence(tenantId: string, input: {

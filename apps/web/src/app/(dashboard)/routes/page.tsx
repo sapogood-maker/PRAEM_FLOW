@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { routeService } from '@/services/operational.service';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -66,11 +67,12 @@ export default function RoutesPage() {
                 <th className='p-3 text-left'>Pacientes</th>
                 <th className='p-3 text-left'>Status</th>
                 <th className='p-3 text-left'>Estado Operacional</th>
+                <th className='p-3 text-left'>Replay</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
-                <tr><td colSpan={8} className='p-6 text-center text-slate-500'>Nenhuma rota para esta data</td></tr>
+                <tr><td colSpan={9} className='p-6 text-center text-slate-500'>Nenhuma rota para esta data</td></tr>
               )}
               {items.map((r: any) => (
                 <tr key={r.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
@@ -92,6 +94,14 @@ export default function RoutesPage() {
                       {getRouteStatusLabel(r.operationalStateDerived ?? r.operationalState ?? r.status)}
                     </span>
                   </td>
+                  <td className='p-3'>
+                    <Link
+                      href={`/replay?routeId=${r.id}`}
+                      className='rounded-lg border border-border bg-slate-900 px-2 py-1 text-xs text-cyan-300 hover:text-cyan-200'
+                    >
+                      Abrir
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -101,4 +111,3 @@ export default function RoutesPage() {
     </section>
   );
 }
-

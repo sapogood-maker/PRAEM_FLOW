@@ -9,6 +9,7 @@ export const NAV_ITEMS = [
   { href: '/routes', label: '🗺️ Rotas' },
   { href: '/trips', label: '🚐 Viagens' },
   { href: '/map', label: '📡 Mapa ao Vivo' },
+  { href: '/replay', label: '⏯️ Replay de Rotas' },
   { href: '/patients', label: '👤 Pacientes' },
   { href: '/drivers', label: '🧑‍✈️ Motoristas' },
   { href: '/vehicles', label: '🚌 Veículos' },

@@ -48,6 +48,11 @@ export const routeService = {
   remove: (id: string) => api.delete(`/routes/${id}`).then((r) => r.data),
 };
 
+export const trackingService = {
+  replay: (routeId: string, maxPoints = 3000) =>
+    api.get('/tracking/replay', { params: { routeId, maxPoints } }).then((r) => r.data),
+};
+
 export const healthcareLocationService = {
   list: (params?: Record<string, string | number>) =>
     api.get('/healthcare-locations', { params }).then((r) => r.data),

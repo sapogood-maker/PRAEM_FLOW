@@ -156,9 +156,23 @@ export class RoutesService {
   }
 
   /** Route fully complete — status ACTIVE → COMPLETED */
-  async completeRoute(id: string, tenantId: string) {
-    this.logger.log(`[ROUTE] completeRoute tenantId=${tenantId} routeId=${id}`);
-    return this.flow.completeRoute(tenantId, id);
+  async completeRoute(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+    this.logger.log(`[ROUTE] completeRoute tenantId=${tenantId} routeId=${id} driverId=${context?.driverId ?? '-'}`);
+    return this.flow.completeRoute(tenantId, id, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'routes.complete',
+    });
+  }
+
+  /** Emergency recovery: force-complete all pending trips and the route */
+  async forceCompleteRoute(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+    this.logger.log(`[ROUTE] forceCompleteRoute tenantId=${tenantId} routeId=${id} driverId=${context?.driverId ?? '-'}`);
+    return this.flow.forceCompleteRoute(tenantId, id, {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      source: 'routes.force-complete',
+    });
   }
 
   optimize(id: string) {

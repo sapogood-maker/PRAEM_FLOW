@@ -69,8 +69,22 @@ export class RoutesController {
   }
 
   @Post(':id/complete')
+  @Roles('DRIVER')
   completeRoute(@Request() req: AuthRequest, @Param('id') id: string) {
-    this.logger.log(`[ROUTE] REST complete request tenantId=${req.user.tenantId} routeId=${id}`);
-    return this.routesService.completeRoute(id, req.user.tenantId);
+    this.logger.log(`[ROUTE] REST complete request tenantId=${req.user.tenantId} routeId=${id} driverId=${req.user.driverId}`);
+    return this.routesService.completeRoute(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
+  }
+
+  @Post(':id/force-complete')
+  @Roles('DRIVER')
+  forceCompleteRoute(@Request() req: AuthRequest, @Param('id') id: string) {
+    this.logger.log(`[ROUTE] REST force-complete request tenantId=${req.user.tenantId} routeId=${id} driverId=${req.user.driverId}`);
+    return this.routesService.forceCompleteRoute(id, req.user.tenantId, {
+      driverId: req.user.driverId,
+      actorUserId: req.user.userId,
+    });
   }
 }

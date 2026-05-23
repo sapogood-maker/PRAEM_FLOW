@@ -31,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loadingRoute = true;
   Timer? _offlineSyncTimer;
   bool _dioLoggingConfigured = false;
+  bool _isOvernightRoute = false;
 
   Map<String, dynamic>? _activeTrip(DriverState driver) {
     for (final trip in driver.patients) {
@@ -578,18 +579,144 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (foundRoute != null) {
         debugPrint('[FLUTTER] active route loaded routeId=${foundRoute['id']} status=${foundRoute['status']}');
+        if (mounted) setState(() => _isOvernightRoute = false);
         driver.setActiveRoute(foundRoute);
         await _loadPatients(auth, driver, foundRoute['id'] as String);
         await _loadStops(auth, driver, foundRoute['id'] as String);
         driver.setOperationalStatus(_deriveOperationalStatus(foundRoute, driver.patients));
       } else {
-        debugPrint('[FLUTTER] no active route found driverId=$driverId vehicleId=$vehicleId');
-        driver.setOperationalStatus('OFFLINE');
+        // ── Overnight recovery: search last 7 days for stuck ACTIVE routes ──
+        debugPrint('[OPS] no route today — searching for overnight stuck route driverId=$driverId');
+        Map<String, dynamic>? stuckRoute;
+        try {
+          final sevenDaysAgo = DateTime.now().subtract(const Duration(days: 7)).toIso8601String().substring(0, 10);
+          final yesterday = DateTime.now().subtract(const Duration(days: 1)).toIso8601String().substring(0, 10);
+          for (final st in ['ACTIVE', 'DISPATCHED', 'PREPARING']) {
+            final resp = await _dio.get(
+              '${AppConfig.apiBaseUrl}/routes',
+              queryParameters: {
+                'startDate': sevenDaysAgo,
+                'endDate': yesterday,
+                'status': st,
+                if (driverId != null) 'driverId': driverId,
+              },
+              options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+            );
+            final data = resp.data;
+            final items = (data is Map ? data['items'] : data) as List? ?? [];
+            debugPrint('[OPS] overnight search status=$st items=${items.length}');
+            if (items.isNotEmpty) {
+              stuckRoute = Map<String, dynamic>.from(items.last as Map);
+              break;
+            }
+          }
+        } catch (e) {
+          debugPrint('[OPS] overnight search error: $e');
+        }
+
+        if (stuckRoute != null) {
+          debugPrint('[RECOVERY] overnight route found routeId=${stuckRoute['id']} status=${stuckRoute['status']}');
+          if (mounted) setState(() => _isOvernightRoute = true);
+          driver.setActiveRoute(stuckRoute);
+          await _loadPatients(auth, driver, stuckRoute['id'] as String);
+          await _loadStops(auth, driver, stuckRoute['id'] as String);
+          driver.setOperationalStatus(_deriveOperationalStatus(stuckRoute, driver.patients));
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _showRecoveryDialog(stuckRoute!);
+          });
+        } else {
+          debugPrint('[FLUTTER] no active route found driverId=$driverId vehicleId=$vehicleId');
+          if (mounted) setState(() => _isOvernightRoute = false);
+          driver.setOperationalStatus('OFFLINE');
+        }
       }
     } catch (e) {
       debugPrint('[FLUTTER] loadRoute error: $e');
     } finally {
       if (mounted) setState(() => _loadingRoute = false);
+    }
+  }
+
+  void _showRecoveryDialog(Map<String, dynamic> route) {
+    final routeDate = _formatDate(route['createdAt'] as String? ?? '');
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Row(
+          children: const [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 24),
+            SizedBox(width: 8),
+            Text(
+              'Viagem anterior detectada',
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Text(
+          'Rota do dia $routeDate ainda está ativa.\nO que deseja fazer?',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Continuar viagem', style: TextStyle(color: AppColors.primary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            onPressed: () {
+              Navigator.of(context).pop();
+              _forceFinalize();
+            },
+            child: const Text('Finalizar viagem', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _forceFinalize() async {
+    final auth = context.read<AuthService>();
+    final driver = context.read<DriverState>();
+    final routeId = driver.activeRoute?['id'] as String?;
+    if (routeId == null) return;
+    debugPrint('[FINALIZE] force-finalize routeId=$routeId');
+    try {
+      final resp = await _dio.post(
+        '${AppConfig.apiBaseUrl}/routes/$routeId/force-complete',
+        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+      );
+      debugPrint('[FINALIZE] force-complete response status=${resp.statusCode} data=${resp.data}');
+      driver.setOperationalStatus('COMPLETED');
+      driver.clearActiveRoute();
+      if (mounted) setState(() => _isOvernightRoute = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Viagem finalizada com sucesso'),
+          backgroundColor: AppColors.primary,
+        ));
+      }
+    } on DioException catch (e) {
+      debugPrint('[FINALIZE] force-complete error status=${e.response?.statusCode} data=${e.response?.data}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Erro ao finalizar viagem: ${e.response?.statusCode ?? 'sem conexão'}'),
+          backgroundColor: AppColors.danger,
+        ));
+      }
+    } catch (e) {
+      debugPrint('[FINALIZE] force-complete unexpected error: $e');
+    }
+  }
+
+  String _formatDate(String isoDate) {
+    if (isoDate.isEmpty) return '?';
+    try {
+      final dt = DateTime.parse(isoDate).toLocal();
+      return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+    } catch (_) {
+      return isoDate.length >= 10 ? isoDate.substring(0, 10) : isoDate;
     }
   }
 
@@ -817,6 +944,10 @@ class _HomeScreenState extends State<HomeScreen> {
       pendingCount: waitingPatients.length,
     );
     final showScanner = nextAction == 'ESCANEAR PASSAGEIRO';
+    // Show emergency finalize for overnight routes, stuck BOARDING, or active IN_TRANSIT
+    final showForceFinalize = _isOvernightRoute ||
+        currentStatus == 'IN_TRANSIT' ||
+        (currentStatus == 'BOARDING' && boardedPatients.isNotEmpty);
     final statusColor = _displayStatusColor(currentStatus);
     final routeTitle = route == null
         ? 'Sem rota ativa'
@@ -888,6 +1019,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onStartTransit: () => _changeStatus('IN_TRANSIT'),
                   onArrive: () => _changeStatus('ARRIVED'),
                   onComplete: () => _changeStatus('COMPLETED'),
+                  onForceFinalize: showForceFinalize ? _forceFinalize : null,
                 ),
                 const SizedBox(height: 12),
                 _PassengerOverviewCard(
@@ -1407,6 +1539,7 @@ class _NextActionCard extends StatelessWidget {
   final VoidCallback onStartTransit;
   final VoidCallback onArrive;
   final VoidCallback onComplete;
+  final VoidCallback? onForceFinalize;
 
   const _NextActionCard({
     required this.currentStatus,
@@ -1417,6 +1550,7 @@ class _NextActionCard extends StatelessWidget {
     required this.onStartTransit,
     required this.onArrive,
     required this.onComplete,
+    this.onForceFinalize,
   });
 
   @override
@@ -1488,6 +1622,16 @@ class _NextActionCard extends StatelessWidget {
               onPressed: onOpenScanner,
               color: AppColors.boarding,
               icon: Icons.qr_code_scanner,
+              outlined: true,
+            ),
+          ],
+          if (onForceFinalize != null) ...[
+            const SizedBox(height: 10),
+            _actionButton(
+              label: 'FINALIZAR VIAGEM',
+              onPressed: onForceFinalize,
+              color: Colors.orange,
+              icon: Icons.warning_amber_rounded,
               outlined: true,
             ),
           ],

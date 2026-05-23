@@ -188,6 +188,156 @@ export class OperationalFlowService {
     return this.transitionState(tenantId, scope, 'CANCELLED', context, true);
   }
 
+  /**
+   * Emergency recovery: directly finalise all pending trips and the route.
+   * Boarded trips → COMPLETED; non-boarded trips → NO_SHOW.
+   * Bypasses the normal state machine for overnight/stuck recovery.
+   */
+  async forceCompleteRoute(tenantId: string, routeId: string, context: FlowContext = {}) {
+    this.logger.log(
+      `[FINALIZE] forceCompleteRoute tenantId=${tenantId} routeId=${routeId} driverId=${context.driverId ?? '-'} source=${context.source ?? 'force-complete'}`,
+    );
+
+    const route = await this.findRoute(tenantId, routeId);
+    const now = new Date();
+
+    const pendingTrips = await this.prisma.trip.findMany({
+      where: {
+        tenantId,
+        routeId,
+        status: { notIn: ['COMPLETED', 'CANCELLED', 'NO_SHOW'] as any[] },
+      },
+      include: {
+        patient: { select: { id: true, name: true, operationalId: true } },
+      },
+    });
+
+    this.logger.log(`[FINALIZE] pending trips count=${pendingTrips.length} routeId=${routeId}`);
+
+    const completedTripIds: string[] = [];
+    const noShowTripIds: string[] = [];
+
+    for (const trip of pendingTrips) {
+      const isBoarded = !!trip.boardedAt;
+      if (isBoarded) {
+        await this.prisma.trip.update({
+          where: { id: trip.id },
+          data: { status: 'COMPLETED', completedAt: now },
+        });
+        completedTripIds.push(trip.id);
+        this.logger.log(`[FINALIZE] trip forced COMPLETED tripId=${trip.id} boardedAt=${trip.boardedAt}`);
+
+        const payload = this.buildPayload({
+          trip: { ...trip, status: 'COMPLETED', completedAt: now },
+          route,
+          queueStatus: 'COMPLETED',
+          patientName: trip.patient?.name ?? null,
+          operationalId: trip.patient?.operationalId ?? null,
+          operationalState: 'COMPLETED',
+          timestamp: now,
+          context,
+        });
+        this.emitToRoute(tenantId, context.driverId ?? null, 'trip:completed', payload);
+        this.emitToRoute(tenantId, context.driverId ?? null, 'patient.completed', payload);
+      } else {
+        await this.prisma.trip.update({
+          where: { id: trip.id },
+          data: { status: 'NO_SHOW' },
+        });
+        noShowTripIds.push(trip.id);
+        this.logger.log(`[FINALIZE] trip forced NO_SHOW tripId=${trip.id}`);
+
+        const payload = this.buildPayload({
+          trip: { ...trip, status: 'NO_SHOW', completedAt: null },
+          route,
+          queueStatus: 'NO_SHOW',
+          patientName: trip.patient?.name ?? null,
+          operationalId: trip.patient?.operationalId ?? null,
+          operationalState: 'NO_SHOW',
+          timestamp: now,
+          context,
+        });
+        this.emitToRoute(tenantId, context.driverId ?? null, 'trip:no_show', payload);
+        this.emitToRoute(tenantId, context.driverId ?? null, 'patient:no_show', payload);
+      }
+
+      // Sync queue record for this patient
+      const queue = await this.findLatestQueue(tenantId, trip.patientId);
+      if (queue) {
+        await this.prisma.operationalQueue.update({
+          where: { id: queue.id },
+          data: {
+            status: (isBoarded ? 'COMPLETED' : 'NO_SHOW') as any,
+            ...(isBoarded ? { completedAt: now } : { noShowAt: now, noShowReason: 'UNKNOWN' as any }),
+          },
+        });
+      }
+
+      await this.audit.log({
+        tenantId,
+        userId: context.actorUserId ?? context.driverId ?? 'system',
+        action: 'OPERATIONAL_STATE_TRANSITION',
+        entity: 'trip',
+        entityId: trip.id,
+        after: {
+          fromState: trip.status,
+          toState: isBoarded ? 'COMPLETED' : 'NO_SHOW',
+          source: context.source ?? 'FORCE_COMPLETE',
+          forceComplete: true,
+        },
+      });
+    }
+
+    // Force-complete the route regardless of current status
+    await this.prisma.route.update({
+      where: { id: routeId },
+      data: { status: 'COMPLETED' },
+    });
+
+    const routeWithRelations = await this.findRoute(tenantId, routeId);
+
+    const routePayload = {
+      routeId,
+      routeStatus: 'COMPLETED',
+      operationalState: 'COMPLETED',
+      driverId: context.driverId ?? route.driverId,
+      vehicleId: route.vehicleId,
+      completedTripIds,
+      noShowTripIds,
+      timestamp: now.toISOString(),
+      source: context.source ?? 'FORCE_COMPLETE',
+    };
+
+    this.emitToRoute(tenantId, context.driverId ?? null, 'route:completed', routePayload);
+    this.emitToRoute(tenantId, context.driverId ?? null, 'operational:state_changed', routePayload);
+    this.emitToRoute(tenantId, context.driverId ?? null, 'route.status_changed', {
+      routeId,
+      status: 'COMPLETED',
+      operationalState: 'COMPLETED',
+      timestamp: now.toISOString(),
+    });
+
+    await this.audit.log({
+      tenantId,
+      userId: context.actorUserId ?? context.driverId ?? 'system',
+      action: 'OPERATIONAL_STATE_TRANSITION',
+      entity: 'route',
+      entityId: routeId,
+      after: {
+        fromState: route.status,
+        toState: 'COMPLETED',
+        source: context.source ?? 'FORCE_COMPLETE',
+        completedTripIds,
+        noShowTripIds,
+      },
+    });
+
+    this.logger.log(
+      `[FINALIZE] forceCompleteRoute done routeId=${routeId} completed=${completedTripIds.length} noShow=${noShowTripIds.length}`,
+    );
+    return { route: routeWithRelations, completedTripIds, noShowTripIds };
+  }
+
   private async transitionState(
     tenantId: string,
     scope: FlowScope,

@@ -99,8 +99,19 @@ export class TrackingController {
    */
   @UseGuards(JwtAuthGuard)
   @Post('cleanup')
-  cleanup(@Request() req: AuthRequest) {
-    return this.trackingService.cleanup(req.user.tenantId);
+  cleanup(
+    @Request() req: AuthRequest,
+    @Query('retentionHours') retentionHours?: string,
+    @Query('staleRetentionHours') staleRetentionHours?: string,
+    @Query('snapshotRetentionHours') snapshotRetentionHours?: string,
+    @Query('archive') archive?: string,
+  ) {
+    return this.trackingService.cleanup(req.user.tenantId, {
+      retentionHours: retentionHours ? Number(retentionHours) : undefined,
+      staleRetentionHours: staleRetentionHours ? Number(staleRetentionHours) : undefined,
+      snapshotRetentionHours: snapshotRetentionHours ? Number(snapshotRetentionHours) : undefined,
+      archiveEnabled: archive == null ? undefined : ['1', 'true', 'yes', 'on'].includes(archive.toLowerCase()),
+    });
   }
 
   // Legacy endpoints for backward compat

@@ -1,8 +1,15 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { sanitizePayload } from '../../common/sanitize';
 import { AuditService } from '../audit/audit.service';
+import {
+  distanceMeters,
+  loadTrackingPolicy,
+  shouldPersistTrackingPoint,
+  shouldThrottleGps,
+} from './tracking-policy';
 
 export type VehicleTrackingPayload = {
   vehicleId: string;
@@ -23,8 +30,6 @@ export type VehicleTrackingPayload = {
 
 // Seconds without heartbeat before a vehicle is considered OFFLINE
 const OFFLINE_THRESHOLD_SECONDS = 60;
-// Max rows to retain per vehicle before compaction
-const TRACKING_RETENTION_HOURS = 24;
 
 function deriveOperationalStatus(speed?: number | null, online?: boolean): string {
   if (!online) return 'OFFLINE';
@@ -32,17 +37,12 @@ function deriveOperationalStatus(speed?: number | null, online?: boolean): strin
   return 'MOVING';
 }
 
-function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const toRad = (n: number) => (n * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 6371000 * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-}
-
 @Injectable()
 export class TrackingService {
   private readonly logger = new Logger(TrackingService.name);
+  private readonly trackingPolicy = loadTrackingPolicy();
+  private readonly lastIngestByKey = new Map<string, number>();
+  private readonly lastPersistedPointByKey = new Map<string, { lat: number; lng: number; heading: number | null; timestamp: Date }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -67,60 +67,101 @@ export class TrackingService {
     const now = new Date();
     const operationalStatus = deriveOperationalStatus(payload.speed, true) as any;
     const isMoving = (payload.speed ?? 0) >= 2;
+    const key = this.gpsCacheKey(payload.tenantId, payload.vehicleId, payload.routeId ?? null);
+    const nowMs = now.getTime();
+    const throttled = shouldThrottleGps(this.lastIngestByKey.get(key), nowMs, this.trackingPolicy.floodMinIntervalMs);
+    if (throttled) {
+      this.logger.warn(
+        `[TRACKING] [GPS] [FLOOD_PROTECTION] heartbeat throttled tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'} minIntervalMs=${this.trackingPolicy.floodMinIntervalMs}`,
+      );
+    }
 
-    // Persist tracking record
-    const record = await this.prisma.vehicleTracking.create({
-      data: {
-        tenantId: payload.tenantId,
-        vehicleId: payload.vehicleId,
-        routeId: payload.routeId ?? null,
-        driverId: payload.driverId ?? null,
-        lat: payload.lat,
-        lng: payload.lng,
-        speed: payload.speed ?? null,
-        heading: payload.heading ?? null,
-        accuracy: payload.accuracy ?? null,
-        batteryLevel: payload.batteryLevel ?? null,
-        signalStrength: payload.signalStrength ?? null,
-        gpsSource: payload.gpsSource ?? null,
-        ignition: payload.ignition ?? false,
-        online: true,
-        operationalStatus,
-        lastHeartbeatAt: now,
-        ...(isMoving && { lastMovementAt: now }),
-        timestamp: now,
-      },
-    });
-    await this.prisma.trackingPoint.create({
-      data: {
-        tenantId: payload.tenantId,
-        routeId: payload.routeId ?? null,
-        driverId: payload.driverId ?? null,
-        vehicleId: payload.vehicleId,
-        lat: payload.lat,
-        lng: payload.lng,
-        speed: payload.speed ?? null,
-        heading: payload.heading ?? null,
-        timestamp: now,
-      },
-    });
-    await this.prisma.operationalTimeline.create({
-      data: {
-        tenantId: payload.tenantId,
-        routeId: payload.routeId ?? null,
-        driverId: payload.driverId ?? null,
-        vehicleId: payload.vehicleId,
-        eventType: 'GPS_CHECKPOINT',
-        source: 'TRACKING_HEARTBEAT',
-        metadata: {
+    let record: { id: string } | null = null;
+    if (!throttled) {
+      record = await this.prisma.vehicleTracking.create({
+        data: {
+          tenantId: payload.tenantId,
+          vehicleId: payload.vehicleId,
+          routeId: payload.routeId ?? null,
+          driverId: payload.driverId ?? null,
           lat: payload.lat,
           lng: payload.lng,
           speed: payload.speed ?? null,
           heading: payload.heading ?? null,
-          timestamp: now.toISOString(),
-        } as any,
-      },
-    });
+          accuracy: payload.accuracy ?? null,
+          batteryLevel: payload.batteryLevel ?? null,
+          signalStrength: payload.signalStrength ?? null,
+          gpsSource: payload.gpsSource ?? null,
+          ignition: payload.ignition ?? false,
+          online: true,
+          operationalStatus,
+          lastHeartbeatAt: now,
+          ...(isMoving && { lastMovementAt: now }),
+          timestamp: now,
+        },
+        select: { id: true },
+      });
+      this.lastIngestByKey.set(key, nowMs);
+
+      const lastPersisted = await this.getLatestPersistReference(payload.tenantId, payload.vehicleId, payload.routeId ?? null);
+      const persistDecision = shouldPersistTrackingPoint(
+        lastPersisted,
+        {
+          lat: payload.lat,
+          lng: payload.lng,
+          heading: payload.heading ?? null,
+          timestamp: now,
+        },
+        this.trackingPolicy,
+      );
+
+      if (persistDecision.persist) {
+        await this.prisma.trackingPoint.create({
+          data: {
+            tenantId: payload.tenantId,
+            routeId: payload.routeId ?? null,
+            driverId: payload.driverId ?? null,
+            vehicleId: payload.vehicleId,
+            lat: payload.lat,
+            lng: payload.lng,
+            speed: payload.speed ?? null,
+            heading: payload.heading ?? null,
+            timestamp: now,
+          },
+        });
+        await this.prisma.operationalTimeline.create({
+          data: {
+            tenantId: payload.tenantId,
+            routeId: payload.routeId ?? null,
+            driverId: payload.driverId ?? null,
+            vehicleId: payload.vehicleId,
+            eventType: 'GPS_CHECKPOINT',
+            source: 'TRACKING_HEARTBEAT',
+            metadata: {
+              lat: payload.lat,
+              lng: payload.lng,
+              speed: payload.speed ?? null,
+              heading: payload.heading ?? null,
+              timestamp: now.toISOString(),
+              persistedBy: persistDecision.reason,
+            } as any,
+          },
+        });
+        this.lastPersistedPointByKey.set(key, {
+          lat: payload.lat,
+          lng: payload.lng,
+          heading: payload.heading ?? null,
+          timestamp: now,
+        });
+        this.logger.log(
+          `[TRACKING] [GPS] persisted checkpoint tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'} reason=${persistDecision.reason} dist=${persistDecision.distanceMeters.toFixed(1)}m dt=${persistDecision.elapsedSeconds.toFixed(1)}s`,
+        );
+      } else {
+        this.logger.debug(
+          `[TRACKING] [GPS] skipped checkpoint tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'} dist=${persistDecision.distanceMeters.toFixed(1)}m dt=${persistDecision.elapsedSeconds.toFixed(1)}s hdg=${persistDecision.headingDelta.toFixed(1)}`,
+        );
+      }
+    }
 
     // Emit real-time location update
     this.logger.log(`[TRACKING] [OPS] heartbeat tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} driverId=${payload.driverId ?? '-'} routeId=${payload.routeId ?? '-'}`);
@@ -153,24 +194,26 @@ export class TrackingService {
       timestamp: now.toISOString(),
     });
     this.logger.log(`[TRACKING] [OPS] broadcast tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'}`);
-    await this.audit.log({
-      tenantId: payload.tenantId,
-      userId: payload.driverId ?? payload.vehicleId,
-      action: 'GPS_POSITION',
-      entity: 'vehicle_tracking',
-      entityId: record.id,
-      after: {
-        vehicleId: payload.vehicleId,
-        driverId: payload.driverId ?? null,
-        routeId: payload.routeId ?? null,
-        lat: payload.lat,
-        lng: payload.lng,
-        speed: payload.speed ?? null,
-        heading: payload.heading ?? null,
-        batteryLevel: payload.batteryLevel ?? null,
-        timestamp: now.toISOString(),
-      },
-    });
+    if (record?.id) {
+      await this.audit.log({
+        tenantId: payload.tenantId,
+        userId: payload.driverId ?? payload.vehicleId,
+        action: 'GPS_POSITION',
+        entity: 'vehicle_tracking',
+        entityId: record.id,
+        after: {
+          vehicleId: payload.vehicleId,
+          driverId: payload.driverId ?? null,
+          routeId: payload.routeId ?? null,
+          lat: payload.lat,
+          lng: payload.lng,
+          speed: payload.speed ?? null,
+          heading: payload.heading ?? null,
+          batteryLevel: payload.batteryLevel ?? null,
+          timestamp: now.toISOString(),
+        },
+      });
+    }
     // Battery alert
     if (payload.batteryLevel !== undefined && payload.batteryLevel < 20) {
       this.opsGateway.emitAlert(payload.tenantId, {
@@ -190,7 +233,7 @@ export class TrackingService {
       speed: payload.speed ?? null,
       timestamp: now,
     });
-    return record;
+    return { id: record?.id ?? null, operationalStatus, throttled };
   }
 
   /**
@@ -382,13 +425,30 @@ export class TrackingService {
   }
 
   /**
-   * Smart retention — delete tracking rows older than TRACKING_RETENTION_HOURS.
-   * Keeps the most recent record per vehicle as a snapshot.
+   * Smart retention with optional archive summary.
+   * Keeps latest per vehicle and applies separate stale retention for points without route.
    */
-  async cleanup(tenantId: string) {
-    const cutoff = new Date(Date.now() - TRACKING_RETENTION_HOURS * 60 * 60 * 1000);
+  async cleanup(
+    tenantId: string,
+    options?: {
+      retentionHours?: number;
+      staleRetentionHours?: number;
+      snapshotRetentionHours?: number;
+      archiveEnabled?: boolean;
+    },
+  ) {
+    const retentionHours = options?.retentionHours ?? this.trackingPolicy.retentionHours;
+    const staleRetentionHours = options?.staleRetentionHours ?? this.trackingPolicy.staleRetentionHours;
+    const snapshotRetentionHours = options?.snapshotRetentionHours ?? this.trackingPolicy.snapshotRetentionHours;
+    const archiveEnabled = options?.archiveEnabled ?? this.trackingPolicy.archiveEnabled;
+    const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000);
+    const staleCutoff = new Date(Date.now() - staleRetentionHours * 60 * 60 * 1000);
+    const snapshotCutoff = new Date(Date.now() - snapshotRetentionHours * 60 * 60 * 1000);
 
-    // Get latest record IDs to preserve
+    if (archiveEnabled) {
+      await this.archiveTrackingWindow(tenantId, cutoff);
+    }
+
     const latest = await this.prisma.vehicleTracking.findMany({
       where: { tenantId },
       distinct: ['vehicleId'],
@@ -400,18 +460,49 @@ export class TrackingService {
     const deleted = await this.prisma.vehicleTracking.deleteMany({
       where: {
         tenantId,
-        timestamp: { lt: cutoff },
+        timestamp: { lt: snapshotCutoff },
         id: { notIn: keepIds },
       },
     });
     const trackingPointDeleted = await this.prisma.trackingPoint.deleteMany({
       where: {
         tenantId,
-        timestamp: { lt: cutoff },
+        OR: [
+          { timestamp: { lt: cutoff } },
+          { routeId: null, timestamp: { lt: staleCutoff } },
+        ],
       },
     });
 
-    return { deletedRows: deleted.count, deletedTrackingPoints: trackingPointDeleted.count, cutoff: cutoff.toISOString() };
+    this.logger.log(
+      `[TRACKING] [GPS] cleanup tenantId=${tenantId} retentionHours=${retentionHours} staleHours=${staleRetentionHours} snapshotHours=${snapshotRetentionHours} deletedTrackings=${deleted.count} deletedPoints=${trackingPointDeleted.count}`,
+    );
+    return {
+      deletedRows: deleted.count,
+      deletedTrackingPoints: trackingPointDeleted.count,
+      cutoff: cutoff.toISOString(),
+      staleCutoff: staleCutoff.toISOString(),
+      snapshotCutoff: snapshotCutoff.toISOString(),
+      archiveEnabled,
+    };
+  }
+
+  @Cron(CronExpression.EVERY_HOUR, { name: 'tracking-retention-cleanup' })
+  async runScheduledCleanup() {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { active: true },
+      select: { id: true },
+      take: 1000,
+    });
+    for (const tenant of tenants) {
+      try {
+        await this.cleanup(tenant.id);
+      } catch (err) {
+        this.logger.error(
+          `[TRACKING] cleanup failed tenantId=${tenant.id} message=${(err as Error).message}`,
+        );
+      }
+    }
   }
 
   // Legacy in-memory methods kept for backward-compat
@@ -421,6 +512,61 @@ export class TrackingService {
 
   vehicleById(_vehicleId: string) {
     return null;
+  }
+
+  private gpsCacheKey(tenantId: string, vehicleId: string, routeId: string | null) {
+    return `${tenantId}:${vehicleId}:${routeId ?? '-'}`;
+  }
+
+  private async getLatestPersistReference(tenantId: string, vehicleId: string, routeId: string | null) {
+    const key = this.gpsCacheKey(tenantId, vehicleId, routeId);
+    const cached = this.lastPersistedPointByKey.get(key);
+    if (cached) return cached;
+    const latest = await this.prisma.trackingPoint.findFirst({
+      where: { tenantId, vehicleId, routeId },
+      orderBy: { timestamp: 'desc' },
+      select: { lat: true, lng: true, heading: true, timestamp: true },
+    });
+    if (!latest) return null;
+    const mapped = {
+      lat: latest.lat,
+      lng: latest.lng,
+      heading: latest.heading ?? null,
+      timestamp: latest.timestamp,
+    };
+    this.lastPersistedPointByKey.set(key, mapped);
+    return mapped;
+  }
+
+  private async archiveTrackingWindow(tenantId: string, cutoff: Date) {
+    const grouped = await this.prisma.trackingPoint.groupBy({
+      by: ['routeId', 'vehicleId'],
+      where: { tenantId, timestamp: { lt: cutoff }, routeId: { not: null } },
+      _count: { _all: true },
+      _min: { timestamp: true },
+      _max: { timestamp: true },
+      _avg: { speed: true },
+    });
+    if (!grouped.length) return;
+    await this.prisma.operationalTimeline.createMany({
+      data: grouped.map((g) => ({
+        tenantId,
+        routeId: g.routeId,
+        vehicleId: g.vehicleId,
+        eventType: 'TRACKING_ARCHIVE',
+        source: 'TRACKING_RETENTION_JOB',
+        metadata: {
+          archivedPoints: g._count._all,
+          from: g._min.timestamp?.toISOString() ?? null,
+          to: g._max.timestamp?.toISOString() ?? null,
+          avgSpeed: g._avg.speed ?? null,
+          retentionCutoff: cutoff.toISOString(),
+        } as any,
+      })),
+    });
+    this.logger.log(
+      `[TRACKING] [GPS] archived tracking window tenantId=${tenantId} groups=${grouped.length} cutoff=${cutoff.toISOString()}`,
+    );
   }
 
   private downsampleReplayPoints<T extends { timestamp: Date }>(points: T[], maxPoints: number): T[] {

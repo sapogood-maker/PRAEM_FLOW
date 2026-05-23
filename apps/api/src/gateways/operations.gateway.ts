@@ -12,6 +12,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { sanitizePayload } from '../common/sanitize';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  loadTrackingPolicy,
+  shouldPersistTrackingPoint,
+  shouldThrottleGps,
+} from '../modules/tracking/tracking-policy';
 
 type SocketAuthUser = {
   userId: string;
@@ -31,6 +36,10 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   server!: Server;
 
   private readonly logger = new Logger(OperationsGateway.name);
+  private readonly trackingPolicy = loadTrackingPolicy();
+  private readonly lastIngestByKey = new Map<string, number>();
+  private readonly lastPersistedPointByKey = new Map<string, { lat: number; lng: number; heading: number | null; timestamp: Date }>();
+  private readonly lastPayloadTimestampByKey = new Map<string, number>();
 
   private connectedClients = new Set<string>();
   private socketUsers = new Map<string, SocketAuthUser>();
@@ -267,68 +276,114 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     if (!vehicleId || Number.isNaN(lat) || Number.isNaN(lng)) {
       return { ok: false, error: 'invalid_payload' };
     }
+    const key = `${user.tenantId}:${vehicleId}:${routeId ?? '-'}`;
     const payloadTimestamp = typeof safe['timestamp'] === 'string' ? new Date(safe['timestamp']) : null;
-    const latestForVehicle = await this.prisma.vehicleTracking.findFirst({
-      where: { tenantId: user.tenantId, vehicleId },
-      orderBy: { timestamp: 'desc' },
-      select: { timestamp: true },
-    });
+    const cachedLatestTs = this.lastPayloadTimestampByKey.get(key);
+    let latestTimestampMs = cachedLatestTs ?? null;
+    if (latestTimestampMs == null) {
+      const latestForVehicle = await this.prisma.vehicleTracking.findFirst({
+        where: { tenantId: user.tenantId, vehicleId },
+        orderBy: { timestamp: 'desc' },
+        select: { timestamp: true },
+      });
+      latestTimestampMs = latestForVehicle?.timestamp ? new Date(latestForVehicle.timestamp).getTime() : null;
+      if (latestTimestampMs != null) this.lastPayloadTimestampByKey.set(key, latestTimestampMs);
+    }
     if (
       payloadTimestamp
       && !Number.isNaN(payloadTimestamp.getTime())
-      && latestForVehicle?.timestamp
-      && payloadTimestamp.getTime() + 5_000 < new Date(latestForVehicle.timestamp).getTime()
+      && latestTimestampMs != null
+      && payloadTimestamp.getTime() + 5_000 < latestTimestampMs
     ) {
-      this.logger.warn(`[CONFLICT] stale gps update rejected tenantId=${user.tenantId} vehicleId=${vehicleId} incoming=${payloadTimestamp.toISOString()} latest=${new Date(latestForVehicle.timestamp).toISOString()}`);
+      this.logger.warn(`[CONFLICT] [GPS] stale gps update rejected tenantId=${user.tenantId} vehicleId=${vehicleId} incoming=${payloadTimestamp.toISOString()} latest=${new Date(latestTimestampMs).toISOString()}`);
       return { ok: false, error: 'stale_update' };
     }
 
     const now = new Date();
+    const nowMs = now.getTime();
+    const throttled = shouldThrottleGps(this.lastIngestByKey.get(key), nowMs, this.trackingPolicy.floodMinIntervalMs);
+    if (throttled) {
+      this.logger.warn(`[TRACKING] [GPS] [FLOOD_PROTECTION] ws update throttled tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'} minIntervalMs=${this.trackingPolicy.floodMinIntervalMs}`);
+    }
     const operationalStatus = speed != null && !Number.isNaN(speed) && speed >= 2 ? 'MOVING' : 'IDLE';
 
     this.logger.log(`[TRACKING] [OPS] driver update tenantId=${user.tenantId} driverId=${driverId ?? '-'} vehicleId=${vehicleId} routeId=${routeId ?? '-'} lat=${lat} lng=${lng}`);
-    await this.prisma.vehicleTracking.create({
-      data: {
-        tenantId: user.tenantId,
-        vehicleId,
-        driverId,
-        routeId,
-        lat,
-        lng,
-        speed: speed != null && !Number.isNaN(speed) ? speed : null,
-        heading: heading != null && !Number.isNaN(heading) ? heading : null,
-        accuracy: accuracy != null && !Number.isNaN(accuracy) ? accuracy : null,
-        batteryLevel: batteryLevel != null && !Number.isNaN(batteryLevel) ? batteryLevel : null,
-        online: true,
-        operationalStatus: operationalStatus as any,
-        lastHeartbeatAt: now,
-        timestamp: now,
-      },
-    });
-    await this.prisma.trackingPoint.create({
-      data: {
-        tenantId: user.tenantId,
-        routeId,
-        driverId,
-        vehicleId,
-        lat,
-        lng,
-        speed: speed != null && !Number.isNaN(speed) ? speed : null,
-        heading: heading != null && !Number.isNaN(heading) ? heading : null,
-        timestamp: now,
-      },
-    });
-    await this.prisma.operationalTimeline.create({
-      data: {
-        tenantId: user.tenantId,
-        routeId,
-        driverId,
-        vehicleId,
-        eventType: 'GPS_CHECKPOINT',
-        source: 'WS_DRIVER_LOCATION',
-        metadata: { lat, lng, speed, heading, timestamp: now.toISOString() } as any,
-      },
-    });
+    if (!throttled) {
+      await this.prisma.vehicleTracking.create({
+        data: {
+          tenantId: user.tenantId,
+          vehicleId,
+          driverId,
+          routeId,
+          lat,
+          lng,
+          speed: speed != null && !Number.isNaN(speed) ? speed : null,
+          heading: heading != null && !Number.isNaN(heading) ? heading : null,
+          accuracy: accuracy != null && !Number.isNaN(accuracy) ? accuracy : null,
+          batteryLevel: batteryLevel != null && !Number.isNaN(batteryLevel) ? batteryLevel : null,
+          online: true,
+          operationalStatus: operationalStatus as any,
+          lastHeartbeatAt: now,
+          timestamp: now,
+        },
+      });
+      this.lastIngestByKey.set(key, nowMs);
+      this.lastPayloadTimestampByKey.set(key, payloadTimestamp && !Number.isNaN(payloadTimestamp.getTime()) ? payloadTimestamp.getTime() : nowMs);
+
+      let lastPersisted = this.lastPersistedPointByKey.get(key) ?? null;
+      if (!lastPersisted) {
+        const latestPoint = await this.prisma.trackingPoint.findFirst({
+          where: { tenantId: user.tenantId, vehicleId, routeId },
+          orderBy: { timestamp: 'desc' },
+          select: { lat: true, lng: true, heading: true, timestamp: true },
+        });
+        if (latestPoint) {
+          lastPersisted = {
+            lat: latestPoint.lat,
+            lng: latestPoint.lng,
+            heading: latestPoint.heading ?? null,
+            timestamp: latestPoint.timestamp,
+          };
+          this.lastPersistedPointByKey.set(key, lastPersisted);
+        }
+      }
+
+      const persistDecision = shouldPersistTrackingPoint(
+        lastPersisted,
+        { lat, lng, heading: heading != null && !Number.isNaN(heading) ? heading : null, timestamp: now },
+        this.trackingPolicy,
+      );
+      if (persistDecision.persist) {
+        await this.prisma.trackingPoint.create({
+          data: {
+            tenantId: user.tenantId,
+            routeId,
+            driverId,
+            vehicleId,
+            lat,
+            lng,
+            speed: speed != null && !Number.isNaN(speed) ? speed : null,
+            heading: heading != null && !Number.isNaN(heading) ? heading : null,
+            timestamp: now,
+          },
+        });
+        await this.prisma.operationalTimeline.create({
+          data: {
+            tenantId: user.tenantId,
+            routeId,
+            driverId,
+            vehicleId,
+            eventType: 'GPS_CHECKPOINT',
+            source: 'WS_DRIVER_LOCATION',
+            metadata: { lat, lng, speed, heading, timestamp: now.toISOString(), persistedBy: persistDecision.reason } as any,
+          },
+        });
+        this.lastPersistedPointByKey.set(key, { lat, lng, heading: heading != null && !Number.isNaN(heading) ? heading : null, timestamp: now });
+        this.logger.log(`[TRACKING] [GPS] ws persisted checkpoint tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'} reason=${persistDecision.reason} dist=${persistDecision.distanceMeters.toFixed(1)}m dt=${persistDecision.elapsedSeconds.toFixed(1)}s`);
+      } else {
+        this.logger.debug(`[TRACKING] [GPS] ws skipped checkpoint tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'} dist=${persistDecision.distanceMeters.toFixed(1)}m dt=${persistDecision.elapsedSeconds.toFixed(1)}s hdg=${persistDecision.headingDelta.toFixed(1)}`);
+      }
+    }
     if (driverId) {
       await this.prisma.driver.updateMany({
         where: { tenantId: user.tenantId, id: driverId },

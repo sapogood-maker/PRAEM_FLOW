@@ -48,7 +48,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     if (code == null || code.isEmpty) return;
 
     final now = DateTime.now();
-    if (_lastToken == code && _lastScanAt != null && now.difference(_lastScanAt!) < const Duration(seconds: 2)) {
+    if (_lastToken == code &&
+        _lastScanAt != null &&
+        now.difference(_lastScanAt!) < const Duration(seconds: 2)) {
       return;
     }
     _lastToken = code;
@@ -99,7 +101,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       setState(() {
         _result = {
           'name': data['name'] ?? data['patient']?['name'] ?? '—',
-          'destination': data['destination'] ?? data['queue']?['destination'] ?? '—',
+          'destination':
+              data['destination'] ?? data['queue']?['destination'] ?? '—',
           'status': 'SUCCESS',
           'tripId': data['tripId'],
           'routeId': data['routeId'],
@@ -121,7 +124,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         });
       } else {
         final responseBody = e.response?.data;
-        final apiMessage = responseBody is Map ? responseBody['message']?.toString() : null;
+        final apiMessage =
+            responseBody is Map ? responseBody['message']?.toString() : null;
         if (!mounted) return;
         setState(() {
           _error = apiMessage ?? 'QR inválido';
@@ -168,7 +172,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.surface,
         title: const Text(
-          'Scan Passenger QR',
+          'Leitura de QR do passageiro',
           style: TextStyle(color: AppColors.textPrimary),
         ),
         iconTheme: const IconThemeData(color: AppColors.textPrimary),
@@ -199,7 +203,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                     alignment: Alignment.topCenter,
                     child: Padding(
                       padding: EdgeInsets.only(top: 16),
-                      child: CircularProgressIndicator(color: AppColors.primary),
+                      child:
+                          CircularProgressIndicator(color: AppColors.primary),
                     ),
                   ),
               ],
@@ -209,7 +214,36 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             flex: 2,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: _buildFeedback(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.autorenew_rounded,
+                            color: AppColors.info, size: 16),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Modo contínuo ativo: a câmera permanece aberta para embarque rápido.',
+                            style: TextStyle(
+                                color: AppColors.textSecondary, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(child: _buildFeedback()),
+                ],
+              ),
             ),
           ),
         ],
@@ -235,18 +269,21 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 Icon(Icons.check_circle, color: AppColors.primary),
                 SizedBox(width: 8),
                 Text(
-                  'Boarding confirmed',
-                  style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 16),
+                  'Embarque confirmado',
+                  style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            _line('Passenger', _result!['name'] as String? ?? '—'),
-            _line('Destination', _result!['destination'] as String? ?? '—'),
-            _line('Trip', (_result!['tripId'] ?? '—').toString()),
+            _line('Paciente', _result!['name'] as String? ?? '—'),
+            _line('Destino', _result!['destination'] as String? ?? '—'),
+            _line('Viagem', (_result!['tripId'] ?? '—').toString()),
             const SizedBox(height: 12),
             const Text(
-              'Continue scanning next passengers...',
+              'Continue escaneando os próximos passageiros.',
               style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
             ),
           ],
@@ -271,16 +308,19 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 Icon(Icons.warning_amber_rounded, color: AppColors.warning),
                 SizedBox(width: 8),
                 Text(
-                  'Operational validation failed',
-                  style: TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold),
+                  'Validação operacional falhou',
+                  style: TextStyle(
+                      color: AppColors.warning, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+            Text(_error!,
+                style: const TextStyle(
+                    color: AppColors.textPrimary, fontSize: 14)),
             const Spacer(),
             OperationalButton(
-              label: 'CLEAR MESSAGE',
+              label: 'LIMPAR MENSAGEM',
               icon: Icons.clear,
               onPressed: () => setState(() => _error = null),
               color: AppColors.warning,
@@ -292,7 +332,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
     return const Center(
       child: Text(
-        'One-tap operational flow:\nOpen scanner -> scan passengers -> start transit',
+        'Fluxo guiado:\nAbra o scanner -> escaneie passageiros -> inicie o deslocamento',
         textAlign: TextAlign.center,
         style: TextStyle(color: AppColors.textSecondary, fontSize: 15),
       ),
@@ -305,12 +345,15 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+          Text(label,
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 12)),
           Expanded(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  color: AppColors.textPrimary, fontWeight: FontWeight.bold),
               overflow: TextOverflow.ellipsis,
             ),
           ),

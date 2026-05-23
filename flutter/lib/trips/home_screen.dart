@@ -32,36 +32,45 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _offlineSyncTimer;
   bool _dioLoggingConfigured = false;
   bool _isOvernightRoute = false;
+  bool _followVehicleMode = true;
   final List<Map<String, dynamic>> _opsNotifications = [];
   bool _wsDisconnected = false;
 
   Map<String, dynamic>? _activeTrip(DriverState driver) {
     for (final trip in driver.patients) {
       final status = trip['status'] as String? ?? 'SCHEDULED';
-      if (status != 'COMPLETED' && status != 'CANCELLED' && status != 'NO_SHOW') {
+      if (status != 'COMPLETED' &&
+          status != 'CANCELLED' &&
+          status != 'NO_SHOW') {
         return trip;
       }
     }
     return null;
   }
 
-  String _deriveOperationalStatus(Map<String, dynamic>? route, List<Map<String, dynamic>> trips) {
+  String _deriveOperationalStatus(
+      Map<String, dynamic>? route, List<Map<String, dynamic>> trips) {
     final routeStatus = route?['status'] as String?;
     final activeTrip = trips.firstWhere(
-      (t) => !['COMPLETED', 'CANCELLED', 'NO_SHOW'].contains((t['status'] as String?) ?? ''),
+      (t) => !['COMPLETED', 'CANCELLED', 'NO_SHOW']
+          .contains((t['status'] as String?) ?? ''),
       orElse: () => <String, dynamic>{},
     );
     final tripStatus = activeTrip['status'] as String?;
 
     if (tripStatus == 'BOARDING') return 'BOARDING';
     if (tripStatus == 'BOARDED') return 'BOARDED';
-    if (tripStatus == 'IN_TRANSIT' || tripStatus == 'IN_PROGRESS') return 'IN_TRANSIT';
+    if (tripStatus == 'IN_TRANSIT' || tripStatus == 'IN_PROGRESS')
+      return 'IN_TRANSIT';
     if (tripStatus == 'ARRIVED') return 'ARRIVED';
     if (tripStatus == 'COMPLETED') return 'COMPLETED';
     if (tripStatus == 'NO_SHOW') return 'NO_SHOW';
     if (routeStatus == 'DISPATCHED') return 'DISPATCHED';
     if (routeStatus == 'ACTIVE') return 'WAITING_PATIENT';
-    if (routeStatus == 'PLANNED' || routeStatus == 'SCHEDULED' || routeStatus == 'PENDING' || routeStatus == 'PREPARING') {
+    if (routeStatus == 'PLANNED' ||
+        routeStatus == 'SCHEDULED' ||
+        routeStatus == 'PENDING' ||
+        routeStatus == 'PREPARING') {
       return 'CREATED';
     }
     return 'OFFLINE';
@@ -73,9 +82,13 @@ class _HomeScreenState extends State<HomeScreen> {
     required GpsTrackingService gps,
     String? routeId,
   }) async {
-    final vehicleId = driver.vehicle?['id'] as String? ?? auth.vehicle?['id'] as String?;
+    final vehicleId =
+        driver.vehicle?['id'] as String? ?? auth.vehicle?['id'] as String?;
     final deviceId = driver.deviceId;
-    if (vehicleId == null || deviceId == null || auth.token == null || auth.tenantId == null) {
+    if (vehicleId == null ||
+        deviceId == null ||
+        auth.token == null ||
+        auth.tenantId == null) {
       return;
     }
     await gps.start(
@@ -177,7 +190,8 @@ class _HomeScreenState extends State<HomeScreen> {
     return status == 'COMPLETED';
   }
 
-  String? _nextActionFor(String status, {required int boardedCount, required int pendingCount}) {
+  String? _nextActionFor(String status,
+      {required int boardedCount, required int pendingCount}) {
     switch (status.toUpperCase()) {
       case 'DISPATCHED':
         return 'ACEITAR ROTA';
@@ -201,7 +215,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  String _nextActionHint(String status, {required int boardedCount, required int pendingCount}) {
+  String _nextActionHint(String status,
+      {required int boardedCount, required int pendingCount}) {
     switch (status.toUpperCase()) {
       case 'DISPATCHED':
         return 'A rota está pronta para aceite.';
@@ -245,6 +260,22 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Atualizado agora';
   }
 
+  String _formatLastUpdate(DateTime? dt) {
+    if (dt == null) return 'sem atualização';
+    final local = dt.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}:${local.second.toString().padLeft(2, '0')}';
+  }
+
+  double _routeProgress(DriverState driver) {
+    final stops = driver.stops;
+    if (stops.isEmpty) return 0;
+    final completed = stops.where((s) {
+      final status = (s['status'] as String? ?? '').toUpperCase();
+      return status == 'COMPLETED' || status == 'SKIPPED';
+    }).length;
+    return completed / stops.length;
+  }
+
   void _pushOpsNotification(
     String message, {
     Color color = AppColors.info,
@@ -285,7 +316,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _configureDioLogging();
 
     // ─── Connect WS (join tenant + driver rooms) ──────────────────────────────
-    debugPrint('[FLUTTER] WS connect tokenPresent=${auth.token != null} tenantId=${auth.tenantId} driverId=${auth.driverId} vehicleId=$vehicleId');
+    debugPrint(
+        '[FLUTTER] WS connect tokenPresent=${auth.token != null} tenantId=${auth.tenantId} driverId=${auth.driverId} vehicleId=$vehicleId');
     ws.connect(
       auth.token!,
       auth.tenantId!,
@@ -302,6 +334,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final driverId = event?['driverId'] as String?;
       if (driverId != null && driverId == auth.driverId) {
         context.read<DriverState>().setOperationalStatus('DISPATCHED');
+        _pushOpsNotification('Nova rota recebida. Ação: Aceitar rota.',
+            color: AppColors.info, tag: 'OPS');
         final routeId = event?['routeId'] as String?;
         // Acknowledge receipt
         if (routeId != null) {
@@ -309,7 +343,8 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         // Reload route and auto-open trip screen
         _loadRoute(auth, driver).then((_) {
-          _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
+          _ensureGpsTracking(
+              auth: auth, driver: driver, gps: gps, routeId: routeId);
         });
       }
     });
@@ -319,7 +354,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() => _wsDisconnected = false);
       }
-      _pushOpsNotification('Conexão operacional restabelecida.', color: AppColors.primary, tag: 'OPS');
+      _pushOpsNotification('Conexão operacional restabelecida.',
+          color: AppColors.primary, tag: 'OPS');
       await _loadRoute(auth, driver);
       await _ensureGpsTracking(
         auth: auth,
@@ -335,7 +371,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() => _wsDisconnected = true);
       }
-      _pushOpsNotification('Sem conexão com a central. Operando em modo offline.', color: AppColors.warning, tag: 'GPS');
+      _pushOpsNotification(
+          'Sem conexão com a central. Operando em modo offline.',
+          color: AppColors.warning,
+          tag: 'GPS');
     });
 
     ws.on('ops:state:replay', (data) {
@@ -350,14 +389,16 @@ class _HomeScreenState extends State<HomeScreen> {
           driver.setOperationalStatus(routeOperationalState);
         }
         final trips = (route['trips'] as List?) ?? [];
-        driver.setPatients(trips.map((t) => Map<String, dynamic>.from(t as Map)).toList());
+        driver.setPatients(
+            trips.map((t) => Map<String, dynamic>.from(t as Map)).toList());
         final allStops = <Map<String, dynamic>>[];
         for (final trip in trips) {
           final stops = (trip as Map)['stops'] as List? ?? [];
-          allStops.addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
+          allStops
+              .addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
         }
-        allStops.sort((a, b) =>
-            ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
+        allStops.sort((a, b) => ((a['sequence'] as num?) ?? 0)
+            .compareTo((b['sequence'] as num?) ?? 0));
         driver.setStops(allStops);
       }
       final trackingPoints = replay['trackingPoints'] as List?;
@@ -386,7 +427,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (routeId != null) {
         context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
         context.read<DriverState>().setOperationalStatus('DRIVER_ACCEPTED');
-        _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
+        _ensureGpsTracking(
+            auth: auth, driver: driver, gps: gps, routeId: routeId);
       }
     });
 
@@ -398,8 +440,10 @@ class _HomeScreenState extends State<HomeScreen> {
         context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
       }
       context.read<DriverState>().setOperationalStatus('WAITING_PATIENT');
-      _pushOpsNotification('Paciente aguardando embarque.', color: AppColors.warning, tag: 'OPS');
-      _ensureGpsTracking(auth: auth, driver: driver, gps: gps, routeId: routeId);
+      _pushOpsNotification('Paciente aguardando embarque.',
+          color: AppColors.warning, tag: 'OPS');
+      _ensureGpsTracking(
+          auth: auth, driver: driver, gps: gps, routeId: routeId);
     });
 
     ws.on('route.status_changed', (data) {
@@ -434,6 +478,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (routeId != null) {
         context.read<DriverState>().updateRouteStatus(routeId, 'COMPLETED');
         context.read<DriverState>().setOperationalStatus('COMPLETED');
+        _pushOpsNotification('Viagem finalizada.',
+            color: AppColors.primary, tag: 'OPS');
       }
     });
 
@@ -512,7 +558,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final tripId = event?['tripId'] as String?;
       final status = event?['status'] as String?;
       if (routeId != null && event?['routeStatus'] is String) {
-        context.read<DriverState>().updateRouteStatus(routeId, event!['routeStatus'] as String);
+        context
+            .read<DriverState>()
+            .updateRouteStatus(routeId, event!['routeStatus'] as String);
       }
       if (tripId != null && status != null) {
         context.read<DriverState>().updateTripStatus(tripId, status);
@@ -535,6 +583,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (routeId != null) {
         context.read<DriverState>().updateRouteStatus(routeId, 'ACTIVE');
       }
+      _pushOpsNotification('Passageiro em embarque.',
+          color: AppColors.warning, tag: 'OPS');
     });
 
     ws.on('trip:started', (data) {
@@ -544,6 +594,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (tripId != null) {
         context.read<DriverState>().updateTripStatus(tripId, 'IN_TRANSIT');
         context.read<DriverState>().setOperationalStatus('IN_TRANSIT');
+        _pushOpsNotification('Em deslocamento.',
+            color: AppColors.primary, tag: 'OPS');
       }
     });
 
@@ -554,6 +606,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (tripId != null) {
         context.read<DriverState>().updateTripStatus(tripId, 'BOARDED');
         context.read<DriverState>().setOperationalStatus('BOARDED');
+        _pushOpsNotification('Passageiro embarcado.',
+            color: AppColors.info, tag: 'OPS');
       }
     });
 
@@ -574,6 +628,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (tripId != null) {
         context.read<DriverState>().updateTripStatus(tripId, 'ARRIVED');
         context.read<DriverState>().setOperationalStatus('ARRIVED');
+        _pushOpsNotification('Chegada ao hospital detectada.',
+            color: AppColors.info, tag: 'OPS');
       }
     });
 
@@ -595,6 +651,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (tripId != null) {
         context.read<DriverState>().updateTripStatus(tripId, 'COMPLETED');
         context.read<DriverState>().setOperationalStatus('COMPLETED');
+        _pushOpsNotification('Viagem finalizada.',
+            color: AppColors.primary, tag: 'OPS');
       }
     });
 
@@ -605,6 +663,8 @@ class _HomeScreenState extends State<HomeScreen> {
       if (tripId != null) {
         context.read<DriverState>().updateTripStatus(tripId, 'NO_SHOW');
         context.read<DriverState>().setOperationalStatus('NO_SHOW');
+        _pushOpsNotification('Passageiro ausente (no-show).',
+            color: AppColors.warning, tag: 'OPS');
       }
     });
 
@@ -693,14 +753,22 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final today = DateTime.now().toIso8601String().substring(0, 10);
       // Search all non-terminal statuses — DISPATCHED covers new realtime dispatch
-      final statuses = ['DISPATCHED', 'PLANNED', 'PREPARING', 'ACTIVE', 'SCHEDULED', 'PENDING'];
+      final statuses = [
+        'DISPATCHED',
+        'PLANNED',
+        'PREPARING',
+        'ACTIVE',
+        'SCHEDULED',
+        'PENDING'
+      ];
       Map<String, dynamic>? foundRoute;
       for (final st in statuses) {
         final params = <String, String>{
           'date': today,
           'status': st,
           if (driverId != null) 'driverId': driverId,
-          if (vehicleId != null && driverId == null) 'vehicleId': vehicleId as String,
+          if (vehicleId != null && driverId == null)
+            'vehicleId': vehicleId as String,
         };
         final resp = await _dio.get(
           '${AppConfig.apiBaseUrl}/routes',
@@ -716,19 +784,28 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
       if (foundRoute != null) {
-        debugPrint('[FLUTTER] active route loaded routeId=${foundRoute['id']} status=${foundRoute['status']}');
+        debugPrint(
+            '[FLUTTER] active route loaded routeId=${foundRoute['id']} status=${foundRoute['status']}');
         if (mounted) setState(() => _isOvernightRoute = false);
         driver.setActiveRoute(foundRoute);
         await _loadPatients(auth, driver, foundRoute['id'] as String);
         await _loadStops(auth, driver, foundRoute['id'] as String);
-        driver.setOperationalStatus(_deriveOperationalStatus(foundRoute, driver.patients));
+        driver.setOperationalStatus(
+            _deriveOperationalStatus(foundRoute, driver.patients));
       } else {
         // ── Overnight recovery: search last 7 days for stuck ACTIVE routes ──
-        debugPrint('[OPS] no route today — searching for overnight stuck route driverId=$driverId');
+        debugPrint(
+            '[OPS] no route today — searching for overnight stuck route driverId=$driverId');
         Map<String, dynamic>? stuckRoute;
         try {
-          final sevenDaysAgo = DateTime.now().subtract(const Duration(days: 7)).toIso8601String().substring(0, 10);
-          final yesterday = DateTime.now().subtract(const Duration(days: 1)).toIso8601String().substring(0, 10);
+          final sevenDaysAgo = DateTime.now()
+              .subtract(const Duration(days: 7))
+              .toIso8601String()
+              .substring(0, 10);
+          final yesterday = DateTime.now()
+              .subtract(const Duration(days: 1))
+              .toIso8601String()
+              .substring(0, 10);
           for (final st in ['ACTIVE', 'DISPATCHED', 'PREPARING']) {
             final resp = await _dio.get(
               '${AppConfig.apiBaseUrl}/routes',
@@ -738,11 +815,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 'status': st,
                 if (driverId != null) 'driverId': driverId,
               },
-              options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+              options:
+                  Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
             );
             final data = resp.data;
             final items = (data is Map ? data['items'] : data) as List? ?? [];
-            debugPrint('[OPS] overnight search status=$st items=${items.length}');
+            debugPrint(
+                '[OPS] overnight search status=$st items=${items.length}');
             if (items.isNotEmpty) {
               stuckRoute = Map<String, dynamic>.from(items.last as Map);
               break;
@@ -753,17 +832,20 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         if (stuckRoute != null) {
-          debugPrint('[RECOVERY] overnight route found routeId=${stuckRoute['id']} status=${stuckRoute['status']}');
+          debugPrint(
+              '[RECOVERY] overnight route found routeId=${stuckRoute['id']} status=${stuckRoute['status']}');
           if (mounted) setState(() => _isOvernightRoute = true);
           driver.setActiveRoute(stuckRoute);
           await _loadPatients(auth, driver, stuckRoute['id'] as String);
           await _loadStops(auth, driver, stuckRoute['id'] as String);
-          driver.setOperationalStatus(_deriveOperationalStatus(stuckRoute, driver.patients));
+          driver.setOperationalStatus(
+              _deriveOperationalStatus(stuckRoute, driver.patients));
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) _showRecoveryDialog(stuckRoute!);
           });
         } else {
-          debugPrint('[FLUTTER] no active route found driverId=$driverId vehicleId=$vehicleId');
+          debugPrint(
+              '[FLUTTER] no active route found driverId=$driverId vehicleId=$vehicleId');
           if (mounted) setState(() => _isOvernightRoute = false);
           driver.setOperationalStatus('OFFLINE');
         }
@@ -788,7 +870,10 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(width: 8),
             Text(
               'Viagem anterior detectada',
-              style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -799,7 +884,8 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Continuar viagem', style: TextStyle(color: AppColors.primary)),
+            child: const Text('Continuar viagem',
+                style: TextStyle(color: AppColors.primary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
@@ -807,7 +893,8 @@ class _HomeScreenState extends State<HomeScreen> {
               Navigator.of(context).pop();
               _forceFinalize();
             },
-            child: const Text('Finalizar viagem', style: TextStyle(color: Colors.white)),
+            child: const Text('Finalizar viagem',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -825,7 +912,8 @@ class _HomeScreenState extends State<HomeScreen> {
         '${AppConfig.apiBaseUrl}/routes/$routeId/force-complete',
         options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
       );
-      debugPrint('[FINALIZE] force-complete response status=${resp.statusCode} data=${resp.data}');
+      debugPrint(
+          '[FINALIZE] force-complete response status=${resp.statusCode} data=${resp.data}');
       driver.setOperationalStatus('COMPLETED');
       driver.clearActiveRoute();
       if (mounted) setState(() => _isOvernightRoute = false);
@@ -836,10 +924,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ));
       }
     } on DioException catch (e) {
-      debugPrint('[FINALIZE] force-complete error status=${e.response?.statusCode} data=${e.response?.data}');
+      debugPrint(
+          '[FINALIZE] force-complete error status=${e.response?.statusCode} data=${e.response?.data}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Erro ao finalizar viagem: ${e.response?.statusCode ?? 'sem conexão'}'),
+          content: Text(
+              'Erro ao finalizar viagem: ${e.response?.statusCode ?? 'sem conexão'}'),
           backgroundColor: AppColors.danger,
         ));
       }
@@ -864,8 +954,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final resp = await _dio.get(
         '${AppConfig.apiBaseUrl}/trips',
         queryParameters: {'routeId': routeId},
-        options:
-            Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
       );
       final data = resp.data;
       final items = (data is Map ? data['items'] : data) as List? ?? [];
@@ -886,7 +975,8 @@ class _HomeScreenState extends State<HomeScreen> {
         options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
       );
       final tripsData = tripsResp.data;
-      final trips = (tripsData is Map ? tripsData['items'] : tripsData) as List? ?? [];
+      final trips =
+          (tripsData is Map ? tripsData['items'] : tripsData) as List? ?? [];
 
       final allStops = <Map<String, dynamic>>[];
       for (final trip in trips) {
@@ -895,19 +985,24 @@ class _HomeScreenState extends State<HomeScreen> {
         try {
           final stopsResp = await _dio.get(
             '${AppConfig.apiBaseUrl}/trips/$tripId/stops',
-            options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+            options:
+                Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
           );
           final stopsData = stopsResp.data;
-          final stops = (stopsData is List ? stopsData : (stopsData as Map?)?.values.first) as List? ?? [];
-          allStops.addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
+          final stops = (stopsData is List
+                  ? stopsData
+                  : (stopsData as Map?)?.values.first) as List? ??
+              [];
+          allStops
+              .addAll(stops.map((s) => Map<String, dynamic>.from(s as Map)));
         } catch (e) {
           debugPrint('[FLUTTER] loadStops tripId=$tripId error: $e');
         }
       }
 
       // Sort by sequence
-      allStops.sort((a, b) =>
-          ((a['sequence'] as num?) ?? 0).compareTo((b['sequence'] as num?) ?? 0));
+      allStops.sort((a, b) => ((a['sequence'] as num?) ?? 0)
+          .compareTo((b['sequence'] as num?) ?? 0));
       driver.setStops(allStops);
     } catch (e) {
       debugPrint('[FLUTTER] loadStops error: $e');
@@ -922,7 +1017,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final offlineQueue = context.read<OfflineQueue>();
     String? routeId = driver.activeRoute?['id'] as String?;
     Map<String, dynamic>? trip = _activeTrip(driver);
-    debugPrint('[FLUTTER] button pressed status=$status routeId=$routeId tripId=${trip?['id']} wsConnected=${ws.connected}');
+    debugPrint(
+        '[FLUTTER] button pressed status=$status routeId=$routeId tripId=${trip?['id']} wsConnected=${ws.connected}');
 
     try {
       await _syncOfflineQueues();
@@ -932,8 +1028,10 @@ class _HomeScreenState extends State<HomeScreen> {
         trip = _activeTrip(driver);
       }
 
-      if ((status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') && routeId == null) {
-        debugPrint('[FLUTTER] cannot proceed because routeId is null for status=$status');
+      if ((status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') &&
+          routeId == null) {
+        debugPrint(
+            '[FLUTTER] cannot proceed because routeId is null for status=$status');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Nenhuma rota ativa para iniciar'),
@@ -969,7 +1067,8 @@ class _HomeScreenState extends State<HomeScreen> {
         vehicleId: driver.vehicle?['id'] as String?,
         routeId: routeId,
       );
-      debugPrint('[FLUTTER] websocket emit driver.status_changed status=$status routeId=$routeId tripId=${trip?['id']}');
+      debugPrint(
+          '[FLUTTER] websocket emit driver.status_changed status=$status routeId=$routeId tripId=${trip?['id']}');
 
       final payload = {
         'routeId': routeId,
@@ -984,7 +1083,8 @@ class _HomeScreenState extends State<HomeScreen> {
         data: payload,
         options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
       );
-      debugPrint('[FLUTTER] REST response POST $actionUrl status=${resp.statusCode} data=${resp.data}');
+      debugPrint(
+          '[FLUTTER] REST response POST $actionUrl status=${resp.statusCode} data=${resp.data}');
       driver.setOperationalStatus(status);
       if (status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') {
         await _ensureGpsTracking(
@@ -995,17 +1095,25 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     } on DioException catch (e) {
-      debugPrint('[FLUTTER] REST error status=${e.response?.statusCode} data=${e.response?.data} message=${e.message}');
+      debugPrint(
+          '[FLUTTER] REST error status=${e.response?.statusCode} data=${e.response?.data} message=${e.message}');
       if (e.response == null) {
         final routeIdToUse = routeId ?? '';
         final tripIdToUse = trip?['id'] as String?;
         String? fallbackUrl;
-        if ((status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') && routeIdToUse.isNotEmpty) fallbackUrl = '/routes/$routeIdToUse/start';
-        if (status == 'BOARDING' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/board';
-        if (status == 'BOARDED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/boarded';
-        if (status == 'IN_TRANSIT' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/in-transit';
-        if (status == 'ARRIVED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/arrived';
-        if (status == 'COMPLETED' && tripIdToUse != null) fallbackUrl = '/trips/$tripIdToUse/complete';
+        if ((status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') &&
+            routeIdToUse.isNotEmpty)
+          fallbackUrl = '/routes/$routeIdToUse/start';
+        if (status == 'BOARDING' && tripIdToUse != null)
+          fallbackUrl = '/trips/$tripIdToUse/board';
+        if (status == 'BOARDED' && tripIdToUse != null)
+          fallbackUrl = '/trips/$tripIdToUse/boarded';
+        if (status == 'IN_TRANSIT' && tripIdToUse != null)
+          fallbackUrl = '/trips/$tripIdToUse/in-transit';
+        if (status == 'ARRIVED' && tripIdToUse != null)
+          fallbackUrl = '/trips/$tripIdToUse/arrived';
+        if (status == 'COMPLETED' && tripIdToUse != null)
+          fallbackUrl = '/trips/$tripIdToUse/complete';
         if (fallbackUrl != null) {
           await offlineQueue.enqueueOperational({
             'url': fallbackUrl,
@@ -1014,7 +1122,8 @@ class _HomeScreenState extends State<HomeScreen> {
             'tripId': tripIdToUse,
             'timestamp': DateTime.now().toIso8601String(),
           });
-          debugPrint('[FLUTTER] offline queue enqueue status=$status url=$fallbackUrl');
+          debugPrint(
+              '[FLUTTER] offline queue enqueue status=$status url=$fallbackUrl');
           driver.setOperationalStatus(status);
           if (status == 'DRIVER_ACCEPTED' || status == 'WAITING_PATIENT') {
             await _ensureGpsTracking(
@@ -1028,7 +1137,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Falha operacional: ${e.response?.statusCode ?? 'sem conexão'}'),
+          content: Text(
+              'Falha operacional: ${e.response?.statusCode ?? 'sem conexão'}'),
           backgroundColor: AppColors.warning,
         ));
       }
@@ -1044,15 +1154,18 @@ class _HomeScreenState extends State<HomeScreen> {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
-          debugPrint('[FLUTTER] REST request ${options.method} ${options.uri} payload=${options.data}');
+          debugPrint(
+              '[FLUTTER] REST request ${options.method} ${options.uri} payload=${options.data}');
           handler.next(options);
         },
         onResponse: (response, handler) {
-          debugPrint('[FLUTTER] REST response ${response.requestOptions.method} ${response.requestOptions.uri} status=${response.statusCode} data=${response.data}');
+          debugPrint(
+              '[FLUTTER] REST response ${response.requestOptions.method} ${response.requestOptions.uri} status=${response.statusCode} data=${response.data}');
           handler.next(response);
         },
         onError: (error, handler) {
-          debugPrint('[FLUTTER] REST error ${error.requestOptions.method} ${error.requestOptions.uri} status=${error.response?.statusCode} data=${error.response?.data}');
+          debugPrint(
+              '[FLUTTER] REST error ${error.requestOptions.method} ${error.requestOptions.uri} status=${error.response?.statusCode} data=${error.response?.data}');
           handler.next(error);
         },
       ),
@@ -1075,10 +1188,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final boardedPatients = patients.where(_isBoardedPassenger).toList();
     final missingPatients = patients.where(_isMissingPassenger).toList();
     final completedPatients = patients.where(_isCompletedPassenger).toList();
-    final waitingPatients = patients.where((p) =>
-        !_isBoardedPassenger(p) &&
-        !_isMissingPassenger(p) &&
-        !_isCompletedPassenger(p)).toList();
+    final waitingPatients = patients
+        .where((p) =>
+            !_isBoardedPassenger(p) &&
+            !_isMissingPassenger(p) &&
+            !_isCompletedPassenger(p))
+        .toList();
     final currentStatus = driver.operationalStatus.toUpperCase();
     final nextAction = _nextActionFor(
       currentStatus,
@@ -1088,12 +1203,23 @@ class _HomeScreenState extends State<HomeScreen> {
     // Show emergency finalize for overnight routes, boarded passengers, or active IN_TRANSIT
     final showForceFinalize = _isOvernightRoute ||
         currentStatus == 'IN_TRANSIT' ||
-        ((currentStatus == 'BOARDED' || currentStatus == 'PASSENGERS_ONBOARD') && boardedPatients.isNotEmpty);
+        ((currentStatus == 'BOARDED' ||
+                currentStatus == 'PASSENGERS_ONBOARD') &&
+            boardedPatients.isNotEmpty);
     final statusColor = _displayStatusColor(currentStatus);
     final routeTitle = route == null
         ? 'Sem rota ativa'
         : '${route['origin'] as String? ?? 'Origem'} → ${route['destination'] as String? ?? 'Destino'}';
     final gpsLabel = _gpsOperationalLabel(gps.lastPosition);
+    final activeTrip = _activeTrip(driver);
+    final progress = _routeProgress(driver);
+    final eta = route?['scheduledAt']?.toString() ?? route?['date']?.toString();
+    final driverName =
+        (route?['driver'] as Map?)?['user']?['name']?.toString() ?? 'Motorista';
+    final vehicleLabel =
+        '${driver.vehicle?['plate'] ?? '—'} · ${driver.vehicle?['model'] ?? '—'}';
+    final qrStatus = waitingPatients.isEmpty ? 'QR validado' : 'QR pendente';
+    final lastGpsUpdate = _formatLastUpdate(gps.lastUpdateAt);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -1105,8 +1231,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: AppColors.primary, size: 20),
             const SizedBox(width: 8),
             const Text('Fluxo operacional',
-                style: TextStyle(color: AppColors.textPrimary,
-                    fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
             const Spacer(),
             StatusBadge(
                 label: ws.connected ? 'CONEXÃO ATIVA' : 'SEM CONEXÃO',
@@ -1140,6 +1266,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   wsDisconnected: _wsDisconnected,
                   gpsActive: gps.active,
                   gpsLabel: gpsLabel,
+                  currentSpeedKmh: gps.lastSpeedKmh,
+                  currentPosition: gps.lastPosition,
+                  lastGpsUpdate: lastGpsUpdate,
+                ),
+                const SizedBox(height: 12),
+                _OperationalSummaryCard(
+                  patientName: activeTrip == null
+                      ? 'Sem passageiro ativo'
+                      : ((activeTrip['patient'] as Map?)?['name']?.toString() ??
+                          activeTrip['name']?.toString() ??
+                          'Paciente'),
+                  destination: route?['destination']?.toString() ??
+                      'Destino não definido',
+                  statusLabel: _displayStatusLabel(currentStatus),
+                  eta: eta == null ? 'Sem ETA' : eta,
+                  vehicle: vehicleLabel,
+                  driverName: driverName,
+                  qrStatus: qrStatus,
+                ),
+                const SizedBox(height: 12),
+                _RouteProgressCard(
+                  progress: progress,
+                  followVehicleMode: _followVehicleMode,
+                  boardedCount: boardedPatients.length,
+                  missingCount: missingPatients.length,
+                  onToggleFollow: () =>
+                      setState(() => _followVehicleMode = !_followVehicleMode),
                 ),
                 const SizedBox(height: 12),
                 _GuidedStatusCard(
@@ -1162,7 +1315,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   currentStatus: currentStatus,
                   nextAction: nextAction,
                   onAcceptRoute: () => _changeStatus('DRIVER_ACCEPTED'),
-                  onOpenScanner: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
+                  onOpenScanner: () =>
+                      Navigator.pushNamed(context, AppRoutes.qrScanner),
                   onStartTransit: () => _changeStatus('IN_TRANSIT'),
                   onArrive: () => _changeStatus('ARRIVED'),
                   onComplete: () => _changeStatus('COMPLETED'),
@@ -1171,6 +1325,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
                 _OpsNotificationsCard(
                   items: _opsNotifications,
+                  title: 'TIMELINE OPERACIONAL',
                 ),
               ],
             ),
@@ -1196,8 +1351,7 @@ class _VehicleCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.directions_car,
-              color: AppColors.primary, size: 40),
+          const Icon(Icons.directions_car, color: AppColors.primary, size: 40),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -1250,8 +1404,7 @@ class _RouteCard extends StatelessWidget {
       ),
       child: route == null
           ? const Text('Sem rota ativa para hoje',
-              style:
-                  TextStyle(color: AppColors.textSecondary, fontSize: 15))
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 15))
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1310,7 +1463,8 @@ class _RouteCard extends StatelessWidget {
                       ),
                     ),
                     StatusBadge(
-                      label: _stopStatusPt(currentStop!['status'] as String? ?? 'PENDING'),
+                      label: _stopStatusPt(
+                          currentStop!['status'] as String? ?? 'PENDING'),
                       color: AppColors.warning,
                     ),
                   ]),
@@ -1371,7 +1525,11 @@ class _StatusButtons extends StatelessWidget {
   final bool hasBoardedPassenger;
   final void Function(String) onTap;
   const _StatusButtons(
-      {required this.currentStatus, required this.hasActiveRoute, required this.hasActiveTrip, required this.hasBoardedPassenger, required this.onTap});
+      {required this.currentStatus,
+      required this.hasActiveRoute,
+      required this.hasActiveTrip,
+      required this.hasBoardedPassenger,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1386,12 +1544,19 @@ class _StatusButtons extends StatelessWidget {
     ];
     bool enabledFor(String target) {
       if (!hasActiveRoute) return false;
-      if ((target == 'BOARDING' || target == 'BOARDED' || target == 'IN_TRANSIT' || target == 'ARRIVED' || target == 'COMPLETED') && !hasActiveTrip) {
+      if ((target == 'BOARDING' ||
+              target == 'BOARDED' ||
+              target == 'IN_TRANSIT' ||
+              target == 'ARRIVED' ||
+              target == 'COMPLETED') &&
+          !hasActiveTrip) {
         return false;
       }
       switch (target) {
         case 'DRIVER_ACCEPTED':
-          return currentStatus == 'DISPATCHED' || currentStatus == 'CREATED' || currentStatus == 'OFFLINE';
+          return currentStatus == 'DISPATCHED' ||
+              currentStatus == 'CREATED' ||
+              currentStatus == 'OFFLINE';
         case 'WAITING_PATIENT':
           return currentStatus == 'DRIVER_ACCEPTED';
         case 'BOARDING':
@@ -1408,6 +1573,7 @@ class _StatusButtons extends StatelessWidget {
           return false;
       }
     }
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -1440,8 +1606,7 @@ class _PatientList extends StatelessWidget {
     if (patients.isEmpty) {
       return const Center(
         child: Text('Nenhum paciente na rota',
-            style:
-                TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
       );
     }
     return Column(
@@ -1522,6 +1687,169 @@ class _PatientTile extends StatelessWidget {
       default:
         return 'Aguardando';
     }
+  }
+}
+
+class _OperationalSummaryCard extends StatelessWidget {
+  final String patientName;
+  final String destination;
+  final String statusLabel;
+  final String eta;
+  final String vehicle;
+  final String driverName;
+  final String qrStatus;
+
+  const _OperationalSummaryCard({
+    required this.patientName,
+    required this.destination,
+    required this.statusLabel,
+    required this.eta,
+    required this.vehicle,
+    required this.driverName,
+    required this.qrStatus,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'RESUMO OPERACIONAL',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _line('Paciente', patientName),
+          _line('Destino', destination),
+          _line('Status', statusLabel),
+          _line('ETA', eta),
+          _line('Veículo', vehicle),
+          _line('Motorista', driverName),
+          _line('QR', qrStatus),
+        ],
+      ),
+    );
+  }
+
+  Widget _line(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(
+              label,
+              style:
+                  const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RouteProgressCard extends StatelessWidget {
+  final double progress;
+  final bool followVehicleMode;
+  final int boardedCount;
+  final int missingCount;
+  final VoidCallback onToggleFollow;
+
+  const _RouteProgressCard({
+    required this.progress,
+    required this.followVehicleMode,
+    required this.boardedCount,
+    required this.missingCount,
+    required this.onToggleFollow,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (progress * 100).clamp(0, 100).toStringAsFixed(0);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'MAPA OPERACIONAL',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                    letterSpacing: 1,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onToggleFollow,
+                icon: Icon(
+                  followVehicleMode
+                      ? Icons.gps_fixed_rounded
+                      : Icons.gps_not_fixed_rounded,
+                  color: AppColors.info,
+                  size: 16,
+                ),
+                label: Text(
+                  followVehicleMode ? 'Seguindo veículo' : 'Seguir veículo',
+                  style: const TextStyle(color: AppColors.info, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0, 1),
+              minHeight: 10,
+              backgroundColor: AppColors.border,
+              valueColor:
+                  const AlwaysStoppedAnimation<Color>(AppColors.primary),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Progresso da rota: $pct% · Embarcados: $boardedCount · Ausentes: $missingCount',
+            style:
+                const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -1749,7 +2077,15 @@ class _NextActionCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          child,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: KeyedSubtree(
+              key: ValueKey<String>(action),
+              child: child,
+            ),
+          ),
           if (onForceFinalize != null) ...[
             const SizedBox(height: 10),
             _actionButton(
@@ -1787,12 +2123,18 @@ class _ConnectionAndGpsCard extends StatelessWidget {
   final bool wsDisconnected;
   final bool gpsActive;
   final String gpsLabel;
+  final double currentSpeedKmh;
+  final Position? currentPosition;
+  final String lastGpsUpdate;
 
   const _ConnectionAndGpsCard({
     required this.wsConnected,
     required this.wsDisconnected,
     required this.gpsActive,
     required this.gpsLabel,
+    required this.currentSpeedKmh,
+    required this.currentPosition,
+    required this.lastGpsUpdate,
   });
 
   @override
@@ -1822,7 +2164,7 @@ class _ConnectionAndGpsCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               StatusBadge(
-                label: wsConnected ? 'ONLINE' : 'OFFLINE',
+                label: wsConnected ? 'CONECTADO' : 'DESCONECTADO',
                 color: wsConnected ? AppColors.primary : AppColors.danger,
               ),
               StatusBadge(
@@ -1839,7 +2181,28 @@ class _ConnectionAndGpsCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             gpsLabel,
-            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            style:
+                const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              StatusBadge(
+                label: 'Velocidade ${currentSpeedKmh.toStringAsFixed(0)} km/h',
+                color: AppColors.primary,
+              ),
+              StatusBadge(
+                label: 'Última atualização $lastGpsUpdate',
+                color: AppColors.info,
+              ),
+              if (currentPosition != null)
+                StatusBadge(
+                  label: 'Localização ativa',
+                  color: AppColors.boarding,
+                ),
+            ],
           ),
         ],
       ),
@@ -1849,7 +2212,9 @@ class _ConnectionAndGpsCard extends StatelessWidget {
 
 class _OpsNotificationsCard extends StatelessWidget {
   final List<Map<String, dynamic>> items;
-  const _OpsNotificationsCard({required this.items});
+  final String title;
+  const _OpsNotificationsCard(
+      {required this.items, this.title = 'NOTIFICAÇÕES OPERACIONAIS'});
 
   @override
   Widget build(BuildContext context) {
@@ -1863,9 +2228,9 @@ class _OpsNotificationsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'NOTIFICAÇÕES OPERACIONAIS',
-            style: TextStyle(
+          Text(
+            title,
+            style: const TextStyle(
               color: AppColors.textSecondary,
               fontSize: 11,
               letterSpacing: 1,
@@ -1889,7 +2254,8 @@ class _OpsNotificationsCard extends StatelessWidget {
                     height: 8,
                     margin: const EdgeInsets.only(top: 5),
                     decoration: BoxDecoration(
-                      color: Color((item['color'] as int?) ?? AppColors.info.toARGB32()),
+                      color: Color(
+                          (item['color'] as int?) ?? AppColors.info.toARGB32()),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -1897,7 +2263,8 @@ class _OpsNotificationsCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item['message']?.toString() ?? '',
-                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                      style: const TextStyle(
+                          color: AppColors.textPrimary, fontSize: 12),
                     ),
                   ),
                 ],
@@ -1956,8 +2323,12 @@ class _PassengerGroupsCard extends StatelessWidget {
             _section('Não compareceu', missing, AppColors.danger),
             const SizedBox(height: 12),
           ],
-          if (completed.isNotEmpty) _section('Concluídos', completed, AppColors.completed),
-          if (boarded.isEmpty && waiting.isEmpty && missing.isEmpty && completed.isEmpty)
+          if (completed.isNotEmpty)
+            _section('Concluídos', completed, AppColors.completed),
+          if (boarded.isEmpty &&
+              waiting.isEmpty &&
+              missing.isEmpty &&
+              completed.isEmpty)
             const Text(
               'Nenhum passageiro disponível.',
               style: TextStyle(color: AppColors.textSecondary),

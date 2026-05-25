@@ -1,0 +1,68 @@
+name: praem_driver
+description: PRAEM OPS — Terminal operacional móvel para motoristas e tablets em veículos do sistema de transporte médico SUS.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+  flutter: '>=3.13.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP client
+  dio: ^5.4.0
+
+  # WebSocket — Socket.IO client
+  socket_io_client: ^2.0.3+1
+
+  # GPS / location
+  geolocator: ^11.0.0
+
+  # QR scanner
+  mobile_scanner: ^5.2.3
+
+  # Secure JWT/token storage
+  flutter_secure_storage: ^9.0.0
+
+  # State management — simple Provider
+  provider: ^6.1.2
+
+  # Connectivity
+  connectivity_plus: ^6.0.3
+
+  # Local offline queue storage
+  hive_flutter: ^1.1.0
+  hive: ^2.2.3
+
+  # Permission handler (camera for QR, location)
+  permission_handler: ^11.3.1
+
+  # Device info (deviceId)
+  device_info_plus: ^10.1.0
+
+  # UUID
+  uuid: ^4.4.0
+
+  # Environment configuration
+  flutter_dotenv: ^5.1.0
+
+  # Battery info
+  battery_plus: ^6.0.1
+
+  # Maps / Navigation — open Google Maps or Waze for turn-by-turn navigation
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  build_runner: ^2.4.0
+  hive_generator: ^2.0.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
+    - assets/icons/

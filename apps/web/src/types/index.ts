@@ -50,7 +50,7 @@ export interface VehiclePosition {
 export interface ActivityEvent {
   id: string;
   message: string;
-  type: 'route' | 'trip' | 'queue' | 'vehicle' | 'kpi' | 'alert' | 'boarding';
+  type: 'route' | 'trip' | 'queue' | 'vehicle' | 'kpi' | 'alert' | 'boarding' | 'ops' | 'replay' | 'recovery' | 'websocket';
   timestamp: string;
 }
 

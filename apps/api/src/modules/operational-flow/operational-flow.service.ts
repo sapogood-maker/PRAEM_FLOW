@@ -40,6 +40,7 @@ type RouteDerivedOperationalState =
   | 'WAITING_PATIENT'
   | 'BOARDING'
   | 'PASSENGERS_ONBOARD'
+  | 'BOARDED'
   | 'IN_TRANSIT'
   | 'ARRIVED'
   | 'COMPLETED'
@@ -322,7 +323,7 @@ export class OperationalFlowService {
     const diagnostics: Array<{ routeId: string; action: string; activeTrips: number; boardedTrips: number }> = [];
     for (const route of staleRoutes) {
       const activeTrips = route.trips.filter((t) => !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(String(t.status)));
-      const boardedTrips = activeTrips.filter((t) => !!t.boardedAt || ['BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'].includes(String(t.status)));
+      const boardedTrips = activeTrips.filter((t) => !!t.boardedAt || ['BOARDED', 'IN_TRANSIT', 'ARRIVED'].includes(String(t.status)));
       if (activeTrips.length === 0) {
         await this.updateRouteWithVersion(route.id, route.operationalVersion ?? 1, {
           status: 'COMPLETED',
@@ -610,7 +611,7 @@ export class OperationalFlowService {
     }
 
     if (targetState === 'IN_TRANSIT' && trip) {
-      // Allow transition to IN_TRANSIT from BOARDED (or legacy IN_PROGRESS)
+      // Allow transition to IN_TRANSIT only after BOARDED
       if (!trip.boardedAt) {
         this.logger.warn(`[OPS] transition rejected reason=not_boarded tenantId=${tenantId} routeId=${route.id} tripId=${trip.id}`);
         throw new BadRequestException('Only boarded passengers can enter in-transit');
@@ -736,7 +737,6 @@ export class OperationalFlowService {
         'CONFIRMED',
         'BOARDING',
         'BOARDED',
-        'IN_PROGRESS',
         'IN_TRANSIT',
         'ARRIVED',
         'COMPLETED',
@@ -890,8 +890,8 @@ export class OperationalFlowService {
   }
 
   private async resolveStartTrip(tenantId: string, routeId: string, requestedTripId?: string): Promise<FlowTrip | null> {
-    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_PROGRESS', 'IN_TRANSIT'] as any[];
-    const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,WAITING_PATIENT,BOARDING,BOARDED,IN_TRANSIT,IN_PROGRESS';
+    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_TRANSIT'] as any[];
+    const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,WAITING_PATIENT,BOARDING,BOARDED,IN_TRANSIT';
 
     const routeAnyTenant = await this.prisma.route.findUnique({
       where: { id: routeId },
@@ -933,7 +933,6 @@ export class OperationalFlowService {
           'BOARDING',
           'BOARDED',
           'IN_TRANSIT',
-          'IN_PROGRESS',
           'ARRIVED',
           'COMPLETED',
           'NO_SHOW',
@@ -964,7 +963,6 @@ export class OperationalFlowService {
       'BOARDING',
       'BOARDED',
       'IN_TRANSIT',
-      'IN_PROGRESS',
       'ARRIVED',
       'COMPLETED',
       'NO_SHOW',
@@ -1016,7 +1014,7 @@ export class OperationalFlowService {
     });
     if (trips.length === 0) return 'CREATED';
     const statuses = trips.map((t) => String(t.status));
-    const hasTransit = statuses.some((s) => s === 'IN_TRANSIT' || s === 'IN_PROGRESS');
+    const hasTransit = statuses.some((s) => s === 'IN_TRANSIT');
     const hasBoarded = statuses.some((s) => s === 'BOARDED' || s === 'BOARDING' || s === 'ARRIVED' || s === 'COMPLETED') || trips.some((t) => !!t.boardedAt);
     const hasPending = statuses.some((s) => ['SCHEDULED', 'CONFIRMED', 'BOARDING'].includes(s));
     const allCompleted = statuses.every((s) => s === 'COMPLETED' || s === 'CANCELLED' || s === 'NO_SHOW');
@@ -1025,8 +1023,8 @@ export class OperationalFlowService {
     if (allCompleted) return 'COMPLETED';
     if (allNoShowOrCancelled) return 'NO_SHOW';
     if (hasTransit) return 'IN_TRANSIT';
-    if (hasBoarded && hasPending) return 'PASSENGERS_ONBOARD';
-    if (hasBoarded) return 'PASSENGERS_ONBOARD';
+    if (hasBoarded && hasPending) return 'BOARDED';
+    if (hasBoarded) return 'BOARDED';
     if (hasPending) return 'WAITING_PATIENT';
     return 'DRIVER_ACCEPTED';
   }
@@ -1102,6 +1100,9 @@ export class OperationalFlowService {
     timestamp: Date;
     context: FlowContext;
   }) {
+    const normalizedTripStatus = params.trip?.status === 'IN_PROGRESS' ? 'IN_TRANSIT' : (params.trip?.status ?? null);
+    const normalizedRouteOperationalState = this.normalizeRealtimeOperationalState(params.routeOperationalState ?? null);
+    const normalizedOperationalState = this.normalizeRealtimeOperationalState(params.operationalState);
     return {
       routeId: params.route.id,
       tripId: params.trip?.id ?? null,
@@ -1110,9 +1111,9 @@ export class OperationalFlowService {
       operationalId: params.operationalId ?? null,
       driverId: params.route.driverId,
       vehicleId: params.context.vehicleId ?? params.route.vehicleId,
-      status: params.trip?.status ?? params.route.status,
-      operationalState: params.operationalState,
-      routeOperationalState: params.routeOperationalState ?? null,
+      status: normalizedTripStatus ?? params.route.status,
+      operationalState: normalizedOperationalState,
+      routeOperationalState: normalizedRouteOperationalState,
       routeStatus: params.route.status,
       queueStatus: params.queueStatus,
       queueId: params.queueId ?? null,
@@ -1125,6 +1126,12 @@ export class OperationalFlowService {
       source: params.context.source ?? 'api',
       timestamp: params.timestamp.toISOString(),
     };
+  }
+
+  private normalizeRealtimeOperationalState(state: string | null | undefined): string | null {
+    if (!state) return null;
+    if (state === 'PASSENGERS_ONBOARD') return 'BOARDED';
+    return state === 'IN_PROGRESS' ? 'IN_TRANSIT' : state;
   }
 
   private emitToRoute(tenantId: string, driverId: string | null, event: string, payload: Record<string, unknown>) {

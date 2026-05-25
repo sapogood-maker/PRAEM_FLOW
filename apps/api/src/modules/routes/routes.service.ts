@@ -198,12 +198,12 @@ export class RoutesService {
   private deriveRouteOperationalStateFromTrips(trips: Array<{ status: string; boardedAt?: Date | null }>, routeStatus: string) {
     const statuses = trips.map((t) => String(t.status));
     if (statuses.length === 0) return routeStatus;
-    const hasTransit = statuses.some((s) => s === 'IN_TRANSIT' || s === 'IN_PROGRESS');
+    const hasTransit = statuses.some((s) => s === 'IN_TRANSIT');
     const hasBoarded = statuses.some((s) => s === 'BOARDED' || s === 'ARRIVED' || s === 'COMPLETED') || trips.some((t) => !!t.boardedAt);
     const hasPending = statuses.some((s) => ['SCHEDULED', 'CONFIRMED', 'BOARDING'].includes(s));
     if (hasTransit) return 'IN_TRANSIT';
-    if (hasBoarded && hasPending) return 'PASSENGERS_ONBOARD';
-    if (hasBoarded) return 'PASSENGERS_ONBOARD';
+    if (hasBoarded && hasPending) return 'BOARDED';
+    if (hasBoarded) return 'BOARDED';
     if (statuses.every((s) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(s))) return 'COMPLETED';
     return routeStatus;
   }

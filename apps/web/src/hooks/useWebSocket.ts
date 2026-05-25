@@ -60,7 +60,17 @@ export function useWebSocket(enabled = true) {
       reconnection: true,
     });
 
-    const record = (message: string, type: 'route' | 'trip' | 'queue' | 'vehicle' | 'alert' | 'boarding' = 'trip') => {
+    const normalizeOperationalState = (value: string | null | undefined) => {
+      const current = (value ?? '').toUpperCase();
+      if (current === 'PASSENGERS_ONBOARD') return 'BOARDED';
+      if (current === 'IN_PROGRESS') return 'IN_TRANSIT';
+      return current || null;
+    };
+
+    const record = (
+      message: string,
+      type: 'route' | 'trip' | 'queue' | 'vehicle' | 'alert' | 'boarding' | 'ops' | 'replay' | 'recovery' | 'websocket' = 'trip',
+    ) => {
       const store = useRealtimeStore.getState();
       store.pushActivity({ message, type, timestamp: new Date().toISOString() });
       store.bumpRevision();
@@ -83,8 +93,9 @@ export function useWebSocket(enabled = true) {
 
     socket.on('connect', () => {
       useRealtimeStore.getState().setConnected(true);
-      console.debug('[SOCKET] connected /operations', { tenantId });
-      console.debug('[SOCKET] auth success', { tenantId, namespace: '/operations' });
+      console.debug('[WEBSOCKET] connected /operations', { tenantId });
+      console.debug('[WEBSOCKET] auth success', { tenantId, namespace: '/operations' });
+      record('🔌 WebSocket operacional conectado', 'websocket');
       socket.emit('join:tenant', { tenantId });
       socket.emit('ops:state:request', { tenantId });
       void api.get('/tracking/live', {
@@ -119,16 +130,18 @@ export function useWebSocket(enabled = true) {
         });
     });
     socket.on('disconnect', () => {
-      console.debug('[SOCKET] disconnected /operations', { tenantId });
+      console.debug('[WEBSOCKET] disconnected /operations', { tenantId });
+      record('○ WebSocket operacional desconectado', 'websocket');
       useRealtimeStore.getState().setConnected(false);
     });
     socket.on('connect_error', (error: unknown) => {
-      console.debug('[SOCKET] connect_error /operations', {
+      console.debug('[WEBSOCKET] connect_error /operations', {
         tenantId,
         error: String(error),
         wsBaseUrl: resolvedWsBaseUrl,
       });
-      console.debug('[SOCKET] auth failed', { tenantId, error: String(error) });
+      console.debug('[WEBSOCKET] auth failed', { tenantId, error: String(error) });
+      record(`⚠️ Falha de conexão WebSocket: ${String(error)}`, 'websocket');
       useRealtimeStore.getState().setConnected(false);
     });
     socket.on('error', (error: unknown) => {
@@ -164,11 +177,19 @@ export function useWebSocket(enabled = true) {
         dispatchGpsToStore('ops:state:replay', data.latestPosition);
       }
       if (data.route?.id) {
-        record(`♻️ Estado recuperado: rota ${data.route.id}${data.route.operationalState ? ` (${data.route.operationalState})` : ''}`, 'route');
+        const normalized = normalizeOperationalState(data.route.operationalState);
+        if (normalized) {
+          useRealtimeStore.getState().setRouteOperationalState(data.route.id, {
+            operationalState: normalized,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        record(`♻️ Estado recuperado: rota ${data.route.id}${normalized ? ` (${normalized})` : ''}`, 'recovery');
       }
-      if ((data.trackingPoints?.length ?? 0) > 0) {
+      const trackingPoints = data.trackingPoints ?? (data as any).tracking_points ?? [];
+      if ((trackingPoints?.length ?? 0) > 0) {
         if (data.latestPosition?.vehicleId) {
-          for (const p of data.trackingPoints ?? []) {
+          for (const p of trackingPoints) {
             dispatchGpsToStore('ops:state:replay:tracking', {
               ...data.latestPosition,
               lat: p.lat,
@@ -176,7 +197,19 @@ export function useWebSocket(enabled = true) {
             } as VehiclePosition);
           }
         }
-        record(`📍 Replay de rastreio: ${data.trackingPoints?.length ?? 0} pontos`, 'vehicle');
+        record(`📍 Replay de rastreio: ${trackingPoints?.length ?? 0} pontos`, 'replay');
+      }
+      const timeline = (data as any).timeline as Array<{ eventType?: string; toState?: string; createdAt?: string }> | undefined;
+      if ((timeline?.length ?? 0) > 0) {
+        const latest = timeline?.[timeline.length - 1];
+        const latestState = normalizeOperationalState(latest?.toState);
+        if (latestState && data.route?.id) {
+          useRealtimeStore.getState().setRouteOperationalState(data.route.id, {
+            operationalState: latestState,
+            updatedAt: latest?.createdAt ?? new Date().toISOString(),
+          });
+        }
+        record(`⏯️ Timeline operacional recuperada (${timeline?.length ?? 0} eventos)`, 'replay');
       }
     });
 
@@ -224,6 +257,14 @@ export function useWebSocket(enabled = true) {
       record(`✅ Viagem concluída: ${data.tripId}`, 'trip');
     });
 
+    socket.on('trip:no_show', (data: { tripId: string; patientId?: string; patientName?: string }) => {
+      record(`🚫 No-show: ${data.patientName ?? data.patientId ?? data.tripId}`, 'trip');
+    });
+
+    socket.on('trip:reinstate', (data: { tripId: string; patientId?: string; patientName?: string }) => {
+      record(`♻️ Passageiro reintegrado: ${data.patientName ?? data.patientId ?? data.tripId}`, 'recovery');
+    });
+
     socket.on('route:started', (data: { routeId: string; driverId?: string }) => {
       record(`🚀 Rota iniciada: ${data.routeId}`, 'route');
     });
@@ -245,12 +286,41 @@ export function useWebSocket(enabled = true) {
     });
 
     socket.on('route:operational_state', (data: { routeId: string; operationalState: string }) => {
-      record(`🧭 Rota ${data.routeId} → ${data.operationalState}`, 'route');
+      const normalized = normalizeOperationalState(data.operationalState);
+      if (normalized) {
+        useRealtimeStore.getState().setRouteOperationalState(data.routeId, {
+          operationalState: normalized,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      record(`🧭 Rota ${data.routeId} → ${normalized ?? data.operationalState}`, 'ops');
     });
 
     socket.on('operational:state_changed', (data: { routeId?: string; tripId?: string; operationalState: string }) => {
+      const normalized = normalizeOperationalState(data.operationalState);
+      if (data.routeId && normalized) {
+        useRealtimeStore.getState().setRouteOperationalState(data.routeId, {
+          operationalState: normalized,
+          updatedAt: new Date().toISOString(),
+          tripId: data.tripId ?? null,
+        });
+      }
       const target = data.tripId ? `viagem ${data.tripId}` : `rota ${data.routeId ?? '—'}`;
-      record(`🔄 ${target} → ${data.operationalState}`, 'trip');
+      record(`🔄 ${target} → ${normalized ?? data.operationalState}`, 'ops');
+    });
+
+    socket.on('route:progression_suggestion', (data: { routeId?: string; suggestedState?: string }) => {
+      const target = data.routeId ?? '—';
+      const suggested = normalizeOperationalState(data.suggestedState) ?? data.suggestedState ?? '—';
+      record(`🧩 Sugestão operacional: rota ${target} → ${suggested}`, 'ops');
+    });
+
+    socket.on('route:deviation', (data: { routeId?: string; distanceMeters?: number }) => {
+      record(`⚠️ Desvio de rota detectado (${data.distanceMeters ?? 0}m)`, 'alert');
+    });
+
+    socket.on('geofence:long_stop', (data: { routeId?: string; longStopSeconds?: number }) => {
+      record(`⏱️ Parada longa detectada (${Math.round((data.longStopSeconds ?? 0) / 60)} min)`, 'alert');
     });
 
     return () => {

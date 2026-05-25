@@ -13,11 +13,13 @@ type RealtimeState = {
   revision: number;
   vehiclePositions: VehiclePosition[];
   vehicleTrails: Record<string, Array<{ lat: number; lng: number; timestamp: string; speed?: number; status?: string }>>;
+  routeOperationalStates: Record<string, { operationalState: string; updatedAt: string; tripId?: string | null }>;
   activityFeed: ActivityEvent[];
   boardingEvents: BoardingEvent[];
   setConnected: (connected: boolean) => void;
   bumpRevision: () => void;
   updateVehiclePosition: (pos: VehiclePosition) => void;
+  setRouteOperationalState: (routeId: string, payload: { operationalState: string; updatedAt: string; tripId?: string | null }) => void;
   pushActivity: (event: Omit<ActivityEvent, 'id'>) => void;
   pushBoardingEvent: (event: BoardingEvent) => void;
 };
@@ -41,6 +43,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
   revision: 0,
   vehiclePositions: [],
   vehicleTrails: {},
+  routeOperationalStates: {},
   activityFeed: [],
   boardingEvents: [],
 
@@ -172,6 +175,14 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         },
       };
     }),
+
+  setRouteOperationalState: (routeId, payload) =>
+    set((state) => ({
+      routeOperationalStates: {
+        ...state.routeOperationalStates,
+        [routeId]: payload,
+      },
+    })),
 
   pushActivity: (event) =>
     set((state) => {

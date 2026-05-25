@@ -425,8 +425,15 @@ export class TrackingService {
     });
 
     const metrics = this.computeReplayMetrics(route, pointsRaw);
-    this.logger.log(`[TRACKING] replay routeId=${routeId} rawPoints=${pointsRaw.length} sampled=${points.length} events=${timeline.length}`);
-    return { route, points, timeline, metrics };
+    this.logger.log(`[TRACKING] [REPLAY] routeId=${routeId} rawPoints=${pointsRaw.length} sampled=${points.length} events=${timeline.length}`);
+    return {
+      route,
+      points,
+      trackingPoints: points,
+      tracking_points: points,
+      timeline,
+      metrics,
+    };
   }
 
   /**
@@ -583,7 +590,7 @@ export class TrackingService {
       where: {
         tenantId,
         routeId: input.routeId,
-        status: { in: ['IN_TRANSIT', 'IN_PROGRESS'] as any[] },
+        status: { in: ['IN_TRANSIT'] as any[] },
       },
       orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
       select: { id: true },
@@ -667,7 +674,7 @@ export class TrackingService {
       where: { id: input.routeId, tenantId },
       include: {
         trips: {
-          where: { status: { in: ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'] as any[] } },
+          where: { status: { in: ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'ARRIVED'] as any[] } },
           include: {
             stops: {
               where: { status: { in: ['PENDING', 'EN_ROUTE', 'ARRIVED', 'BOARDING'] as any[] } },

@@ -11,7 +11,6 @@ export const TRIP_STATUS_LABEL: Record<string, string> = {
   BOARDING:    'Embarcando',
   BOARDED:     'EMBARCADO',
   IN_TRANSIT:  'EM DESLOCAMENTO',
-  IN_PROGRESS: 'EM DESLOCAMENTO',
   ARRIVED:     'Chegou',
   COMPLETED:   'Finalizado',
   NO_SHOW:     'Não Compareceu',
@@ -19,6 +18,7 @@ export const TRIP_STATUS_LABEL: Record<string, string> = {
 };
 
 export function getTripStatusLabel(status: string): string {
+  if (status === 'IN_PROGRESS') return TRIP_STATUS_LABEL.IN_TRANSIT;
   return TRIP_STATUS_LABEL[status] ?? status;
 }
 
@@ -35,6 +35,7 @@ export const ROUTE_STATUS_LABEL: Record<string, string> = {
   RETURNING:             'Retornando',
   COMPLETED:             'Finalizado',
   CANCELLED:             'Cancelado',
+  BOARDED:               'Embarcado',
   PASSENGERS_ONBOARD:    'PASSAGEIROS EMBARCADOS',
 };
 

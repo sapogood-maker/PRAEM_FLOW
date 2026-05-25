@@ -59,14 +59,14 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
   handleConnection(client: Socket) {
     const authUser = this.authenticateSocket(client);
     if (!authUser) {
-      this.logger.warn('[SOCKET] unauthorized connection rejected');
+      this.logger.warn('[WEBSOCKET] unauthorized connection rejected');
       client.disconnect(true);
       return;
     }
     this.socketUsers.set(client.id, authUser);
     this.connectedClients.add(client.id);
     client.join(`tenant:${authUser.tenantId}`);
-    this.logger.log(`[SOCKET] connected socketId=${client.id} tenantId=${authUser.tenantId} role=${authUser.role} driverId=${authUser.driverId ?? '-'}`);
+    this.logger.log(`[WEBSOCKET] connected socketId=${client.id} tenantId=${authUser.tenantId} role=${authUser.role} driverId=${authUser.driverId ?? '-'}`);
   }
 
   async handleDisconnect(client: Socket) {
@@ -157,7 +157,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
         }
       }
     }
-    this.logger.log(`[SOCKET] join:driver socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} deviceId=${typeof deviceId === 'string' ? deviceId : '-'}`);
+    this.logger.log(`[WEBSOCKET] join:driver socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} deviceId=${typeof deviceId === 'string' ? deviceId : '-'}`);
 
     client.join(`tenant:${tenantId}`);
     if (typeof driverId === 'string') client.join(`driver:${driverId}`);
@@ -198,7 +198,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       this.logger.warn(`[SOCKET] ops:state:request forbidden socketId=${client.id} userDriverId=${user.driverId ?? '-'} requestedDriverId=${requestedDriverId}`);
       return { ok: false, error: 'forbidden' };
     }
-    this.logger.log(`[SOCKET] ops:state:request socketId=${client.id} tenantId=${user.tenantId} driverId=${requestedDriverId ?? '-'}`);
+    this.logger.log(`[WEBSOCKET] ops:state:request socketId=${client.id} tenantId=${user.tenantId} driverId=${requestedDriverId ?? '-'}`);
     await this.emitStateReplay(client, user.tenantId, requestedDriverId);
     return { ok: true };
   }
@@ -423,7 +423,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       operationalStatus,
       timestamp: now.toISOString(),
     };
-    this.logger.log(`[SOCKET] broadcast driver:location:update tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'}`);
+    this.logger.log(`[WEBSOCKET] broadcast driver:location:update tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'}`);
     this.logger.log(`[MAP] broadcast location tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'} operationalStatus=${operationalStatus}`);
     this.server.to(room).emit('driver:location:update', broadcast);
     this.server.to(room).emit('vehicle.location_updated', broadcast);
@@ -810,7 +810,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       where: { id: input.routeId, tenantId },
       include: {
         trips: {
-          where: { status: { in: ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'IN_PROGRESS', 'ARRIVED'] as any[] } },
+          where: { status: { in: ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'ARRIVED'] as any[] } },
           include: {
             stops: {
               where: { status: { in: ['PENDING', 'EN_ROUTE', 'ARRIVED', 'BOARDING'] as any[] } },
@@ -911,14 +911,40 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       })
       : [];
 
+    const routeOperationalState = this.normalizeRealtimeOperationalState(
+      typeof activeRoute?.operationalState === 'string' ? activeRoute.operationalState : null,
+    );
+    const timeline = activeRoute
+      ? await this.prisma.operationalTimeline.findMany({
+        where: { tenantId, routeId: activeRoute.id },
+        orderBy: { createdAt: 'desc' },
+        take: 300,
+      })
+      : [];
+
+    const normalizedTrackingPoints = [...trackingPoints].reverse();
+
     client.emit('ops:state:replay', sanitizePayload({
       tenantId,
       driverId,
-      route: activeRoute,
+      route: activeRoute == null
+        ? null
+        : {
+          ...activeRoute,
+          operationalState: routeOperationalState,
+        },
       latestPosition,
-      trackingPoints: trackingPoints.reverse(),
+      trackingPoints: normalizedTrackingPoints,
+      tracking_points: normalizedTrackingPoints,
+      timeline: timeline.reverse(),
       replayedAt: new Date().toISOString(),
     }));
-    this.logger.log(`[SOCKET] replay sent socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} routeId=${activeRoute?.id ?? '-'} vehicleId=${latestPosition?.vehicleId ?? '-'}`);
+    this.logger.log(`[WEBSOCKET] [REPLAY] replay sent socketId=${client.id} tenantId=${tenantId} driverId=${driverId ?? '-'} routeId=${activeRoute?.id ?? '-'} vehicleId=${latestPosition?.vehicleId ?? '-'} points=${trackingPoints.length} timeline=${timeline.length}`);
+  }
+
+  private normalizeRealtimeOperationalState(state: string | null): string | null {
+    if (!state) return null;
+    if (state === 'PASSENGERS_ONBOARD') return 'BOARDED';
+    return state === 'IN_PROGRESS' ? 'IN_TRANSIT' : state;
   }
 }

@@ -55,7 +55,8 @@ function fmtDuration(seconds: number) {
 function mapEventLabel(evt: ReplayEvent) {
   const eventType = evt.eventType?.toUpperCase();
   if (eventType === 'STATE_TRANSITION') {
-    const next = (evt.toState ?? evt.metadata?.toState ?? '').toUpperCase();
+    const raw = (evt.toState ?? evt.metadata?.toState ?? '').toUpperCase();
+    const next = raw === 'IN_PROGRESS' ? 'IN_TRANSIT' : raw;
     switch (next) {
       case 'WAITING_PATIENT':
       case 'WAITING':
@@ -65,7 +66,6 @@ function mapEventLabel(evt: ReplayEvent) {
       case 'BOARDED':
         return 'Paciente embarcado';
       case 'IN_TRANSIT':
-      case 'IN_PROGRESS':
         return 'Em deslocamento';
       case 'ARRIVED':
         return 'Chegada ao destino';

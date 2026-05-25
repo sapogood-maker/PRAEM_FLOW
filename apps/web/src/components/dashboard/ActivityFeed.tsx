@@ -10,6 +10,11 @@ const typeIcons: Record<string, string> = {
   vehicle: '🚌',
   kpi: '📊',
   alert: '⚠️',
+  boarding: '🧍',
+  ops: '🧭',
+  replay: '⏯️',
+  recovery: '♻️',
+  websocket: '🔌',
 };
 
 export function ActivityFeed() {

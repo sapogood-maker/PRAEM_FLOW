@@ -60,7 +60,7 @@ export class DashboardService {
       }),
       // Em trânsito
       this.prisma.trip.count({
-        where: { tenantId, status: { in: ['IN_TRANSIT', 'IN_PROGRESS'] as any[] } },
+        where: { tenantId, status: { in: ['IN_TRANSIT'] as any[] } },
       }),
       // Chegou ao destino
       this.prisma.trip.count({

@@ -27,19 +27,9 @@ class GpsTrackingService extends ChangeNotifier {
   String? _deviceId;
   String? _authToken;
   String? _routeId;
-  DateTime? _lastEmitAt;
-  Position? _lastEmitPosition;
-  DateTime? _lastHeartbeatAt;
-
-  static const int _emitMinIntervalMs = 900;
-  static const double _emitMinDistanceMeters = 4;
-  static const int _heartbeatIntervalSeconds = 20;
 
   bool get active => _active;
   Position? get lastPosition => _lastPosition;
-  DateTime? get lastUpdateAt => _lastEmitAt;
-  double get lastSpeedKmh =>
-      _lastPosition == null ? 0 : (_lastPosition!.speed * 3.6);
 
   GpsTrackingService(this._ws, this._offlineQueue);
 
@@ -63,8 +53,7 @@ class GpsTrackingService extends ChangeNotifier {
         permission = LocationPermission.always;
         debugPrint('[GPS] background permission granted');
       } else {
-        debugPrint(
-            '[GPS] background permission not granted (using whileInUse)');
+        debugPrint('[GPS] background permission not granted (using whileInUse)');
       }
     }
 
@@ -86,8 +75,7 @@ class GpsTrackingService extends ChangeNotifier {
     _routeId = routeId ?? _routeId;
 
     if (_active && _subscription != null) {
-      debugPrint(
-          '[GPS] context updated vehicleId=$_vehicleId routeId=$_routeId');
+      debugPrint('[GPS] context updated vehicleId=$_vehicleId routeId=$_routeId');
       return;
     }
 
@@ -105,134 +93,144 @@ class GpsTrackingService extends ChangeNotifier {
     _active = true;
     notifyListeners();
 
+    final androidSettings = AndroidSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 3,
+      forceLocationManager: false,
+      intervalDuration: const Duration(seconds: 5),
+      foregroundNotificationConfig: const ForegroundNotificationConfig(
+        notificationText: 'PRAEM OPS — rastreamento ativo',
+        notificationTitle: 'GPS Operacional',
+        enableWakeLock: true,
+        notificationIcon: AndroidResource(
+          name: 'ic_notification',
+          defType: 'drawable',
+        ),
+      ),
+    );
+
+    final iosSettings = AppleSettings(
+      accuracy: LocationAccuracy.high,
+      activityType: ActivityType.automotiveNavigation,
+      distanceFilter: 3,
+      pauseLocationUpdatesAutomatically: false,
+      showBackgroundLocationIndicator: true,
+    );
+
     const settings = LocationSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 3,
     );
 
-    _subscription =
-        Geolocator.getPositionStream(locationSettings: settings).listen(
-      (pos) => _handlePosition(pos),
-      onError: (Object error, StackTrace stackTrace) {
-        debugPrint('[GPS] stream error: $error');
-      },
-      cancelOnError: false,
-    );
+    final locationSettings = _isAndroid()
+        ? androidSettings as LocationSettings
+        : _isIos()
+            ? iosSettings as LocationSettings
+            : settings;
 
-    debugPrint(
-        '[GPS] started vehicleId=$_vehicleId routeId=$_routeId tenantId=$_tenantId');
-    await _captureCurrentFix();
+   _subscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+     (pos) => _handlePosition(pos),
+     onError: (Object error, StackTrace stackTrace) {
+       debugPrint('[GPS] stream error: $error');
+     },
+     cancelOnError: false,
+   );
+
+   debugPrint('[GPS] started vehicleId=$_vehicleId routeId=$_routeId tenantId=$_tenantId');
+   await _captureCurrentFix();
   }
 
   void stop() {
-    _subscription?.cancel();
-    _subscription = null;
-    _active = false;
-    notifyListeners();
+   _subscription?.cancel();
+   _subscription = null;
+   _active = false;
+   notifyListeners();
+  }
+
+  /// Resume tracking if it stopped unexpectedly (e.g. after a system kill).
+  Future<void> restartIfNeeded() async {
+    if (_active && _subscription != null) return;
+    if (_vehicleId == null || _tenantId == null || _deviceId == null || _authToken == null) {
+      debugPrint('[GPS] restartIfNeeded — missing context, skipping');
+      return;
+    }
+    debugPrint('[GPS] restartIfNeeded — restarting stream');
+    await start(
+      vehicleId: _vehicleId!,
+      tenantId: _tenantId!,
+      deviceId: _deviceId!,
+      authToken: _authToken!,
+      routeId: _routeId,
+    );
+  }
+
+  bool _isAndroid() {
+    return defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  bool _isIos() {
+    return defaultTargetPlatform == TargetPlatform.iOS;
   }
 
   Future<void> _captureCurrentFix() async {
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 8),
-      );
-      await _handlePosition(pos);
-    } catch (e) {
-      debugPrint('[GPS] current fix error: $e');
-    }
+   try {
+     final pos = await Geolocator.getCurrentPosition(
+       desiredAccuracy: LocationAccuracy.high,
+       timeLimit: const Duration(seconds: 8),
+     );
+     await _handlePosition(pos);
+   } catch (e) {
+     debugPrint('[GPS] current fix error: $e');
+   }
   }
 
   Future<void> _handlePosition(Position pos) async {
-    _lastPosition = pos;
-    final now = DateTime.now();
-    if (!_shouldEmitPosition(pos, now)) {
-      notifyListeners();
-      return;
-    }
+   _lastPosition = pos;
 
-    final batteryLevel = await _getBattery();
-    final payload = {
-      'vehicleId': _vehicleId!,
-      'tenantId': _tenantId!,
-      'deviceId': _deviceId!,
-      if (_routeId != null) 'routeId': _routeId,
-      'lat': pos.latitude,
-      'lng': pos.longitude,
-      'speed': pos.speed * 3.6,
-      'heading': pos.heading,
-      'accuracy': pos.accuracy,
-      'batteryLevel': batteryLevel,
-      'timestamp': now.toIso8601String(),
-    };
+   final batteryLevel = await _getBattery();
+   final payload = {
+     'vehicleId': _vehicleId!,
+     'tenantId': _tenantId!,
+     'deviceId': _deviceId!,
+     if (_routeId != null) 'routeId': _routeId,
+     'lat': pos.latitude,
+     'lng': pos.longitude,
+     'speed': pos.speed * 3.6,
+     'heading': pos.heading,
+     'accuracy': pos.accuracy,
+     'batteryLevel': batteryLevel,
+     'timestamp': DateTime.now().toIso8601String(),
+   };
 
-    debugPrint(
-        '[GPS] fix driverId=${_ws.driverId ?? '-'} routeId=${_routeId ?? '-'} lat=${pos.latitude} lng=${pos.longitude} speed=${payload['speed']} heading=${pos.heading} acc=${pos.accuracy}');
+   debugPrint('[GPS] fix driverId=${_ws.driverId ?? '-'} routeId=${_routeId ?? '-'} lat=${pos.latitude} lng=${pos.longitude} speed=${payload['speed']} heading=${pos.heading} acc=${pos.accuracy}');
 
-    if (_ws.connected) {
-      _ws.emitLocationUpdate(
-        vehicleId: _vehicleId!,
-        lat: pos.latitude,
-        lng: pos.longitude,
-        speed: pos.speed * 3.6,
-        heading: pos.heading,
-        battery: batteryLevel.toDouble(),
-        deviceId: _deviceId!,
-        accuracy: pos.accuracy,
-        routeId: _routeId,
-      );
-      if (_lastHeartbeatAt == null ||
-          now.difference(_lastHeartbeatAt!).inSeconds >=
-              _heartbeatIntervalSeconds) {
-        _lastHeartbeatAt = now;
-        _ws.emitHeartbeat(
-          vehicleId: _vehicleId!,
-          lat: pos.latitude,
-          lng: pos.longitude,
-          speed: pos.speed * 3.6,
-          heading: pos.heading,
-          battery: batteryLevel.toDouble(),
-          deviceId: _deviceId!,
-          routeId: _routeId,
-          operationalStatus: (pos.speed * 3.6) >= 2 ? 'MOVING' : 'IDLE',
-        );
-      }
-      await _tryFlush();
-    } else {
-      debugPrint('[GPS] socket offline, queueing GPS payload');
-      await _offlineQueue.enqueueGps(payload);
-    }
+   if (_ws.connected) {
+     _ws.emitLocationUpdate(
+       vehicleId: _vehicleId!,
+       lat: pos.latitude,
+       lng: pos.longitude,
+       speed: pos.speed * 3.6,
+       heading: pos.heading,
+       battery: batteryLevel.toDouble(),
+       deviceId: _deviceId!,
+       accuracy: pos.accuracy,
+       routeId: _routeId,
+     );
+     await _tryFlush();
+   } else {
+     debugPrint('[GPS] socket offline, queueing GPS payload');
+     await _offlineQueue.enqueueGps(payload);
+   }
 
-    notifyListeners();
-  }
-
-  bool _shouldEmitPosition(Position pos, DateTime now) {
-    if (_lastEmitAt == null || _lastEmitPosition == null) {
-      _lastEmitAt = now;
-      _lastEmitPosition = pos;
-      return true;
-    }
-    final elapsedMs = now.difference(_lastEmitAt!).inMilliseconds;
-    final moved = Geolocator.distanceBetween(
-      _lastEmitPosition!.latitude,
-      _lastEmitPosition!.longitude,
-      pos.latitude,
-      pos.longitude,
-    );
-    if (elapsedMs >= _emitMinIntervalMs || moved >= _emitMinDistanceMeters) {
-      _lastEmitAt = now;
-      _lastEmitPosition = pos;
-      return true;
-    }
-    return false;
+   notifyListeners();
   }
 
   Future<void> _sendRest(Map<String, dynamic> payload) async {
-    try {
-      await _dio.post(
-        '${AppConfig.apiBaseUrl}/tracking/heartbeat',
-        data: payload,
-        options: Options(headers: {'x-device-token': _authToken}),
+   try {
+     await _dio.post(
+       '${AppConfig.apiBaseUrl}/tracking/heartbeat',
+       data: payload,
+       options: Options(headers: {'x-device-token': _authToken}),
       );
     } catch (e) {
       debugPrint('[GpsTracking] REST heartbeat error: $e');

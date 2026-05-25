@@ -89,12 +89,6 @@ class WsService extends ChangeNotifier {
       })
       ..onReconnect((attempt) {
         debugPrint('[FLUTTER][SOCKET] reconnect attempt=$attempt');
-        if (_connected && _tenantId != null) {
-          _socket!.emit('ops:state:request', {
-            'tenantId': _tenantId,
-            if (_driverId != null) 'driverId': _driverId,
-          });
-        }
       });
 
     // ─── Register operational event listeners ─────────────────────────────
@@ -257,7 +251,6 @@ class WsService extends ChangeNotifier {
     'vehicle.status_changed',
     'vehicle.heartbeat',
     'trip:boarding',
-    'trip:boarded',
     'trip:started',
     'trip:in_transit',
     'trip:arrived',
@@ -277,9 +270,6 @@ class WsService extends ChangeNotifier {
     'operational.alert',
     'route:started',
     'route:waiting_patient',
-    'route:operational_state',
-    'route:progression_suggestion',
-    'route:deviation',
     'route.status_changed',
     'route:completed',
     'route:dispatched',
@@ -291,10 +281,6 @@ class WsService extends ChangeNotifier {
     'return.requested',
     'ops:state:replay',
     'ops:pong',
-    'geofence:hospital_proximity',
-    'geofence:arrival',
-    'geofence:departure',
-    'geofence:long_stop',
   ];
 
   @override

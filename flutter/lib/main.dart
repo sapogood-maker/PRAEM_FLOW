@@ -17,6 +17,9 @@ import 'driver/driver_state.dart';
 import 'websocket/ws_service.dart';
 import 'tracking/gps_tracking_service.dart';
 import 'offline/offline_queue.dart';
+import 'operational/local_store.dart';
+import 'operational/sync_manager.dart';
+import 'operational/operation_controller.dart';
 import 'core/constants.dart';
 import 'core/app_router.dart';
 
@@ -38,6 +41,10 @@ Future<void> main() async {
   final offlineQueue = OfflineQueue();
   await offlineQueue.init();
 
+  // ─── Local operational store ───────────────────────────────────────────────
+  final localStore = LocalStore();
+  await localStore.init();
+
   // ─── Services ──────────────────────────────────────────────────────────────
   final authService = AuthService();
   await authService.init();
@@ -47,6 +54,18 @@ Future<void> main() async {
 
   final wsService = WsService();
   final gpsService = GpsTrackingService(wsService, offlineQueue);
+  final syncManager = SyncManager(offlineQueue, authService);
+
+  final operationController = OperationController(
+    auth: authService,
+    driverState: driverState,
+    ws: wsService,
+    gps: gpsService,
+    offlineQueue: offlineQueue,
+    localStore: localStore,
+    syncManager: syncManager,
+  );
+  await operationController.init();
 
   // ─── Auto-connect WebSocket when auth state changes ────────────────────────
   authService.addListener(() {
@@ -93,7 +112,10 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: driverState),
         ChangeNotifierProvider.value(value: wsService),
         ChangeNotifierProvider.value(value: gpsService),
+        ChangeNotifierProvider.value(value: syncManager),
+        ChangeNotifierProvider.value(value: operationController),
         Provider.value(value: offlineQueue),
+        Provider.value(value: localStore),
       ],
       child: const PraemDriverApp(),
     ),

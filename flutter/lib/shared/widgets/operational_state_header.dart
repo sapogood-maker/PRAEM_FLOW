@@ -59,6 +59,13 @@ class OperationalStateHeader extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
+          if (ctrl.isStaleRoute) ...[
+            const SizedBox(height: 6),
+            Text(
+              '⚠️ Rota stale (${ctrl.staleElapsedHours}h) · ${ctrl.staleLevel}',
+              style: const TextStyle(color: AppColors.warning, fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ],
           if (ctrl.lastError != null) ...[
             const SizedBox(height: 4),
             Text(

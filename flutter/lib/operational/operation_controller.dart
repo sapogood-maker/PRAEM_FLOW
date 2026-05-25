@@ -34,6 +34,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
   bool _actionInProgress = false;
   Timer? _offlineSyncTimer;
   String? _lastError;
+  String? _staleRecoveryAcknowledgedRouteId;
 
   // ─── Getters ────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,55 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
   bool get actionInProgress => _actionInProgress;
   String? get lastError => _lastError;
   bool get hasActiveRoute => _activeRoute != null;
+  String get staleLevel {
+    final topLevel = _activeRoute?['staleLevel'] as String?;
+    final policy = _activeRoute?['stalePolicy'];
+    final policyMap = policy is Map ? Map<String, dynamic>.from(policy) : null;
+    final nested = policyMap?['level'] as String?;
+    return (topLevel ?? nested ?? 'FRESH').toUpperCase();
+  }
+  int get staleElapsedHours {
+    final top = _activeRoute?['staleHours'];
+    final policy = _activeRoute?['stalePolicy'];
+    final policyMap = policy is Map ? Map<String, dynamic>.from(policy) : null;
+    final nested = policyMap?['elapsedHours'];
+    final value = top ?? nested;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+  bool get isStaleRoute {
+    if (_activeRoute == null) return false;
+    if (_activeRoute?['isStale'] == true) return true;
+    final routeDateRaw = _activeRoute?['date'] as String?;
+    if (routeDateRaw == null) return false;
+    final routeDate = DateTime.tryParse(routeDateRaw);
+    if (routeDate == null) return false;
+    final now = DateTime.now();
+    final elapsed = now.difference(routeDate.toLocal()).inHours;
+    return elapsed > 12;
+  }
+  bool get hasInTransitPassengers => _patients.any((p) {
+        final s = (p['status'] as String? ?? '').toUpperCase();
+        return s == 'IN_TRANSIT' || s == 'IN_PROGRESS';
+      });
+  bool get hasBoardedPassengers => _patients.any(_isBoarded);
+  bool get hasUnresolvedTrips => _patients.any((p) {
+        final s = (p['status'] as String? ?? '').toUpperCase();
+        return s != 'COMPLETED' && s != 'CANCELLED' && s != 'NO_SHOW';
+      });
+  bool get hasUnresolvedRoute {
+    if (_activeRoute == null) return false;
+    final status = (_activeRoute?['status'] as String? ?? '').toUpperCase();
+    return status != 'COMPLETED' && status != 'CANCELLED';
+  }
+  bool get mustShowFinalizeOperation =>
+      hasActiveRoute && (isStaleRoute || hasBoardedPassengers || hasInTransitPassengers || hasUnresolvedRoute || hasUnresolvedTrips);
+  bool get requiresStaleRecoveryScreen {
+    final routeId = _activeRoute?['id'] as String?;
+    if (routeId == null) return false;
+    final acknowledged = _staleRecoveryAcknowledgedRouteId == routeId;
+    return isStaleRoute && hasUnresolvedRoute && !acknowledged;
+  }
 
   int get boardedCount => _patients.where(_isBoarded).length;
   int get pendingBoardingCount => _patients.where((p) {
@@ -95,6 +145,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
   String get nextActionHint {
     switch (_state) {
       case OperationalState.offline:
+        if (isStaleRoute) return 'Operação anterior detectada. Ação obrigatória de recuperação.';
         return 'Sem rota ativa no momento.';
       case OperationalState.created:
         return 'Aguardando despacho da central.';
@@ -276,14 +327,14 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     _ws.on('trip:started', (data) {
       final event = data as Map? ?? {};
       final tripId = event['tripId'] as String?;
-      if (tripId != null) _updateTripStatus(tripId, 'IN_PROGRESS');
+      if (tripId != null) _updateTripStatus(tripId, 'IN_TRANSIT');
       _transition(OperationalState.inTransit);
     });
 
     _ws.on('trip:in_transit', (data) {
       final event = data as Map? ?? {};
       final tripId = event['tripId'] as String?;
-      if (tripId != null) _updateTripStatus(tripId, 'IN_PROGRESS');
+      if (tripId != null) _updateTripStatus(tripId, 'IN_TRANSIT');
       _transition(OperationalState.inTransit);
     });
 
@@ -427,7 +478,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     final tripId = trip['id'] as String?;
     if (tripId == null) return;
     await _apiPost('/trips/$tripId/in-transit', onSuccess: () {
-      _updateTripStatus(tripId, 'IN_PROGRESS');
+      _updateTripStatus(tripId, 'IN_TRANSIT');
       _transition(OperationalState.inTransit);
       _ws.emitDriverStatus(
         'IN_TRANSIT',
@@ -457,6 +508,27 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
       _updateTripStatus(tripId, 'COMPLETED');
       _transition(OperationalState.completed);
       _gps.stop();
+    });
+  }
+
+  void continueStaleOperation() {
+    final routeId = _activeRoute?['id'] as String?;
+    if (routeId == null) return;
+    _staleRecoveryAcknowledgedRouteId = routeId;
+    debugPrint('[RECOVERY] [STALE_ROUTE] continue operation routeId=$routeId staleLevel=$staleLevel elapsedHours=$staleElapsedHours');
+    _ensureGps(routeId: routeId);
+    notifyListeners();
+  }
+
+  Future<void> finalizeOperationRecovery() async {
+    final routeId = _activeRoute?['id'] as String?;
+    if (routeId == null) return;
+    await _apiPost('/routes/$routeId/force-complete', onSuccess: () {
+      debugPrint('[RECOVERY] [FINALIZE] force-complete success routeId=$routeId staleLevel=$staleLevel elapsedHours=$staleElapsedHours');
+      _staleRecoveryAcknowledgedRouteId = routeId;
+      _transition(OperationalState.completed, force: true);
+      _gps.stop();
+      _clearRoute();
     });
   }
 
@@ -536,8 +608,29 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
           break;
         }
       }
+      if (found == null) {
+        final staleResp = await _dio.get(
+          '${AppConfig.apiBaseUrl}/routes',
+          queryParameters: {
+            'status': 'DISPATCHED,ACTIVE,RETURNING,PREPARING,PLANNED,SCHEDULED,PENDING',
+            'limit': 20,
+            if (driverId != null) 'driverId': driverId,
+            if (vehicleId != null && driverId == null) 'vehicleId': vehicleId,
+          },
+          options: Options(headers: {'Authorization': 'Bearer ${_auth.token}'}),
+        );
+        final staleData = staleResp.data;
+        final staleItems = (staleData is Map ? staleData['items'] : staleData) as List? ?? [];
+        if (staleItems.isNotEmpty) {
+          found = Map<String, dynamic>.from(staleItems.first as Map);
+        }
+      }
       if (found != null) {
         _activeRoute = found;
+        final routeId = found['id'] as String?;
+        if (_staleRecoveryAcknowledgedRouteId != routeId) {
+          _staleRecoveryAcknowledgedRouteId = null;
+        }
         await _loadPatients(found['id'] as String);
         await _loadStops(found['id'] as String);
         final derived = _deriveState(_activeRoute, _patients);
@@ -546,6 +639,10 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
             '[OPS] route loaded id=${found['id']} status=${found['status']} derivedState=${operationalStateToString(derived)}');
         _persist();
         _syncToDriverState();
+        if (requiresStaleRecoveryScreen) {
+          debugPrint(
+              '[STALE_ROUTE] stale route detected routeId=${found['id']} staleLevel=$staleLevel elapsedHours=$staleElapsedHours state=${operationalStateToString(_state)}');
+        }
       } else {
         if (_state != OperationalState.offline) {
           _transition(OperationalState.offline, force: true);
@@ -689,6 +786,8 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     final tripStatus = (activeTrip['status'] as String? ?? '').toUpperCase();
 
     if (tripStatus == 'BOARDING') return OperationalState.boarding;
+    if (tripStatus == 'BOARDED') return OperationalState.boarded;
+    if (tripStatus == 'IN_TRANSIT') return OperationalState.inTransit;
     if (tripStatus == 'IN_PROGRESS') return OperationalState.inTransit;
     if (tripStatus == 'ARRIVED') return OperationalState.arrived;
     if (tripStatus == 'NO_SHOW') return OperationalState.noShow;
@@ -739,6 +838,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     _patients = [];
     _stops = [];
     _state = OperationalState.offline;
+    _staleRecoveryAcknowledgedRouteId = null;
     _driverState.clearActiveRoute();
     _localStore.clear();
     notifyListeners();

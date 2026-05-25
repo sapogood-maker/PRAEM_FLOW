@@ -273,6 +273,7 @@ class WsService extends ChangeNotifier {
     'route.status_changed',
     'route:completed',
     'route:dispatched',
+    'route:tracking_archived',
     'route.dispatched',
     'route.updated',
     'route.cancelled',

@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { routeService } from '@/services/operational.service';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { getRouteStatusLabel } from '@/lib/i18n';
+import { api } from '@/services/api';
 
 const STATUS_BADGE: Record<string, string> = {
   SCHEDULED: 'bg-indigo-900 text-indigo-300',
@@ -21,10 +22,34 @@ const STATUS_BADGE: Record<string, string> = {
 export default function RoutesPage() {
   const today = new Date().toISOString().split('T')[0];
   const [selectedDate, setSelectedDate] = useState(today);
+  const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['routes', selectedDate],
-    queryFn: () => routeService.list({ date: selectedDate, limit: 100 }),
+    queryFn: async () => {
+      const [dateScoped, staleCandidates] = await Promise.all([
+        routeService.list({ date: selectedDate, limit: 100 }),
+        routeService.list({ status: 'DISPATCHED,ACTIVE,RETURNING', limit: 100 }),
+      ]);
+      const merged = new Map<string, any>();
+      for (const item of dateScoped?.items ?? []) merged.set(item.id, item);
+      for (const item of staleCandidates?.items ?? []) {
+        if (item?.isStale || item?.requiresRecovery) merged.set(item.id, item);
+      }
+      return {
+        ...(dateScoped ?? {}),
+        items: [...merged.values()],
+        total: [...merged.values()].length,
+      };
+    },
+  });
+  const recoveryMutation = useMutation({
+    mutationFn: async (routeId: string) => api.post(`/routes/${routeId}/force-complete`).then((r) => r.data),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['routes'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard', 'kpis'] });
+      void qc.invalidateQueries({ queryKey: ['trips'] });
+    },
   });
 
   const items = data?.items ?? [];
@@ -67,15 +92,22 @@ export default function RoutesPage() {
                 <th className='p-3 text-left'>Pacientes</th>
                 <th className='p-3 text-left'>Status</th>
                 <th className='p-3 text-left'>Estado Operacional</th>
+                <th className='p-3 text-left'>Stale Operacional</th>
                 <th className='p-3 text-left'>Replay</th>
+                <th className='p-3 text-left'>Recuperação</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
-                <tr><td colSpan={9} className='p-6 text-center text-slate-500'>Nenhuma rota para esta data</td></tr>
+                <tr><td colSpan={11} className='p-6 text-center text-slate-500'>Nenhuma rota para esta data</td></tr>
               )}
               {items.map((r: any) => (
-                <tr key={r.id} className='border-t border-border hover:bg-slate-900/40 transition-colors'>
+                <tr
+                  key={r.id}
+                  className={`border-t border-border transition-colors ${
+                    r.isStale ? 'bg-amber-950/30 hover:bg-amber-950/40' : 'hover:bg-slate-900/40'
+                  }`}
+                >
                   <td className='p-3 max-w-[140px] truncate'>{r.origin}</td>
                   <td className='p-3 max-w-[140px] truncate'>{r.destination}</td>
                   <td className='p-3'>{r.driver?.user?.name ?? <span className='text-slate-500 text-xs'>a atribuir</span>}</td>
@@ -95,12 +127,51 @@ export default function RoutesPage() {
                     </span>
                   </td>
                   <td className='p-3'>
+                    {r.isStale ? (
+                      <div className='space-y-1'>
+                        <span
+                          className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                            r.staleLevel === 'RECOVERY_REQUIRED'
+                              ? 'bg-red-900 text-red-300'
+                              : r.staleLevel === 'CRITICAL_STALE'
+                                ? 'bg-amber-900 text-amber-300'
+                                : 'bg-yellow-900 text-yellow-300'
+                          }`}
+                        >
+                          {r.staleLevel === 'RECOVERY_REQUIRED'
+                            ? 'RECUPERAÇÃO OBRIGATÓRIA'
+                            : r.staleLevel === 'CRITICAL_STALE'
+                              ? 'STALE CRÍTICA'
+                              : 'STALE'}
+                        </span>
+                        <p className='text-[11px] text-slate-400'>Tempo decorrido: {r.staleHours ?? r.stalePolicy?.elapsedHours ?? 0}h</p>
+                        <p className='text-[11px] text-amber-300'>⚠️ Atenção operacional</p>
+                      </div>
+                    ) : (
+                      <span className='text-xs text-slate-500'>OK</span>
+                    )}
+                  </td>
+                  <td className='p-3'>
                     <Link
                       href={`/replay?routeId=${r.id}`}
                       className='rounded-lg border border-border bg-slate-900 px-2 py-1 text-xs text-cyan-300 hover:text-cyan-200'
                     >
                       Abrir
                     </Link>
+                  </td>
+                  <td className='p-3'>
+                    {r.isStale || ['ACTIVE', 'DISPATCHED', 'RETURNING'].includes(String(r.status)) ? (
+                      <button
+                        type='button'
+                        disabled={recoveryMutation.isPending}
+                        onClick={() => recoveryMutation.mutate(r.id)}
+                        className='rounded-lg bg-red-900 px-2 py-1 text-xs font-semibold text-red-300 hover:bg-red-800 disabled:opacity-60'
+                      >
+                        {recoveryMutation.isPending ? 'Finalizando…' : 'Finalizar Operação'}
+                      </button>
+                    ) : (
+                      <span className='text-xs text-slate-500'>—</span>
+                    )}
                   </td>
                 </tr>
               ))}

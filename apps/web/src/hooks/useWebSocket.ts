@@ -315,6 +315,10 @@ export function useWebSocket(enabled = true) {
       record(`🧩 Sugestão operacional: rota ${target} → ${suggested}`, 'ops');
     });
 
+    socket.on('route:tracking_archived', (data: { routeId?: string; points?: number }) => {
+      record(`🗄️ Tracking arquivado: rota ${data.routeId ?? '—'} (${data.points ?? 0} pontos)`, 'replay');
+    });
+
     socket.on('route:deviation', (data: { routeId?: string; distanceMeters?: number }) => {
       record(`⚠️ Desvio de rota detectado (${data.distanceMeters ?? 0}m)`, 'alert');
     });

@@ -79,9 +79,9 @@ export class RoutesController {
   }
 
   @Post(':id/force-complete')
-  @Roles('DRIVER')
+  @Roles('DRIVER', 'SUPERVISOR', 'ADMIN', 'COORDINATOR')
   forceCompleteRoute(@Request() req: AuthRequest, @Param('id') id: string) {
-    this.logger.log(`[ROUTE] REST force-complete request tenantId=${req.user.tenantId} routeId=${id} driverId=${req.user.driverId}`);
+    this.logger.log(`[RECOVERY] [FINALIZE] REST force-complete request tenantId=${req.user.tenantId} routeId=${id} driverId=${req.user.driverId ?? '-'} role=${req.user.role}`);
     return this.routesService.forceCompleteRoute(id, req.user.tenantId, {
       driverId: req.user.driverId,
       actorUserId: req.user.userId,
@@ -91,7 +91,7 @@ export class RoutesController {
   @Post('recovery/stale')
   @Roles('SUPERVISOR', 'ADMIN', 'COORDINATOR')
   recoverStaleRoutes(@Request() req: AuthRequest, @Body() body: { cutoffHours?: number }) {
-    this.logger.log(`[ROUTE] REST recovery stale tenantId=${req.user.tenantId} cutoffHours=${body?.cutoffHours ?? 12}`);
+    this.logger.log(`[RECOVERY] [STALE_ROUTE] REST recovery stale tenantId=${req.user.tenantId} cutoffHours=${body?.cutoffHours ?? 12}`);
     return this.routesService.recoverStaleRoutes(req.user.tenantId, body?.cutoffHours, {
       actorUserId: req.user.userId,
     });

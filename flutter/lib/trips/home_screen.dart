@@ -11,6 +11,7 @@ import '../shared/widgets/connection_status_bar.dart';
 import '../shared/widgets/operational_state_header.dart';
 import '../shared/widgets/next_action_panel.dart';
 import '../shared/widgets/passenger_manifest.dart';
+import '../shared/widgets/stale_recovery_panel.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -98,26 +99,28 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        onRefresh: ctrl.loadRoute,
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: const [
-                  ConnectionStatusBar(),
-                  OperationalStateHeader(),
-                  NextActionPanel(),
-                  PassengerManifest(),
-                  SizedBox(height: 80),
+      body: ctrl.requiresStaleRecoveryScreen
+          ? const StaleRecoveryPanel()
+          : RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: ctrl.loadRoute,
+              child: CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: const [
+                        ConnectionStatusBar(),
+                        OperationalStateHeader(),
+                        NextActionPanel(),
+                        PassengerManifest(),
+                        SizedBox(height: 80),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
       floatingActionButton: ctrl.hasActiveRoute
           ? FloatingActionButton.extended(
               backgroundColor: AppColors.info,

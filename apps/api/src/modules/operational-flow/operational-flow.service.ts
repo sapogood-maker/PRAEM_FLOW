@@ -307,7 +307,7 @@ export class OperationalFlowService {
 
   async recoverStaleRoutes(tenantId: string, cutoffHours = 12, context: FlowContext = {}) {
     const cutoff = new Date(Date.now() - cutoffHours * 3600 * 1000);
-    this.logger.log(`[RECOVERY] [OPS] scanning stale routes tenantId=${tenantId} cutoff=${cutoff.toISOString()}`);
+    this.logger.log(`[RECOVERY] [STALE_ROUTE] scanning stale routes tenantId=${tenantId} cutoff=${cutoff.toISOString()}`);
     const staleRoutes = await this.prisma.route.findMany({
       where: {
         tenantId,
@@ -324,21 +324,24 @@ export class OperationalFlowService {
     for (const route of staleRoutes) {
       const activeTrips = route.trips.filter((t) => !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(String(t.status)));
       const boardedTrips = activeTrips.filter((t) => !!t.boardedAt || ['BOARDED', 'IN_TRANSIT', 'ARRIVED'].includes(String(t.status)));
+      const elapsedHours = Math.floor((Date.now() - new Date(route.date).getTime()) / (1000 * 60 * 60));
       if (activeTrips.length === 0) {
         await this.updateRouteWithVersion(route.id, route.operationalVersion ?? 1, {
           status: 'COMPLETED',
           operationalState: 'COMPLETED',
         });
         diagnostics.push({ routeId: route.id, action: 'MARK_COMPLETED_NO_ACTIVE_TRIPS', activeTrips: 0, boardedTrips: 0 });
+        this.logger.warn(`[STALE_ROUTE] route auto-completed routeId=${route.id} elapsedHours=${elapsedHours} reason=no_active_trips`);
       } else {
         await this.forceCompleteRoute(tenantId, route.id, {
           ...context,
           source: context.source ?? 'RECOVERY_STALE_ROUTES',
         });
         diagnostics.push({ routeId: route.id, action: 'FORCE_COMPLETE_ROUTE', activeTrips: activeTrips.length, boardedTrips: boardedTrips.length });
+        this.logger.warn(`[STALE_ROUTE] route force-completed routeId=${route.id} elapsedHours=${elapsedHours} activeTrips=${activeTrips.length} boardedTrips=${boardedTrips.length}`);
       }
     }
-    this.logger.log(`[RECOVERY] [OPS] stale routes processed=${diagnostics.length}`);
+    this.logger.log(`[RECOVERY] [STALE_ROUTE] stale routes processed=${diagnostics.length}`);
     return { processed: diagnostics.length, diagnostics };
   }
 
@@ -449,6 +452,35 @@ export class OperationalFlowService {
       });
     }
 
+    const trackingAggregate = await this.prisma.trackingPoint.aggregate({
+      where: { tenantId, routeId },
+      _count: { _all: true },
+      _min: { timestamp: true },
+      _max: { timestamp: true },
+    });
+    const archivedTrackingSummary = {
+      points: trackingAggregate._count._all,
+      firstPointAt: trackingAggregate._min.timestamp?.toISOString() ?? null,
+      lastPointAt: trackingAggregate._max.timestamp?.toISOString() ?? null,
+      archivedAt: now.toISOString(),
+    };
+    await this.persistTimeline({
+      tenantId,
+      routeId,
+      driverId: context.driverId ?? route.driverId ?? null,
+      vehicleId: context.vehicleId ?? route.vehicleId ?? null,
+      eventType: 'TRACKING_ARCHIVED_ON_FINALIZE',
+      source: context.source ?? 'FORCE_COMPLETE',
+      metadata: archivedTrackingSummary,
+    });
+    this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'route:tracking_archived', {
+      routeId,
+      ...archivedTrackingSummary,
+    });
+    this.logger.log(
+      `[FINALIZE] [TRACKING] archived summary routeId=${routeId} points=${archivedTrackingSummary.points} first=${archivedTrackingSummary.firstPointAt ?? '-'} last=${archivedTrackingSummary.lastPointAt ?? '-'}`,
+    );
+
     // Force-complete the route regardless of current status
     await this.updateRouteWithVersion(routeId, route.operationalVersion ?? 1, {
       status: 'COMPLETED',
@@ -465,6 +497,7 @@ export class OperationalFlowService {
       vehicleId: route.vehicleId,
       completedTripIds,
       noShowTripIds,
+      trackingArchive: archivedTrackingSummary,
       timestamp: now.toISOString(),
       source: context.source ?? 'FORCE_COMPLETE',
     };

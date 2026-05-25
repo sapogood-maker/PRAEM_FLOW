@@ -5,6 +5,9 @@ import { OperationalFlowService } from '../operational-flow/operational-flow.ser
 @Injectable()
 export class RoutesService {
   private readonly logger = new Logger(RoutesService.name);
+  private static readonly STALE_HOURS = 12;
+  private static readonly CRITICAL_STALE_HOURS = 24;
+  private static readonly RECOVERY_REQUIRED_HOURS = 48;
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
@@ -46,10 +49,24 @@ export class RoutesService {
       }),
       this.prisma.route.count({ where }),
     ]);
-    const mapped = items.map((r: any) => ({
-      ...r,
-      operationalStateDerived: this.deriveRouteOperationalStateFromTrips(r.trips ?? [], r.status),
-    }));
+    const mapped = items.map((r: any) => {
+      const operationalStateDerived = this.deriveRouteOperationalStateFromTrips(r.trips ?? [], r.status);
+      const stalePolicy = this.deriveStalePolicy(r, r.trips ?? []);
+      if (stalePolicy.isStale && stalePolicy.hasUnresolvedTrips) {
+        this.logger.warn(
+          `[STALE_ROUTE] routeId=${r.id} tenantId=${tenantId} status=${r.status} elapsedHours=${stalePolicy.elapsedHours} level=${stalePolicy.level} requiresRecovery=${stalePolicy.requiresRecovery}`,
+        );
+      }
+      return {
+        ...r,
+        operationalStateDerived,
+        stalePolicy,
+        isStale: stalePolicy.isStale,
+        staleLevel: stalePolicy.level,
+        staleHours: stalePolicy.elapsedHours,
+        requiresRecovery: stalePolicy.requiresRecovery,
+      };
+    });
     return { items: mapped, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
@@ -63,9 +80,20 @@ export class RoutesService {
       },
     });
     if (!route) throw new NotFoundException('Route not found');
+    const stalePolicy = this.deriveStalePolicy(route, route.trips ?? []);
+    if (stalePolicy.isStale && stalePolicy.hasUnresolvedTrips) {
+      this.logger.warn(
+        `[STALE_ROUTE] routeId=${route.id} tenantId=${tenantId} status=${route.status} elapsedHours=${stalePolicy.elapsedHours} level=${stalePolicy.level} requiresRecovery=${stalePolicy.requiresRecovery}`,
+      );
+    }
     return {
       ...route,
       operationalStateDerived: this.deriveRouteOperationalStateFromTrips(route.trips ?? [], route.status),
+      stalePolicy,
+      isStale: stalePolicy.isStale,
+      staleLevel: stalePolicy.level,
+      staleHours: stalePolicy.elapsedHours,
+      requiresRecovery: stalePolicy.requiresRecovery,
     };
   }
 
@@ -78,6 +106,8 @@ export class RoutesService {
         status: true,
         dispatchType: true,
         date: true,
+        scheduledAt: true,
+        createdAt: true,
         driverId: true,
         vehicleId: true,
         trips: {
@@ -87,6 +117,7 @@ export class RoutesService {
       },
     });
     if (!route) throw new NotFoundException('Route not found');
+    const stalePolicy = this.deriveStalePolicy(route, route.trips ?? []);
     return {
       routeId: route.id,
       tenantId: route.tenantId,
@@ -98,6 +129,7 @@ export class RoutesService {
       totalTrips: route.trips.length,
       tripStatuses: route.trips.map((t: { status: string }) => t.status),
       operationalStateDerived: this.deriveRouteOperationalStateFromTrips(route.trips, route.status),
+      stalePolicy,
       trips: route.trips,
     };
   }
@@ -206,5 +238,48 @@ export class RoutesService {
     if (hasBoarded) return 'BOARDED';
     if (statuses.every((s) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(s))) return 'COMPLETED';
     return routeStatus;
+  }
+
+  private deriveStalePolicy(
+    route: {
+      status: string;
+      date?: Date | null;
+      scheduledAt?: Date | null;
+      createdAt?: Date | null;
+    },
+    trips: Array<{ status: string; boardedAt?: Date | null }>,
+  ) {
+    const now = new Date();
+    const referenceAt = route.scheduledAt ?? route.date ?? route.createdAt ?? now;
+    const elapsedHours = Math.max(0, Math.floor((now.getTime() - new Date(referenceAt).getTime()) / (1000 * 60 * 60)));
+    const statuses = trips.map((t) => String(t.status).toUpperCase());
+    const hasTransitPassengers = statuses.some((s) => s === 'IN_TRANSIT' || s === 'IN_PROGRESS');
+    const hasBoardedPassengers = statuses.some((s) => s === 'BOARDED' || s === 'ARRIVED' || s === 'BOARDING') || trips.some((t) => !!t.boardedAt);
+    const hasUnresolvedTrips = statuses.some((s) => !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(s));
+    const hasUnresolvedRoute = !['COMPLETED', 'CANCELLED'].includes(String(route.status).toUpperCase());
+    const staleCandidate = hasUnresolvedRoute || hasUnresolvedTrips || hasTransitPassengers || hasBoardedPassengers;
+    const isStale = staleCandidate && elapsedHours > RoutesService.STALE_HOURS;
+    let level: 'FRESH' | 'STALE' | 'CRITICAL_STALE' | 'RECOVERY_REQUIRED' = 'FRESH';
+    if (staleCandidate && elapsedHours > RoutesService.RECOVERY_REQUIRED_HOURS) {
+      level = 'RECOVERY_REQUIRED';
+    } else if (staleCandidate && elapsedHours > RoutesService.CRITICAL_STALE_HOURS) {
+      level = 'CRITICAL_STALE';
+    } else if (staleCandidate && elapsedHours > RoutesService.STALE_HOURS) {
+      level = 'STALE';
+    }
+    return {
+      referenceAt: new Date(referenceAt).toISOString(),
+      elapsedHours,
+      staleAfterHours: RoutesService.STALE_HOURS,
+      criticalAfterHours: RoutesService.CRITICAL_STALE_HOURS,
+      recoveryRequiredAfterHours: RoutesService.RECOVERY_REQUIRED_HOURS,
+      isStale,
+      level,
+      requiresRecovery: level === 'RECOVERY_REQUIRED',
+      hasUnresolvedRoute,
+      hasUnresolvedTrips,
+      hasBoardedPassengers,
+      hasTransitPassengers,
+    };
   }
 }

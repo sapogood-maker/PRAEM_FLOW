@@ -28,6 +28,39 @@ class NextActionPanel extends StatelessWidget {
           Text(hint,
               style: const TextStyle(
                   color: AppColors.textSecondary, fontSize: 13)),
+          if (ctrl.mustShowFinalizeOperation) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: ctrl.actionInProgress
+                    ? null
+                    : () async {
+                        await ctrl.finalizeOperationRecovery();
+                      },
+                icon: ctrl.actionInProgress
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppColors.textPrimary),
+                      )
+                    : const Icon(Icons.task_alt, size: 20),
+                label: const Text('FINALIZAR OPERAÇÃO'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.danger,
+                  foregroundColor: AppColors.textPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  textStyle: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8),
+                ),
+              ),
+            ),
+          ],
           if (label != null) ...[
             const SizedBox(height: 10),
             SizedBox(

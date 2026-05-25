@@ -1,6 +1,7 @@
 // lib/shared/widgets/next_action_panel.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../navigation/navigation_service.dart';
 import '../../operational/operation_controller.dart';
 import '../../operational/operation_state.dart';
 import '../../core/constants.dart';
@@ -28,6 +29,12 @@ class NextActionPanel extends StatelessWidget {
           Text(hint,
               style: const TextStyle(
                   color: AppColors.textSecondary, fontSize: 13)),
+          // ── Navigation shortcut ──────────────────────────────────────────
+          if (ctrl.currentOpsNavDestination != null) ...[
+            const SizedBox(height: 10),
+            _buildNavigationButton(context, ctrl),
+          ],
+          // ── Finalize (stale / recovery) ──────────────────────────────────
           if (ctrl.mustShowFinalizeOperation) ...[
             const SizedBox(height: 10),
             SizedBox(
@@ -69,6 +76,23 @@ class NextActionPanel extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildNavigationButton(BuildContext context, OperationController ctrl) {
+    final dest = ctrl.currentOpsNavDestination!;
+    return OutlinedButton.icon(
+      onPressed: () => NavigationService.showNavigationPicker(context, dest),
+      icon: const Icon(Icons.navigation_outlined, size: 18),
+      label: Text('INICIAR NAVEGAÇÃO  ·  ${dest.typeLabel}'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.info,
+        side: const BorderSide(color: AppColors.info),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        textStyle:
+            const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
       ),
     );
   }

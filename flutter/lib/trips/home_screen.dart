@@ -8,6 +8,7 @@ import '../driver/driver_state.dart';
 import '../operational/operation_controller.dart';
 import '../core/constants.dart';
 import '../shared/widgets/connection_status_bar.dart';
+import '../shared/widgets/destination_info_card.dart';
 import '../shared/widgets/operational_state_header.dart';
 import '../shared/widgets/next_action_panel.dart';
 import '../shared/widgets/passenger_manifest.dart';
@@ -133,6 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ConnectionStatusBar(),
                         OperationalStateHeader(),
                         NextActionPanel(),
+                        DestinationInfoCard(),
                         PassengerManifest(),
                         SizedBox(height: 80),
                       ],

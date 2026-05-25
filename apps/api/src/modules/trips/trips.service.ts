@@ -24,7 +24,7 @@ export class TripsService {
         skip,
         take: limit,
         include: {
-          patient: { select: { id: true, name: true, cpf: true, mobility: true, requiresCompanion: true } },
+          patient: { select: { id: true, name: true, cpf: true, mobility: true, requiresCompanion: true, lat: true, lng: true, address: true } },
           route: { select: { id: true, origin: true, destination: true, date: true } },
         },
         orderBy: { boardedAt: 'desc' },

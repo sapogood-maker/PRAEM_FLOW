@@ -12,6 +12,7 @@ import '../websocket/ws_service.dart';
 import '../tracking/gps_tracking_service.dart';
 import '../offline/offline_queue.dart';
 import '../config/app_config.dart';
+import '../navigation/navigation_service.dart';
 import 'operation_state.dart';
 import 'local_store.dart';
 import 'sync_manager.dart';
@@ -121,6 +122,91 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
       default:
         return 'Não há embarque pendente nesta operação.';
     }
+  }
+
+  /// Navigation destination based on current operational state.
+  /// - Pre-boarding: first pending patient with coords → PATIENT_PICKUP
+  /// - Boarding/boarded/in-transit: next TripStop with coords → HOSPITAL/RETURN
+  /// - Arrived: first return/dropoff stop → RETURN
+  /// Returns null when no navigation coordinates are available.
+  OpsNavDestination? get currentOpsNavDestination {
+    if (!hasActiveRoute) return null;
+    switch (_state) {
+      case OperationalState.dispatched:
+      case OperationalState.driverAccepted:
+      case OperationalState.waitingPatient:
+      case OperationalState.boarding:
+        for (final trip in _patients) {
+          final s = (trip['status'] as String? ?? '').toUpperCase();
+          if (['COMPLETED', 'CANCELLED', 'NO_SHOW', 'ARRIVED'].contains(s)) continue;
+          final patient = (trip['patient'] as Map?) ?? trip;
+          final lat = (patient['lat'] as num?)?.toDouble();
+          final lng = (patient['lng'] as num?)?.toDouble();
+          if (lat != null && lng != null) {
+            debugPrint('[NAVIGATION] pickup dest: ${patient['name']} lat=$lat lng=$lng');
+            return OpsNavDestination(
+              type: OpsNavDestType.patientPickup,
+              name: (patient['name'] as String?) ?? 'Paciente',
+              address: patient['address'] as String?,
+              lat: lat,
+              lng: lng,
+            );
+          }
+        }
+        break;
+      case OperationalState.boarded:
+      case OperationalState.inTransit:
+        final stop = currentStop;
+        if (stop != null) {
+          final lat = (stop['lat'] as num?)?.toDouble();
+          final lng = (stop['lng'] as num?)?.toDouble();
+          if (lat != null && lng != null) {
+            final typeRaw = (stop['type'] as String? ?? '').toUpperCase();
+            debugPrint('[NAVIGATION] stop dest: ${stop['name']} type=$typeRaw lat=$lat lng=$lng');
+            return OpsNavDestination(
+              type: ['RETURN', 'DROPOFF'].contains(typeRaw)
+                  ? OpsNavDestType.returnDest
+                  : OpsNavDestType.hospital,
+              name: (stop['name'] as String?) ?? 'Destino',
+              address: stop['address'] as String?,
+              lat: lat,
+              lng: lng,
+            );
+          }
+        }
+        // Fallback: API-computed OpsNavDestination on the route object
+        final apiDest = OpsNavDestination.fromMap(
+          _activeRoute?['OpsNavDestination'] as Map<String, dynamic>?,
+        );
+        if (apiDest != null) {
+          debugPrint('[NAVIGATION] api dest fallback: ${apiDest.name}');
+          return apiDest;
+        }
+        break;
+      case OperationalState.arrived:
+        for (final stop in _stops) {
+          final type = (stop['type'] as String? ?? '').toUpperCase();
+          final status = (stop['status'] as String? ?? '').toUpperCase();
+          if (!['RETURN', 'DROPOFF'].contains(type)) continue;
+          if (['COMPLETED', 'SKIPPED'].contains(status)) continue;
+          final lat = (stop['lat'] as num?)?.toDouble();
+          final lng = (stop['lng'] as num?)?.toDouble();
+          if (lat != null && lng != null) {
+            debugPrint('[NAVIGATION] return dest: ${stop['name']} lat=$lat lng=$lng');
+            return OpsNavDestination(
+              type: OpsNavDestType.returnDest,
+              name: (stop['name'] as String?) ?? 'Retorno',
+              address: stop['address'] as String?,
+              lat: lat,
+              lng: lng,
+            );
+          }
+        }
+        break;
+      default:
+        break;
+    }
+    return null;
   }
 
   int get boardedCount => _patients.where(_isBoarded).length;

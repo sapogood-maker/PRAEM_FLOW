@@ -5,82 +5,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:dio/dio.dart';
 import '../auth/auth_service.dart';
 import '../config/app_config.dart';
 import '../driver/driver_state.dart';
 import '../core/constants.dart';
+import '../navigation/navigation_service.dart';
 import '../shared/widgets/operational_button.dart';
 import '../shared/widgets/status_badge.dart';
-
-// ─── Navigation helpers ───────────────────────────────────────────────────────
-
-Future<void> _openInGoogleMaps(double lat, double lng, String label) async {
-  final uri = Uri.parse(
-    'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
-  );
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-}
-
-Future<void> _openInWaze(double lat, double lng) async {
-  final uri = Uri.parse('https://waze.com/ul?ll=$lat,$lng&navigate=yes');
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } else {
-    // Fall back to Google Maps if Waze is not installed
-    await _openInGoogleMaps(lat, lng, '');
-  }
-}
-
-void _showNavigationOptions(BuildContext context, double lat, double lng, String name) {
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: AppColors.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
-    builder: (_) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '🗺️ Navegar para $name',
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: const Text('🗺️', style: TextStyle(fontSize: 24)),
-              title: const Text('Google Maps',
-                  style: TextStyle(color: AppColors.textPrimary)),
-              onTap: () {
-                Navigator.pop(context);
-                _openInGoogleMaps(lat, lng, name);
-              },
-            ),
-            ListTile(
-              leading: const Text('🚗', style: TextStyle(fontSize: 24)),
-              title: const Text('Waze',
-                  style: TextStyle(color: AppColors.textPrimary)),
-              onTap: () {
-                Navigator.pop(context);
-                _openInWaze(lat, lng);
-              },
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
 
 // ─── Stop type / status helpers ───────────────────────────────────────────────
 
@@ -435,8 +367,17 @@ class _StopCard extends StatelessWidget {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: () =>
-                            _showNavigationOptions(context, lat, lng, name),
+                        onPressed: () => NavigationService.showNavigationPicker(
+                          context,
+                          OpsNavDestination(
+                            type: ['RETURN', 'DROPOFF'].contains(type.toUpperCase())
+                                ? OpsNavDestType.returnDest
+                                : OpsNavDestType.hospital,
+                            name: name,
+                            lat: lat,
+                            lng: lng,
+                          ),
+                        ),
                         icon: const Text('🗺️',
                             style: TextStyle(fontSize: 14)),
                         label: const Text('Navegar',
@@ -600,11 +541,16 @@ class _TripPatientCard extends StatelessWidget {
           if (lat != null && lng != null) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: () => _showNavigationOptions(
-                  context,
-                  lat,
-                  lng,
-                  patientData['name'] as String? ?? 'Paciente'),
+              onPressed: () => NavigationService.showNavigationPicker(
+                context,
+                OpsNavDestination(
+                  type: OpsNavDestType.patientPickup,
+                  name: patientData['name'] as String? ?? 'Paciente',
+                  address: patientData['address'] as String?,
+                  lat: lat,
+                  lng: lng,
+                ),
+              ),
               icon: const Text('🗺️', style: TextStyle(fontSize: 14)),
               label: const Text('Ir até endereço',
                   style: TextStyle(fontSize: 13)),

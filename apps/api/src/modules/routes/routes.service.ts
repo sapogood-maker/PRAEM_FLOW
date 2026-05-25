@@ -76,7 +76,7 @@ export class RoutesService {
       include: {
         driver: { include: { user: true } },
         vehicle: true,
-        trips: { include: { patient: true } },
+        trips: { include: { patient: true, stops: { orderBy: { sequence: 'asc' } } } },
       },
     });
     if (!route) throw new NotFoundException('Route not found');
@@ -86,6 +86,8 @@ export class RoutesService {
         `[STALE_ROUTE] routeId=${route.id} tenantId=${tenantId} status=${route.status} elapsedHours=${stalePolicy.elapsedHours} level=${stalePolicy.level} requiresRecovery=${stalePolicy.requiresRecovery}`,
       );
     }
+    const navigationDestination = this.deriveNavigationDestination(route, route.trips ?? []);
+    this.logger.debug(`[NAVIGATION] routeId=${route.id} dest=${navigationDestination ? `${navigationDestination.type}@${navigationDestination.lat},${navigationDestination.lng}` : 'none'}`);
     return {
       ...route,
       operationalStateDerived: this.deriveRouteOperationalStateFromTrips(route.trips ?? [], route.status),
@@ -94,6 +96,7 @@ export class RoutesService {
       staleLevel: stalePolicy.level,
       staleHours: stalePolicy.elapsedHours,
       requiresRecovery: stalePolicy.requiresRecovery,
+      navigationDestination,
     };
   }
 
@@ -238,6 +241,43 @@ export class RoutesService {
     if (hasBoarded) return 'BOARDED';
     if (statuses.every((s) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(s))) return 'COMPLETED';
     return routeStatus;
+  }
+
+  private deriveNavigationDestination(
+    route: { status: string; origin?: string | null; destination?: string | null },
+    trips: Array<{
+      status: string;
+      boardedAt?: Date | null;
+      patient?: { name: string; address: string; lat?: number | null; lng?: number | null } | null;
+      stops?: Array<{ type: string; status: string; name: string; lat?: number | null; lng?: number | null; sequence: number }>;
+    }>,
+  ): { type: 'PATIENT_PICKUP' | 'HOSPITAL' | 'RETURN'; name: string; address?: string | null; lat: number; lng: number } | null {
+    const operationalState = this.deriveRouteOperationalStateFromTrips(trips, route.status);
+    const preBoarding =
+      ['DISPATCHED', 'PLANNED', 'SCHEDULED', 'PENDING', 'PREPARING'].includes(route.status.toUpperCase()) ||
+      ['DISPATCHED', 'DRIVER_ACCEPTED', 'WAITING_PATIENT', 'BOARDING'].some((s) => operationalState.toUpperCase().includes(s));
+
+    if (preBoarding) {
+      const unboarded = trips.filter((t) => {
+        const s = t.status.toUpperCase();
+        return !['COMPLETED', 'CANCELLED', 'NO_SHOW', 'ARRIVED', 'IN_TRANSIT', 'IN_PROGRESS'].includes(s);
+      });
+      for (const trip of unboarded) {
+        if (trip.patient?.lat && trip.patient?.lng) {
+          return { type: 'PATIENT_PICKUP', name: trip.patient.name, address: trip.patient.address, lat: trip.patient.lat, lng: trip.patient.lng };
+        }
+      }
+    }
+
+    const allStops = trips.flatMap((t) => t.stops ?? []);
+    allStops.sort((a, b) => a.sequence - b.sequence);
+    const nextStop = allStops.find((s) => !['COMPLETED', 'SKIPPED'].includes(s.status.toUpperCase()) && s.lat && s.lng);
+    if (nextStop?.lat && nextStop?.lng) {
+      const isReturn = ['RETURN', 'DROPOFF'].includes(nextStop.type.toUpperCase());
+      return { type: isReturn ? 'RETURN' : 'HOSPITAL', name: nextStop.name, lat: nextStop.lat, lng: nextStop.lng };
+    }
+
+    return null;
   }
 
   private deriveStalePolicy(

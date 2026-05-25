@@ -96,6 +96,33 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     return isStaleRoute && hasUnresolvedRoute && !acknowledged;
   }
 
+  /// True when the current state is a primary boarding state (direct scanner access).
+  bool get isQrScanningValid => _state == OperationalState.waitingPatient ||
+      _state == OperationalState.boarding ||
+      _state == OperationalState.boarded;
+
+  /// PT-BR contextual warning when QR scanning is allowed but state is non-primary.
+  /// Null when scanning is fully valid (no warning needed).
+  String? get qrScanningWarning {
+    if (!hasActiveRoute) return null;
+    if (isQrScanningValid) return null;
+    switch (_state) {
+      case OperationalState.dispatched:
+      case OperationalState.driverAccepted:
+        return 'Rota ainda não iniciada. Confirme o aceite antes de escanear.';
+      case OperationalState.inTransit:
+        return 'Em deslocamento — escaneie para embarque em parada intermediária.';
+      case OperationalState.arrived:
+        return 'Chegada registrada. Escaneie para confirmar desembarque se necessário.';
+      case OperationalState.noShow:
+        return 'Passageiro marcado como não comparecido. Escaneie para reclassificar.';
+      case OperationalState.completed:
+        return 'Operação concluída. Scanner disponível apenas para revisão.';
+      default:
+        return 'Não há embarque pendente nesta operação.';
+    }
+  }
+
   int get boardedCount => _patients.where(_isBoarded).length;
   int get pendingBoardingCount => _patients.where((p) {
         final s = (p['status'] as String? ?? '').toUpperCase();

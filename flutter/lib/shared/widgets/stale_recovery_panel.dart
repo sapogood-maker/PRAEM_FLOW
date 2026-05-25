@@ -73,6 +73,17 @@ class StaleRecoveryPanel extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
+              const SizedBox(height: 16),
+              const Divider(color: AppColors.textSecondary),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
+                icon: const Icon(Icons.qr_code_scanner, color: AppColors.info),
+                label: const Text(
+                  'SCAN QR — Embarque de emergência',
+                  style: TextStyle(color: AppColors.info, fontSize: 13),
+                ),
+              ),
             ],
           ),
         ),

@@ -29,6 +29,26 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _openQrScanner(BuildContext context, OperationController ctrl) {
+    final warning = ctrl.qrScanningWarning;
+    if (warning != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(warning),
+          backgroundColor: AppColors.warning,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'ABRIR SCANNER',
+            textColor: AppColors.textPrimary,
+            onPressed: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
+          ),
+        ),
+      );
+    } else {
+      Navigator.pushNamed(context, AppRoutes.qrScanner);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
@@ -123,9 +143,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
       floatingActionButton: ctrl.hasActiveRoute
           ? FloatingActionButton.extended(
-              backgroundColor: AppColors.info,
-              foregroundColor: AppColors.textPrimary,
-              onPressed: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
+              backgroundColor: ctrl.isQrScanningValid ? AppColors.info : AppColors.surface,
+              foregroundColor: ctrl.isQrScanningValid
+                  ? AppColors.textPrimary
+                  : AppColors.textSecondary,
+              onPressed: () => _openQrScanner(context, ctrl),
               icon: const Icon(Icons.qr_code_scanner),
               label: const Text('SCAN QR'),
             )

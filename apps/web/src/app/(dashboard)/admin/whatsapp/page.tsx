@@ -1,15 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Label } from '@/components/ui/label';
-import { AlertCircle, MessageCircle, RefreshCw, Send } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card } from '@/components/ui/card';
 
 interface NotificationTemplate {
   id: string;
@@ -68,6 +60,7 @@ export default function WhatsappAdminPage() {
   const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
   const [logs, setLogs] = useState<NotificationLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<'templates' | 'logs'>('templates');
   const [editingTemplate, setEditingTemplate] = useState<NotificationTemplate | null>(null);
   const [testPhone, setTestPhone] = useState('');
   const [testLoading, setTestLoading] = useState(false);
@@ -165,13 +158,13 @@ export default function WhatsappAdminPage() {
     switch (status) {
       case 'SENT':
       case 'DELIVERED':
-        return 'bg-green-100 text-green-800';
+        return 'bg-emerald-900/30 text-emerald-300';
       case 'FAILED':
-        return 'bg-red-100 text-red-800';
+        return 'bg-red-900/30 text-red-300';
       case 'PENDING':
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-yellow-900/30 text-yellow-300';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-slate-700 text-slate-300';
     }
   };
 
@@ -188,223 +181,268 @@ export default function WhatsappAdminPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className='space-y-6'>
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Gerenciar WhatsApp</h1>
-        <p className="text-gray-600 mt-2">Configure mensagens e monitore comunicações</p>
+        <h1 className='text-3xl font-bold tracking-tight'>Gerenciar WhatsApp</h1>
+        <p className='text-slate-400 mt-2'>Configure mensagens e monitore comunicações</p>
       </div>
 
-      <Tabs defaultValue="templates" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="templates" className="flex items-center gap-2">
-            <MessageCircle className="w-4 h-4" />
-            Templates
-          </TabsTrigger>
-          <TabsTrigger value="logs" className="flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" />
-            Histórico
-          </TabsTrigger>
-        </TabsList>
+      {testMessage && (
+        <div
+          className={`rounded-lg border p-4 ${
+            testMessage.includes('Erro')
+              ? 'border-red-900/50 bg-red-900/10 text-red-300'
+              : 'border-emerald-900/50 bg-emerald-900/10 text-emerald-300'
+          }`}
+        >
+          {testMessage}
+        </div>
+      )}
 
-        <TabsContent value="templates" className="space-y-4">
-          {testMessage && (
-            <Alert className={testMessage.includes('Erro') ? 'border-red-500' : 'border-green-500'}>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{testMessage}</AlertDescription>
-            </Alert>
-          )}
+      {/* Tabs */}
+      <div className='border-b border-slate-700'>
+        <div className='flex gap-6'>
+          <button
+            onClick={() => setTab('templates')}
+            className={`px-1 py-3 text-sm font-medium transition-colors ${
+              tab === 'templates'
+                ? 'border-b-2 border-blue-500 text-blue-300'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            📧 Templates
+          </button>
+          <button
+            onClick={() => setTab('logs')}
+            className={`px-1 py-3 text-sm font-medium transition-colors ${
+              tab === 'logs'
+                ? 'border-b-2 border-blue-500 text-blue-300'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            📋 Histórico
+          </button>
+        </div>
+      </div>
 
-          <div className="grid gap-4">
+      {/* Templates Tab */}
+      {tab === 'templates' && (
+        <div className='space-y-4'>
+          <div className='grid gap-4'>
             {templates.map((template) => (
-              <Card key={template.id} className="overflow-hidden">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-lg">{template.title}</CardTitle>
-                      <CardDescription className="font-mono text-xs mt-1">{template.key}</CardDescription>
-                    </div>
-                    <Badge variant={template.active ? 'default' : 'secondary'}>
-                      {template.active ? 'Ativo' : 'Inativo'}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
+              <Card key={template.id}>
+                <div className='space-y-4'>
                   {editingTemplate?.id === template.id ? (
-                    <div className="space-y-3">
-                      <div>
-                        <Label htmlFor={`title-${template.id}`}>Título</Label>
-                        <Input
-                          id={`title-${template.id}`}
-                          value={editingTemplate.title}
-                          onChange={(e) =>
-                            setEditingTemplate({
-                              ...editingTemplate,
-                              title: e.target.value,
-                            })
-                          }
-                          disabled={loading}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor={`message-${template.id}`}>Mensagem</Label>
-                        <Textarea
-                          id={`message-${template.id}`}
-                          value={editingTemplate.message}
-                          onChange={(e) =>
-                            setEditingTemplate({
-                              ...editingTemplate,
-                              message: e.target.value,
-                            })
-                          }
-                          disabled={loading}
-                          rows={4}
-                        />
-                        {SAMPLE_VARIABLES[template.key] && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            Variáveis disponíveis: {Object.keys(SAMPLE_VARIABLES[template.key]).join(', ')}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => handleUpdateTemplate(editingTemplate)}
-                          disabled={loading}
+                    <>
+                      <div className='flex items-center justify-between border-b border-slate-700 pb-3'>
+                        <h3 className='font-semibold'>Editando: {template.title}</h3>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs ${
+                            template.active
+                              ? 'bg-emerald-900/30 text-emerald-300'
+                              : 'bg-slate-700 text-slate-400'
+                          }`}
                         >
-                          Salvar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setEditingTemplate(null)}
-                          disabled={loading}
-                        >
-                          Cancelar
-                        </Button>
+                          {template.active ? 'Ativo' : 'Inativo'}
+                        </span>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="bg-gray-50 p-3 rounded text-sm whitespace-pre-wrap">
-                        {template.message}
-                      </div>
-                      {SAMPLE_VARIABLES[template.key] && (
-                        <div className="bg-blue-50 p-3 rounded text-sm">
-                          <p className="font-semibold mb-2">Amostra com variáveis:</p>
-                          <p className="whitespace-pre-wrap">
-                            {template.message.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
-                              const sampleVars = SAMPLE_VARIABLES[template.key];
-                              return (sampleVars as Record<string, any>)[varName] || match;
-                            })}
-                          </p>
+                      <div className='space-y-3'>
+                        <div>
+                          <label className='block text-xs font-medium text-slate-400 mb-1'>
+                            Título
+                          </label>
+                          <input
+                            type='text'
+                            value={editingTemplate.title}
+                            onChange={(e) =>
+                              setEditingTemplate({
+                                ...editingTemplate,
+                                title: e.target.value,
+                              })
+                            }
+                            disabled={loading}
+                            className='w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none'
+                          />
                         </div>
-                      )}
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setEditingTemplate(template)}
-                          disabled={loading}
-                        >
-                          Editar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleTestSend(template)}
-                          disabled={testLoading || !testPhone}
-                        >
-                          <Send className="w-3 h-3 mr-1" />
-                          Teste
-                        </Button>
+                        <div>
+                          <label className='block text-xs font-medium text-slate-400 mb-1'>
+                            Mensagem
+                          </label>
+                          <textarea
+                            value={editingTemplate.message}
+                            onChange={(e) =>
+                              setEditingTemplate({
+                                ...editingTemplate,
+                                message: e.target.value,
+                              })
+                            }
+                            disabled={loading}
+                            rows={4}
+                            className='w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none'
+                          />
+                          {SAMPLE_VARIABLES[template.key] && (
+                            <p className='text-xs text-slate-500 mt-1'>
+                              Variáveis: {Object.keys(SAMPLE_VARIABLES[template.key]).join(', ')}
+                            </p>
+                          )}
+                        </div>
+                        <div className='flex gap-2'>
+                          <button
+                            onClick={() => handleUpdateTemplate(editingTemplate)}
+                            disabled={loading}
+                            className='rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50'
+                          >
+                            Salvar
+                          </button>
+                          <button
+                            onClick={() => setEditingTemplate(null)}
+                            disabled={loading}
+                            className='rounded border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50'
+                          >
+                            Cancelar
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className='flex items-start justify-between border-b border-slate-700 pb-3'>
+                        <div>
+                          <h3 className='font-semibold'>{template.title}</h3>
+                          <code className='text-xs text-slate-500 font-mono'>{template.key}</code>
+                        </div>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs whitespace-nowrap ${
+                            template.active
+                              ? 'bg-emerald-900/30 text-emerald-300'
+                              : 'bg-slate-700 text-slate-400'
+                          }`}
+                        >
+                          {template.active ? 'Ativo' : 'Inativo'}
+                        </span>
+                      </div>
+                      <div className='space-y-3'>
+                        <div className='rounded bg-slate-800/50 p-3 text-sm text-slate-300 whitespace-pre-wrap break-words'>
+                          {template.message}
+                        </div>
+                        {SAMPLE_VARIABLES[template.key] && (
+                          <div className='rounded bg-blue-900/20 p-3 text-sm'>
+                            <p className='font-semibold mb-2 text-blue-300'>Amostra com variáveis:</p>
+                            <p className='text-blue-200 whitespace-pre-wrap break-words'>
+                              {template.message.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+                                const sampleVars = SAMPLE_VARIABLES[template.key];
+                                return (sampleVars as Record<string, any>)[varName] || match;
+                              })}
+                            </p>
+                          </div>
+                        )}
+                        <div className='flex gap-2'>
+                          <button
+                            onClick={() => setEditingTemplate(template)}
+                            disabled={loading}
+                            className='rounded border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50'
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => handleTestSend(template)}
+                            disabled={testLoading || !testPhone}
+                            className='rounded border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50'
+                          >
+                            📤 Teste
+                          </button>
+                        </div>
+                      </div>
+                    </>
                   )}
-                </CardContent>
+                </div>
               </Card>
             ))}
           </div>
 
           {templates.length === 0 && !loading && (
             <Card>
-              <CardContent className="pt-6">
-                <p className="text-center text-gray-500">Nenhum template encontrado</p>
-              </CardContent>
+              <div className='text-center text-slate-400'>Nenhum template encontrado</div>
             </Card>
           )}
 
-          <Card className="bg-blue-50 border-blue-200">
-            <CardHeader>
-              <CardTitle className="text-base">Enviar Teste</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+          <Card>
+            <div className='space-y-3'>
+              <h3 className='font-semibold border-b border-slate-700 pb-3'>Enviar Teste</h3>
               <div>
-                <Label htmlFor="test-phone">Número de telefone (WhatsApp)</Label>
-                <Input
-                  id="test-phone"
-                  placeholder="55 45 99999-9999 ou 5545999999999"
+                <label className='block text-xs font-medium text-slate-400 mb-1'>
+                  Número de telefone (WhatsApp)
+                </label>
+                <input
+                  type='text'
+                  placeholder='55 45 99999-9999 ou 5545999999999'
                   value={testPhone}
                   onChange={(e) => setTestPhone(e.target.value)}
+                  className='w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none'
                 />
               </div>
-              <p className="text-xs text-gray-600">
-                Digite um número de telefone e clique em "Teste" em qualquer template acima para enviar uma mensagem
-                de teste.
+              <p className='text-xs text-slate-500'>
+                Digite um número e clique em "Teste" em qualquer template acima para enviar.
               </p>
-            </CardContent>
+            </div>
           </Card>
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="logs" className="space-y-4">
-          <div className="grid gap-4">
-            {logs.map((log) => (
-              <Card key={log.id}>
-                <CardContent className="pt-6">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs text-gray-600">Telefone</p>
-                      <p className="font-mono">{log.phone}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600">Status</p>
-                      <Badge className={getStatusColor(log.status)}>
-                        {getStatusLabel(log.status)}
-                      </Badge>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600">Data</p>
-                      <p className="text-sm">{new Date(log.createdAt).toLocaleString('pt-BR')}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600">Tentativas</p>
-                      <p className="text-sm">{log.retryCount}</p>
-                    </div>
+      {/* Logs Tab */}
+      {tab === 'logs' && (
+        <div className='grid gap-4'>
+          {logs.map((log) => (
+            <Card key={log.id}>
+              <div className='space-y-3'>
+                <div className='grid grid-cols-2 gap-4 border-b border-slate-700 pb-3'>
+                  <div>
+                    <p className='text-xs text-slate-500'>Telefone</p>
+                    <p className='font-mono text-sm'>{log.phone}</p>
                   </div>
-                  <div className="mt-4">
-                    <p className="text-xs text-gray-600">Mensagem</p>
-                    <p className="text-sm mt-1 bg-gray-50 p-2 rounded whitespace-pre-wrap break-words">
-                      {log.message}
+                  <div>
+                    <p className='text-xs text-slate-500'>Status</p>
+                    <span
+                      className={`inline-block rounded-full px-3 py-1 text-xs ${getStatusColor(
+                        log.status
+                      )}`}
+                    >
+                      {getStatusLabel(log.status)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className='text-xs text-slate-500'>Data</p>
+                    <p className='text-sm'>
+                      {new Date(log.createdAt).toLocaleString('pt-BR')}
                     </p>
                   </div>
-                  {log.failedReason && (
-                    <div className="mt-3 p-2 bg-red-50 rounded border border-red-200">
-                      <p className="text-xs text-red-800">{log.failedReason}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                  <div>
+                    <p className='text-xs text-slate-500'>Tentativas</p>
+                    <p className='text-sm'>{log.retryCount}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className='text-xs text-slate-500 mb-1'>Mensagem</p>
+                  <p className='text-sm bg-slate-800/50 p-2 rounded whitespace-pre-wrap break-words text-slate-300'>
+                    {log.message}
+                  </p>
+                </div>
+                {log.failedReason && (
+                  <div className='p-2 rounded bg-red-900/20 border border-red-900/50'>
+                    <p className='text-xs text-red-300'>{log.failedReason}</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))}
 
           {logs.length === 0 && !loading && (
             <Card>
-              <CardContent className="pt-6">
-                <p className="text-center text-gray-500">Nenhum log encontrado</p>
-              </CardContent>
+              <div className='text-center text-slate-400'>Nenhum log encontrado</div>
             </Card>
           )}
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
     </div>
   );
 }

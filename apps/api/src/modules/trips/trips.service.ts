@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class TripsService {
@@ -8,6 +9,7 @@ export class TripsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
+    @Optional() private readonly whatsapp?: WhatsappService,
   ) {}
 
   async findAll(tenantId: string, query: { routeId?: string; status?: string; page?: number; limit?: number }) {
@@ -57,6 +59,17 @@ export class TripsService {
       actorUserId: context?.actorUserId ?? null,
       source: 'TRIP_BOARDED',
     });
+
+    // [WHATSAPP] Confirm boarding to patient
+    if (this.whatsapp && result.trip) {
+      const trip = result.trip as { patientId?: string; routeId?: string };
+      if (trip.patientId) {
+        this.whatsapp.notifyBoardingConfirmed(tenantId, trip.patientId, id).catch((err) =>
+          this.logger.warn(`[WHATSAPP] notifyBoardingConfirmed failed tripId=${id}: ${err}`),
+        );
+      }
+    }
+
     return result.trip;
   }
 
@@ -87,6 +100,17 @@ export class TripsService {
       actorUserId: context?.actorUserId ?? null,
       source: 'TRIP_COMPLETED',
     });
+
+    // [WHATSAPP] Notify patient of trip completion
+    if (this.whatsapp && result.trip) {
+      const trip = result.trip as { patientId?: string };
+      if (trip.patientId) {
+        this.whatsapp.notifyTripCompleted(tenantId, trip.patientId, id).catch((err) =>
+          this.logger.warn(`[WHATSAPP] notifyTripCompleted failed tripId=${id}: ${err}`),
+        );
+      }
+    }
+
     return result.trip;
   }
 
@@ -98,6 +122,14 @@ export class TripsService {
       actorUserId: context?.actorUserId ?? null,
       source: 'TRIP_NO_SHOW',
     });
+
+    // [WHATSAPP] Notify patient of no-show
+    if (this.whatsapp && trip.patientId) {
+      this.whatsapp.notifyNoShow(tenantId, trip.patientId, id).catch((err) =>
+        this.logger.warn(`[WHATSAPP] notifyNoShow failed tripId=${id}: ${err}`),
+      );
+    }
+
     return result.trip;
   }
 

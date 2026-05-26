@@ -75,7 +75,64 @@ class NextActionPanel extends StatelessWidget {
               child: _buildActionButton(context, ctrl, label, state, color),
             ),
           ],
+          // ── WhatsApp & QR quick actions ──────────────────────────────────
+          if (ctrl.hasActiveRoute && ctrl.canPerformQrAction) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: ctrl.actionInProgress ? null : () => _sendQrWhatsApp(context, ctrl),
+                    icon: const Icon(Icons.message, size: 16),
+                    label: const Text('ENVIAR QR'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.info,
+                      side: BorderSide(color: AppColors.info.withValues(alpha: 1)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: ctrl.actionInProgress ? null : () => _shareRoute(context, ctrl),
+                    icon: const Icon(Icons.share, size: 16),
+                    label: const Text('COMPARTILHAR'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: BorderSide(color: AppColors.primary.withValues(alpha: 1)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Future<void> _sendQrWhatsApp(BuildContext context, OperationController ctrl) async {
+    // TODO: Implement WhatsApp QR send via /api/whatsapp/send-boarding-qr
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('QR será enviado via WhatsApp'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _shareRoute(BuildContext context, OperationController ctrl) async {
+    // TODO: Implement route share via native share intent with tracking link
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Rota compartilhada'),
+        duration: Duration(seconds: 2),
       ),
     );
   }

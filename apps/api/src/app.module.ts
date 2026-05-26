@@ -30,6 +30,7 @@ import { RealtimeGateway } from './gateways/realtime.gateway';
 import { DashboardService } from './modules/dashboard/dashboard.service';
 import { TripTokensModule } from './modules/trip-tokens/trip-tokens.module';
 import { TripStopsModule } from './modules/trip-stops/trip-stops.module';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { TripStopsModule } from './modules/trip-stops/trip-stops.module';
     HealthModule,
     TripTokensModule,
     TripStopsModule,
+    WhatsappModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

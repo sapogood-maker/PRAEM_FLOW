@@ -33,6 +33,8 @@ model Tenant {
   healthcareLocations  HealthcareLocation[]
   devices              Device[]
   geoFenceEvents       GeoFenceEvent[]
+  notificationTemplates NotificationTemplate[]
+  notificationLogs      NotificationLog[]
 }
 
 model User {
@@ -101,6 +103,7 @@ model Patient {
   trips             Trip[]
   qrAccessLogs      PatientQrAccessLog[]
   tripTokens        TripToken[]
+  notificationLogs  NotificationLog[]
 
   @@unique([tenantId, cpf])
   @@index([tenantId])
@@ -342,6 +345,7 @@ model Route {
   checkpoints             Checkpoint[]
   timelines               OperationalTimeline[]
   trackingPoints          TrackingPoint[]
+  notificationLogs        NotificationLog[]
 
   @@index([tenantId])
   @@index([scheduledAt])
@@ -410,6 +414,7 @@ model Trip {
   tokens      TripToken[]
   stops       TripStop[]
   timelines   OperationalTimeline[]
+  notificationLogs NotificationLog[]
 
   @@index([tenantId])
 }
@@ -887,3 +892,70 @@ enum TripStopStatus {
   COMPLETED
   SKIPPED
 }
+
+// ---------------------------------------------------------------------------
+// Notification — WhatsApp (Z-API) / provider-agnostic messaging
+// ---------------------------------------------------------------------------
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  DUPLICATE
+  SKIPPED
+}
+
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  tenantId  String
+  key       String
+  title     String
+  message   String   @db.Text
+  variables Json?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  logs      NotificationLog[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@index([active])
+}
+
+model NotificationLog {
+  id                String               @id @default(uuid())
+  tenantId          String
+  templateId        String?
+  patientId         String?
+  tripId            String?
+  routeId           String?
+  phone             String
+  message           String               @db.Text
+  status            NotificationStatus   @default(PENDING)
+  provider          String               @default("ZAPI")
+  providerMessageId String?
+  retryCount        Int                  @default(0)
+  maxRetries        Int                  @default(3)
+  queuedAt          DateTime             @default(now())
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedReason      String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  tenant            Tenant               @relation(fields: [tenantId], references: [id])
+  template          NotificationTemplate? @relation(fields: [templateId], references: [id])
+  patient           Patient?             @relation(fields: [patientId], references: [id])
+  trip              Trip?                @relation(fields: [tripId], references: [id])
+  route             Route?               @relation(fields: [routeId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([phone])
+  @@index([patientId])
+  @@index([tripId])
+  @@index([routeId])
+  @@index([createdAt])
+}
+

@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class RoutesService {
@@ -11,6 +12,7 @@ export class RoutesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
+    @Optional() private readonly whatsapp?: WhatsappService,
   ) {}
 
   async findAll(tenantId: string, query: { status?: string | string[]; date?: string; startDate?: string; endDate?: string; driverId?: string; vehicleId?: string; page?: number; limit?: number }) {
@@ -186,7 +188,7 @@ export class RoutesService {
     context?: { driverId?: string; actorUserId?: string },
   ) {
     this.logger.log(`[ROUTE] startRoute tenantId=${tenantId} routeId=${id} tripId=${input?.tripId ?? '-'} source=${input?.source ?? 'routes.start'}`);
-    return this.flow.startRoute(
+    const result = await this.flow.startRoute(
       tenantId,
       id,
       {
@@ -196,6 +198,21 @@ export class RoutesService {
       },
       input?.tripId,
     );
+
+    // [WHATSAPP] Notify all patients in this route that the route has started
+    if (this.whatsapp) {
+      const trips = await this.prisma.trip.findMany({
+        where: { routeId: id, tenantId, status: { notIn: ['CANCELLED', 'NO_SHOW'] as any } },
+        select: { id: true, patientId: true },
+      });
+      for (const trip of trips) {
+        this.whatsapp.notifyRouteStarted(tenantId, trip.patientId, trip.id, id).catch((err) =>
+          this.logger.warn(`[WHATSAPP] notifyRouteStarted failed patientId=${trip.patientId}: ${err}`),
+        );
+      }
+    }
+
+    return result;
   }
 
   /** Route fully complete — status ACTIVE → COMPLETED */

@@ -124,6 +124,14 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// True when QR action buttons should be visible (boarding, boarded states with active route)
+  bool get canPerformQrAction =>
+      hasActiveRoute && (
+        _state == OperationalState.boarding ||
+        _state == OperationalState.boarded ||
+        _state == OperationalState.waitingPatient
+      );
+
   /// Navigation destination based on current operational state.
   /// - Pre-boarding: first pending patient with coords → PATIENT_PICKUP
   /// - Boarding/boarded/in-transit: next TripStop with coords → HOSPITAL/RETURN

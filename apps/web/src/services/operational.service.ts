@@ -63,3 +63,22 @@ export const healthcareLocationService = {
   bySpecialty: (specialty: string) =>
     api.get(`/healthcare-locations/by-specialty/${encodeURIComponent(specialty)}`).then((r) => r.data),
 };
+
+export const schedulingImportService = {
+  upload: (file: File, options?: {
+    mode?: 'PREVIEW' | 'APPLY';
+    autoAssignVehicles?: boolean;
+    defaultDispatchType?: 'SCHEDULED' | 'IMMEDIATE';
+    defaultOrigin?: string;
+  }) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (options?.mode) form.append('mode', options.mode);
+    if (options?.autoAssignVehicles != null) form.append('autoAssignVehicles', String(options.autoAssignVehicles));
+    if (options?.defaultDispatchType) form.append('defaultDispatchType', options.defaultDispatchType);
+    if (options?.defaultOrigin) form.append('defaultOrigin', options.defaultOrigin);
+    return api.post('/scheduling-import/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data);
+  },
+};

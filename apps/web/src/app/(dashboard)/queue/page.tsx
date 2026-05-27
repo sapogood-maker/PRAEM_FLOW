@@ -173,7 +173,7 @@ export default function QueuePage() {
             </button>
           )}
           <button type='button' onClick={() => setShowModal(true)} className='rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-600 transition-colors'>
-            + Adicionar à Fila
+            + Adicionar à Fila (Legado)
           </button>
         </div>
       </div>
@@ -421,4 +421,3 @@ export default function QueuePage() {
     </section>
   );
 }
-

@@ -150,7 +150,7 @@ export default function PatientsPage() {
           onClick={() => setShowModal(true)}
           className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold hover:bg-cyan-600 transition-colors'
         >
-          + Novo Paciente
+          + Novo Paciente (Legado)
         </button>
       </div>
 
@@ -342,4 +342,3 @@ export default function PatientsPage() {
     </section>
   );
 }
-

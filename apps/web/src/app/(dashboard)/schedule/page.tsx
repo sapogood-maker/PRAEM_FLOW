@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
+import { schedulingImportService } from '@/services/operational.service';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
@@ -44,10 +45,17 @@ function toIsoDate(date: Date) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function SchedulePage() {
+  const qc = useQueryClient();
   const today = new Date();
   const [startDate, setStartDate] = useState(toIsoDate(today));
   const [endDate, setEndDate] = useState(toIsoDate(addDays(today, 6)));
   const [statusFilter, setStatusFilter] = useState('');
+  const [importMode, setImportMode] = useState<'PREVIEW' | 'APPLY'>('PREVIEW');
+  const [autoAssignVehicles, setAutoAssignVehicles] = useState(true);
+  const [defaultOrigin, setDefaultOrigin] = useState('Central PRAEM OPS');
+  const [defaultDispatchType, setDefaultDispatchType] = useState<'SCHEDULED' | 'IMMEDIATE'>('SCHEDULED');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [importResult, setImportResult] = useState<any>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['schedule-routes', startDate, endDate, statusFilter],
@@ -96,6 +104,27 @@ export default function SchedulePage() {
     setEndDate(toIsoDate(addDays(today, days - 1)));
   }
 
+  const uploadImport = useMutation({
+    mutationFn: () => {
+      if (!selectedFile) throw new Error('Selecione um arquivo CSV/XLSX.');
+      return schedulingImportService.upload(selectedFile, {
+        mode: importMode,
+        autoAssignVehicles,
+        defaultDispatchType,
+        defaultOrigin,
+      });
+    },
+    onSuccess: (result) => {
+      setImportResult(result);
+      if (result?.mode === 'APPLY') {
+        qc.invalidateQueries({ queryKey: ['schedule-routes'] });
+        qc.invalidateQueries({ queryKey: ['queue'] });
+        qc.invalidateQueries({ queryKey: ['routes'] });
+        qc.invalidateQueries({ queryKey: ['patients'] });
+      }
+    },
+  });
+
   return (
     <section className='space-y-6'>
       {/* Header */}
@@ -116,6 +145,100 @@ export default function SchedulePage() {
             onChange={(e) => setStartDate(e.target.value)}
             className='rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm focus:border-cyan-700 focus:outline-none'
           />
+        </div>
+
+        <div className='space-y-3 rounded-xl border border-indigo-900/50 bg-indigo-950/20 p-4'>
+          <div className='flex items-center justify-between gap-3'>
+            <div>
+              <h3 className='text-base font-semibold text-indigo-200'>Importação SUS (CSV/XLSX)</h3>
+              <p className='text-xs text-slate-400'>Novo fluxo principal: ingestão automática de pacientes, filas, rotas e viagens.</p>
+            </div>
+            <span className='rounded bg-indigo-900/60 px-2 py-1 text-xs text-indigo-300'>Fluxo legado manual mantido</span>
+          </div>
+          <div className='grid gap-3 md:grid-cols-2'>
+            <label className='space-y-1'>
+              <span className='text-xs uppercase tracking-wider text-slate-400'>Arquivo</span>
+              <input
+                type='file'
+                accept='.csv,.xlsx,.xls'
+                onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+                className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm'
+              />
+            </label>
+            <label className='space-y-1'>
+              <span className='text-xs uppercase tracking-wider text-slate-400'>Modo</span>
+              <select
+                value={importMode}
+                onChange={(e) => setImportMode(e.target.value as 'PREVIEW' | 'APPLY')}
+                className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm'
+              >
+                <option value='PREVIEW'>Pré-visualização (sem gravação)</option>
+                <option value='APPLY'>Aplicar importação</option>
+              </select>
+            </label>
+            <label className='space-y-1'>
+              <span className='text-xs uppercase tracking-wider text-slate-400'>Tipo de despacho padrão</span>
+              <select
+                value={defaultDispatchType}
+                onChange={(e) => setDefaultDispatchType(e.target.value as 'SCHEDULED' | 'IMMEDIATE')}
+                className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm'
+              >
+                <option value='SCHEDULED'>Agendado</option>
+                <option value='IMMEDIATE'>Imediato</option>
+              </select>
+            </label>
+            <label className='space-y-1'>
+              <span className='text-xs uppercase tracking-wider text-slate-400'>Origem padrão</span>
+              <input
+                type='text'
+                value={defaultOrigin}
+                onChange={(e) => setDefaultOrigin(e.target.value)}
+                className='w-full rounded-lg border border-border bg-slate-900 px-3 py-2 text-sm'
+              />
+            </label>
+            <label className='flex items-center gap-2 text-sm text-slate-300'>
+              <input
+                type='checkbox'
+                checked={autoAssignVehicles}
+                onChange={(e) => setAutoAssignVehicles(e.target.checked)}
+              />
+              Atribuir veículos automaticamente
+            </label>
+            <div className='flex items-end'>
+              <button
+                type='button'
+                onClick={() => uploadImport.mutate()}
+                disabled={!selectedFile || uploadImport.isPending}
+                className='w-full rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-600 disabled:opacity-50'
+              >
+                {uploadImport.isPending ? 'Processando…' : importMode === 'PREVIEW' ? 'Pré-visualizar arquivo' : 'Importar planilha'}
+              </button>
+            </div>
+          </div>
+          {uploadImport.isError && (
+            <p className='text-sm text-red-400'>{(uploadImport.error as any)?.response?.data?.message ?? (uploadImport.error as Error).message}</p>
+          )}
+          {importResult && (
+            <div className='space-y-2 rounded-lg border border-border bg-panel p-3 text-xs'>
+              <p className='text-slate-300'>
+                <strong>Resultado:</strong> {importResult.mode} · {importResult.file?.name} · {importResult.file?.rowCount ?? 0} linha(s)
+              </p>
+              {importResult.summary && (
+                <p className='text-slate-400'>
+                  Pacientes criados/reutilizados: {importResult.summary.createdPatients}/{importResult.summary.reusedPatients} ·
+                  Filas criadas/reutilizadas: {importResult.summary.createdQueues}/{importResult.summary.reusedQueues} ·
+                  Rotas: {importResult.summary.createdRoutes} · Viagens: {importResult.summary.createdTrips}
+                </p>
+              )}
+              {Array.isArray(importResult.warnings) && importResult.warnings.length > 0 && (
+                <ul className='space-y-1 text-amber-300'>
+                  {importResult.warnings.slice(0, 8).map((w: string) => (
+                    <li key={w}>⚠ {w}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
         <div className='space-y-1'>
           <label className='text-xs uppercase tracking-wider text-slate-400'>Até</label>

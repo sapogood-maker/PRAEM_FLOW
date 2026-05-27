@@ -261,28 +261,35 @@ async function main() {
     const qrTokenHash = crypto.createHash('sha256').update(qrToken).digest('hex');
     const qrExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-    const patient = await prisma.patient.upsert({
-      where: { cpf: p.cpf },
-      update: {},
-      create: {
-        tenantId: tenant.id,
-        name: p.name,
-        cpf: p.cpf,
-        birthDate: new Date('1970-01-01'),
-        address: 'Endereço Fictício — apenas para testes de homologação',
-        mobility: p.mobility,
-        clinicalRisk: p.risk,
-        recurrent: true,
-        notes: `[HOMOLOG] Paciente fictício. Especialidade: ${p.specialty}`,
-        qrToken,
-        qrTokenHash,
-        qrIssuedAt: now,
-        qrActive: true,
-        qrExpiresAt,
-        qrVersion: 1,
-        operationalId: `HML-${String(patientData.indexOf(p) + 1).padStart(4, '0')}`,
-      },
+    const existingPatient = await prisma.patient.findFirst({
+      where: { tenantId: tenant.id, cpf: p.cpf },
     });
+
+    const patient = existingPatient
+      ? await prisma.patient.update({
+          where: { id: existingPatient.id },
+          data: {},
+        })
+      : await prisma.patient.create({
+          data: {
+            tenantId: tenant.id,
+            name: p.name,
+            cpf: p.cpf,
+            birthDate: new Date('1970-01-01'),
+            address: 'Endereço Fictício — apenas para testes de homologação',
+            mobility: p.mobility,
+            clinicalRisk: p.risk,
+            recurrent: true,
+            notes: `[HOMOLOG] Paciente fictício. Especialidade: ${p.specialty}`,
+            qrToken,
+            qrTokenHash,
+            qrIssuedAt: now,
+            qrActive: true,
+            qrExpiresAt,
+            qrVersion: 1,
+            operationalId: `HML-${String(patientData.indexOf(p) + 1).padStart(4, '0')}`,
+          },
+        });
     savedPatients.push({ id: patient.id, name: patient.name, locationIdx: p.locationIdx, specialty: p.specialty });
     console.log(`✅ Paciente: ${p.name} (${p.specialty})`);
   }

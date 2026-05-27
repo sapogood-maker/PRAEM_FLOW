@@ -5,6 +5,7 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { useAuthStore } from '@/store/auth.store';
 import { useRealtimeStore } from '@/store/realtime.store';
 import { useAuth } from '@/hooks/useAuth';
+import { Wifi, WifiOff } from 'lucide-react';
 
 export function TopBar() {
   const tenantName = useAuthStore((s) => s.tenantName);
@@ -25,35 +26,38 @@ export function TopBar() {
   return (
     <>
       {isHomolog && (
-        <div className='flex items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-6 py-1.5'>
-          <span className='text-xs font-bold uppercase tracking-widest text-amber-400'>⚠ HOMOLOGAÇÃO OPERACIONAL — Dados fictícios · Ambiente de testes</span>
+        <div className='flex items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-6 py-1.5'>
+          <span className='text-xs font-bold uppercase tracking-widest text-amber-300'>HOMOLOGATION MODE · SIMULATED OPERATIONS</span>
         </div>
       )}
-      <header className='flex items-center justify-between border-b border-border bg-panel px-6 py-3'>
+      <header className='flex items-center justify-between border-b border-white/5 bg-slate-950/80 px-6 py-3 backdrop-blur-xl'>
         <div className='flex items-center gap-4'>
           <div>
-            <p className='text-xs text-slate-500 uppercase tracking-wider'>Prefeitura</p>
+            <p className='text-[11px] uppercase tracking-[0.28em] text-slate-500'>Operations</p>
             <p className='font-semibold text-slate-100'>{tenantName || '—'}</p>
           </div>
           <div className='h-6 w-px bg-border' />
           <div>
-            <p className='text-xs text-slate-500 uppercase tracking-wider'>Turno</p>
-            <p className='text-sm font-medium text-cyan-400'>{now}</p>
+            <p className='text-[11px] uppercase tracking-[0.28em] text-slate-500'>Live clock</p>
+            <p className='text-sm font-medium text-cyan-300'>{now}</p>
           </div>
         </div>
         <div className='flex items-center gap-4'>
-          <StatusBadge label={connected ? '● Conectado' : '○ Offline'} active={connected} />
-          <StatusBadge label={connected ? 'WS CONNECTED' : 'WS DISCONNECTED'} active={connected} />
+          <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${connected ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
+            {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
+            {connected ? 'Realtime online' : 'Realtime offline'}
+          </span>
+          <StatusBadge label={connected ? '● Connected' : '○ Offline'} active={connected} />
           <div className='text-right'>
-            <p className='text-xs text-slate-500'>Operador</p>
+            <p className='text-[11px] uppercase tracking-[0.28em] text-slate-500'>Operator</p>
             <p className='text-sm text-slate-300'>{userName || '—'}</p>
           </div>
           <button
             type='button'
             onClick={logout}
-            className='rounded-lg border border-border px-3 py-1.5 text-xs text-slate-400 hover:border-red-800 hover:text-red-400 transition-colors'
+            className='rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-red-500/30 hover:text-red-300'
           >
-            Sair
+            Logout
           </button>
         </div>
       </header>

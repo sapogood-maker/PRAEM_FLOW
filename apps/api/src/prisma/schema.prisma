@@ -73,7 +73,7 @@ model Patient {
   id                String        @id @default(uuid())
   tenantId          String
   name              String
-  cpf               String        @unique
+  cpf               String
   birthDate         DateTime
   phone             String?
   address           String
@@ -84,8 +84,8 @@ model Patient {
   recurrent         Boolean       @default(false)
   recurringPatient  Boolean       @default(false)
   notes             String?
-  praemId           String?       @unique
-  qrHash            String?       @unique
+  praemId           String?
+  qrHash            String?
   qrCodeUrl         String?
   qrCode            String?       @unique
   operationalId     String?       @unique

@@ -5,6 +5,7 @@ import '../../navigation/navigation_service.dart';
 import '../../operational/operation_controller.dart';
 import '../../operational/operation_state.dart';
 import '../../core/constants.dart';
+import '../../core/l10n.dart';
 
 class NextActionPanel extends StatelessWidget {
   const NextActionPanel({super.key});
@@ -53,7 +54,7 @@ class NextActionPanel extends StatelessWidget {
                             strokeWidth: 2, color: AppColors.textPrimary),
                       )
                     : const Icon(Icons.task_alt, size: 20),
-                label: const Text('FINALIZAR OPERAÇÃO'),
+                label: Text(context.l10n.finalizeOperation),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.danger,
                   foregroundColor: AppColors.textPrimary,
@@ -82,30 +83,40 @@ class NextActionPanel extends StatelessWidget {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: ctrl.actionInProgress ? null : () => _sendQrWhatsApp(context, ctrl),
+                    onPressed: ctrl.actionInProgress
+                        ? null
+                        : () => _sendQrWhatsApp(context, ctrl),
                     icon: const Icon(Icons.message, size: 16),
-                    label: const Text('ENVIAR QR'),
+                    label: Text(context.l10n.sendQrAction),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.info,
-                      side: BorderSide(color: AppColors.info.withValues(alpha: 1)),
+                      side: BorderSide(
+                          color: AppColors.info.withValues(alpha: 1)),
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      textStyle: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: ctrl.actionInProgress ? null : () => _shareRoute(context, ctrl),
+                    onPressed: ctrl.actionInProgress
+                        ? null
+                        : () => _shareRoute(context, ctrl),
                     icon: const Icon(Icons.share, size: 16),
-                    label: const Text('COMPARTILHAR'),
+                    label: Text(context.l10n.shareAction),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.primary,
-                      side: BorderSide(color: AppColors.primary.withValues(alpha: 1)),
+                      side: BorderSide(
+                          color: AppColors.primary.withValues(alpha: 1)),
                       padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      textStyle: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -117,39 +128,42 @@ class NextActionPanel extends StatelessWidget {
     );
   }
 
-  Future<void> _sendQrWhatsApp(BuildContext context, OperationController ctrl) async {
+  Future<void> _sendQrWhatsApp(
+      BuildContext context, OperationController ctrl) async {
     // TODO: Implement WhatsApp QR send via /api/whatsapp/send-boarding-qr
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('QR será enviado via WhatsApp'),
+      SnackBar(
+        content: Text(context.l10n.qrWillBeSent),
         duration: Duration(seconds: 2),
       ),
     );
   }
 
-  Future<void> _shareRoute(BuildContext context, OperationController ctrl) async {
+  Future<void> _shareRoute(
+      BuildContext context, OperationController ctrl) async {
     // TODO: Implement route share via native share intent with tracking link
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Rota compartilhada'),
+      SnackBar(
+        content: Text(context.l10n.routeShared),
         duration: Duration(seconds: 2),
       ),
     );
   }
 
-  Widget _buildNavigationButton(BuildContext context, OperationController ctrl) {
+  Widget _buildNavigationButton(
+      BuildContext context, OperationController ctrl) {
     final dest = ctrl.currentOpsNavDestination!;
     return OutlinedButton.icon(
       onPressed: () => NavigationService.showNavigationPicker(context, dest),
       icon: const Icon(Icons.navigation_outlined, size: 18),
-      label: Text('INICIAR NAVEGAÇÃO  ·  ${dest.typeLabel}'),
+      label: Text(context.l10n.startNavigationTo(dest.typeLabel(context))),
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.info,
         side: const BorderSide(color: AppColors.info),
         padding: const EdgeInsets.symmetric(vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        textStyle:
-            const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+        textStyle: const TextStyle(
+            fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
       ),
     );
   }
@@ -188,8 +202,7 @@ class NextActionPanel extends StatelessWidget {
         backgroundColor: color,
         foregroundColor: AppColors.textPrimary,
         padding: const EdgeInsets.symmetric(vertical: 16),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         textStyle: const TextStyle(
             fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.8),
       ),

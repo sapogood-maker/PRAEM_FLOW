@@ -7,10 +7,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'auth/auth_service.dart';
 import 'driver/driver_state.dart';
@@ -24,6 +25,8 @@ import 'offline_sync/connectivity_service.dart';
 import 'offline_sync/realtime_recovery_service.dart';
 import 'core/constants.dart';
 import 'core/app_router.dart';
+import 'core/l10n.dart';
+import 'l10n/app_localizations.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,7 +62,8 @@ Future<void> main() async {
 
   final wsService = WsService();
   final gpsService = GpsTrackingService(wsService, offlineQueue);
-  final syncManager = SyncManager(offlineQueue, authService, connectivity: connectivityService);
+  final syncManager =
+      SyncManager(offlineQueue, authService, connectivity: connectivityService);
 
   final operationController = OperationController(
     auth: authService,
@@ -168,7 +172,6 @@ class PraemDriverApp extends StatelessWidget {
     final auth = context.watch<AuthService>();
 
     return MaterialApp(
-      title: 'PRAEM OPS',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: AppColors.background,
@@ -186,6 +189,15 @@ class PraemDriverApp extends StatelessWidget {
         ),
       ),
       onGenerateRoute: generateRoute,
+      onGenerateTitle: (context) => context.l10n.appTitle,
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('pt', 'BR')],
+      locale: const Locale('pt', 'BR'),
       initialRoute: auth.isAuthenticated ? AppRoutes.home : AppRoutes.login,
     );
   }

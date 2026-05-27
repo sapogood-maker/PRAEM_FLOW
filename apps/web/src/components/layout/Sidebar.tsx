@@ -1,4 +1,5 @@
 import { NAV_ITEMS } from '@/lib/constants';
+import { UI_TEXT } from '@/lib/ui-text';
 import { NavItem } from './NavItem';
 import { AppWindow } from 'lucide-react';
 
@@ -11,7 +12,7 @@ export function Sidebar() {
         </div>
         <div>
           <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>PRAEM OPS</p>
-          <p className='text-sm font-semibold text-slate-100'>Live Control Center</p>
+          <p className='text-sm font-semibold text-slate-100'>{UI_TEXT.sidebar.subtitle}</p>
         </div>
       </div>
       <nav className='space-y-1'>

@@ -6,6 +6,7 @@ import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-
 import L from 'leaflet';
 import { cn } from '@/lib/utils';
 import { useRealtimeStore } from '@/store/realtime.store';
+import { UI_TEXT } from '@/lib/ui-text';
 import { VehicleMarker } from './VehicleMarker';
 
 type PickupPoint = {
@@ -37,11 +38,11 @@ function formatTime(iso?: string | null) {
 }
 
 function formatEta(iso?: string | null) {
-  if (!iso) return 'ETA live';
+  if (!iso) return UI_TEXT.operationalMap.etaLive;
   const target = new Date(iso).getTime();
-  if (Number.isNaN(target)) return 'ETA live';
+  if (Number.isNaN(target)) return UI_TEXT.operationalMap.etaLive;
   const delta = Math.round((target - Date.now()) / 60000);
-  if (delta <= 0) return 'ETA now';
+  if (delta <= 0) return UI_TEXT.operationalMap.etaNow;
   return `ETA ${delta}m`;
 }
 
@@ -165,9 +166,9 @@ function PickupMarker({ point }: { point: PickupPoint }) {
       <Popup>
         <div className='min-w-[220px] text-xs text-slate-200'>
           <p className='text-sm font-semibold text-slate-100'>{point.label}</p>
-          <p className='mt-1 text-slate-300'>{point.destination ?? 'Destination'}</p>
+          <p className='mt-1 text-slate-300'>{point.destination ?? UI_TEXT.operationalMap.destination}</p>
           <p className='text-slate-400'>
-            {point.patientName ? `Patient: ${point.patientName}` : 'Pickup window'} · {formatTime(point.appointmentDate)}
+            {point.patientName ? `${UI_TEXT.operationalMap.patientPrefix}: ${point.patientName}` : UI_TEXT.operationalMap.pickupWindow} · {formatTime(point.appointmentDate)}
           </p>
           <p className='mt-2 text-slate-300'>{formatEta(point.appointmentDate)}</p>
         </div>
@@ -202,19 +203,19 @@ export default function OperationalMap({ pickupPoints = [], showFleetList = true
     <section className={cn('rounded-[28px] border border-white/5 bg-slate-950/80 p-4 shadow-2xl backdrop-blur-xl', className)}>
       <div className='flex flex-wrap items-center justify-between gap-3 pb-4'>
         <div>
-          <p className='text-[11px] uppercase tracking-[0.32em] text-slate-500'>Live map</p>
-          <h3 className='mt-1 text-lg font-semibold text-slate-100'>Fleet movement, pickups, and route execution</h3>
+          <p className='text-[11px] uppercase tracking-[0.32em] text-slate-500'>{UI_TEXT.operationalMap.panelOverline}</p>
+          <h3 className='mt-1 text-lg font-semibold text-slate-100'>{UI_TEXT.operationalMap.panelTitle}</h3>
         </div>
         <div className='flex items-center gap-2'>
           <span className={`rounded-full border px-3 py-1 text-xs font-medium ${connected ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
-            {connected ? 'Realtime connected' : 'Realtime offline'}
+            {connected ? UI_TEXT.operationalMap.realtimeConnected : UI_TEXT.operationalMap.realtimeOffline}
           </span>
           <button
             type='button'
             onClick={() => setFollowVehicles((value) => !value)}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${followVehicles ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/5 text-slate-400'}`}
           >
-            Follow {followVehicles ? 'on' : 'off'}
+            {followVehicles ? UI_TEXT.operationalMap.followOn : UI_TEXT.operationalMap.followOff}
           </button>
         </div>
       </div>
@@ -223,7 +224,7 @@ export default function OperationalMap({ pickupPoints = [], showFleetList = true
         <div className='relative overflow-hidden rounded-[24px] border border-white/5 bg-slate-900/60'>
           <div className='pointer-events-none absolute left-4 top-4 z-[500] flex items-center gap-2 rounded-full border border-white/5 bg-slate-950/80 px-3 py-1.5 text-xs text-slate-300 shadow-2xl backdrop-blur-xl'>
             <span className='h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_0_6px_rgba(74,222,128,0.08)]' />
-            {liveVehicles}/{validVehicles.length} vehicles live · {validPickups.length} pickup windows
+            {liveVehicles}/{validVehicles.length} {UI_TEXT.operationalMap.vehiclesLive} · {validPickups.length} {UI_TEXT.operationalMap.pickupWindows}
           </div>
           <MapContainer
             center={DEFAULT_CITY_CENTER}
@@ -276,13 +277,13 @@ export default function OperationalMap({ pickupPoints = [], showFleetList = true
         {showFleetList && (
           <aside className='space-y-3 rounded-[24px] border border-white/5 bg-slate-950/80 p-4 shadow-2xl backdrop-blur-xl'>
             <div className='flex items-center justify-between gap-2'>
-              <h4 className='text-sm font-semibold uppercase tracking-[0.28em] text-slate-400'>Fleet snapshot</h4>
+              <h4 className='text-sm font-semibold uppercase tracking-[0.28em] text-slate-400'>{UI_TEXT.operationalMap.fleetSnapshot}</h4>
               <span className='rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-slate-400'>{liveVehicles}/{validVehicles.length}</span>
             </div>
             <div className='space-y-2 max-h-[620px] overflow-y-auto pr-1'>
               {validVehicles.length === 0 ? (
                 <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-4 text-sm text-slate-500'>
-                  Waiting for GPS telemetry.
+                  {UI_TEXT.operationalMap.waitingGps}
                 </div>
               ) : (
                 validVehicles.map((vehicle) => {
@@ -296,7 +297,7 @@ export default function OperationalMap({ pickupPoints = [], showFleetList = true
                         <div className='min-w-0'>
                           <p className='truncate text-sm font-medium text-slate-100'>{vehicle.plate ?? vehicle.vehicleId}</p>
                           <p className='mt-1 text-xs text-slate-500'>
-                            {vehicle.driverName ?? vehicle.driverId ?? 'Driver pending'} · {distance} km
+                            {vehicle.driverName ?? vehicle.driverId ?? UI_TEXT.operationalMap.driverPending} · {distance} km
                           </p>
                         </div>
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTone(status, online)}`}>
@@ -304,7 +305,7 @@ export default function OperationalMap({ pickupPoints = [], showFleetList = true
                         </span>
                       </div>
                       <p className='mt-2 text-xs text-slate-500'>
-                        Speed {vehicle.speed != null ? `${Math.max(0, vehicle.speed).toFixed(0)} km/h` : '—'} · Updated{' '}
+                        {UI_TEXT.operationalMap.speed} {vehicle.speed != null ? `${Math.max(0, vehicle.speed).toFixed(0)} km/h` : '—'} · {UI_TEXT.operationalMap.updated}{' '}
                         {vehicle.timestamp ?? vehicle.updatedAt
                           ? new Date(vehicle.timestamp ?? vehicle.updatedAt ?? '').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
                           : '--:--'}

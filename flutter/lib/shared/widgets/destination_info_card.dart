@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
+import '../../core/l10n.dart';
 import '../../navigation/navigation_service.dart';
 import '../../operational/operation_controller.dart';
 
@@ -36,7 +37,7 @@ class DestinationInfoCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  dest.typeLabel.toUpperCase(),
+                  dest.typeLabel(context).toUpperCase(),
                   style: const TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: 10,
@@ -68,14 +69,13 @@ class DestinationInfoCard extends StatelessWidget {
             onPressed: () =>
                 NavigationService.showNavigationPicker(context, dest),
             icon: const Icon(Icons.navigation, size: 16),
-            label: const Text('NAVEGAR'),
+            label: Text(context.l10n.navigateAction),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: AppColors.textPrimary,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              textStyle: const TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.bold),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              textStyle:
+                  const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
             ),
           ),
         ],

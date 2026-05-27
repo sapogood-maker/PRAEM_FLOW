@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../../driver/driver_state.dart';
 import '../../core/constants.dart';
+import '../../core/l10n.dart';
 import '../../shared/widgets/operational_button.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -56,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.pushReplacementNamed(context, AppRoutes.vehicleSelect);
       }
     } else {
-      setState(() => _error = 'Email ou senha inválidos. Use seu login operacional.');
+      setState(() => _error = context.l10n.loginInvalidCredentials);
     }
   }
 
@@ -75,20 +76,20 @@ class _LoginScreenState extends State<LoginScreen> {
               const Icon(Icons.local_hospital_rounded,
                   color: AppColors.primary, size: 56),
               const SizedBox(height: 12),
-              const Text(
-                'PRAEM OPS',
+              Text(
+                context.l10n.appTitle,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   color: AppColors.textPrimary,
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 2,
                 ),
               ),
-              const Text(
-                'Terminal Operacional Motorista',
+              Text(
+                context.l10n.loginSubtitle,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                     color: AppColors.textSecondary, fontSize: 14),
               ),
               const SizedBox(height: 48),
@@ -97,9 +98,9 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _emailCtrl,
                 keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 18),
-                decoration: _inputDeco('Email'),
+                style:
+                    const TextStyle(color: AppColors.textPrimary, fontSize: 18),
+                decoration: _inputDeco(context.l10n.email),
               ),
               const SizedBox(height: 16),
 
@@ -107,9 +108,9 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _passCtrl,
                 obscureText: true,
-                style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 18),
-                decoration: _inputDeco('Senha'),
+                style:
+                    const TextStyle(color: AppColors.textPrimary, fontSize: 18),
+                decoration: _inputDeco(context.l10n.password),
                 onSubmitted: (_) => _submit(),
               ),
               const SizedBox(height: 12),
@@ -117,14 +118,16 @@ class _LoginScreenState extends State<LoginScreen> {
               if (_error != null)
                 Text(_error!,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: AppColors.danger, fontSize: 14)),
+                    style:
+                        const TextStyle(color: AppColors.danger, fontSize: 14)),
 
               const SizedBox(height: 24),
 
               // ─── Login button ─────────────────────────────────────────────
               OperationalButton(
-                label: _loading ? 'Entrando…' : 'ENTRAR',
+                label: _loading
+                    ? context.l10n.loginEntering
+                    : context.l10n.loginAction,
                 icon: Icons.login,
                 onPressed: _loading ? null : _submit,
               ),

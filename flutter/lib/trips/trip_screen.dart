@@ -13,6 +13,7 @@ import '../shared/widgets/operational_button.dart';
 import '../shared/widgets/status_badge.dart';
 import '../offline/offline_queue.dart';
 import '../operational/sync_manager.dart';
+import '../core/l10n.dart';
 
 // ─── Stop type / status helpers ───────────────────────────────────────────────
 
@@ -90,7 +91,8 @@ class _TripScreenState extends State<TripScreen> {
     final driver = context.read<DriverState>();
     final offline = context.read<OfflineQueue>();
     final syncManager = context.read<SyncManager>();
-    final stop = driver.stops.firstWhere((s) => s['id'] == stopId, orElse: () => <String, dynamic>{});
+    final stop = driver.stops.firstWhere((s) => s['id'] == stopId,
+        orElse: () => <String, dynamic>{});
     try {
       await offline.enqueueOperationalAction(
         type: 'TRIP_STOP_STATUS',
@@ -114,7 +116,7 @@ class _TripScreenState extends State<TripScreen> {
       debugPrint('[TripScreen] updateStopStatus error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erro ao atualizar parada')),
+          SnackBar(content: Text(context.l10n.stopUpdateError)),
         );
       }
     }
@@ -136,8 +138,8 @@ class _TripScreenState extends State<TripScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
-        title: const Text('Detalhes da Viagem',
-            style: TextStyle(color: AppColors.textPrimary)),
+        title: Text(context.l10n.tripDetailsTitle,
+            style: const TextStyle(color: AppColors.textPrimary)),
         iconTheme: const IconThemeData(color: AppColors.textPrimary),
       ),
       body: SingleChildScrollView(
@@ -157,7 +159,7 @@ class _TripScreenState extends State<TripScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('ORIGEM',
+                    Text(context.l10n.origin,
                         style: TextStyle(
                             color: AppColors.textSecondary,
                             fontSize: 11,
@@ -166,7 +168,7 @@ class _TripScreenState extends State<TripScreen> {
                         style: const TextStyle(
                             color: AppColors.textPrimary, fontSize: 16)),
                     const SizedBox(height: 8),
-                    const Text('DESTINO',
+                    Text(context.l10n.destinationUpper,
                         style: TextStyle(
                             color: AppColors.textSecondary,
                             fontSize: 11,
@@ -180,8 +182,7 @@ class _TripScreenState extends State<TripScreen> {
                     Row(children: [
                       StatusBadge(
                           label: route['status'] as String? ?? '—',
-                          color: statusColor(
-                              route['status'] as String? ?? '')),
+                          color: statusColor(route['status'] as String? ?? '')),
                     ]),
                   ],
                 ),
@@ -191,7 +192,7 @@ class _TripScreenState extends State<TripScreen> {
 
             // ─── Multi-stop route ──────────────────────────────────────────
             if (stops.isNotEmpty) ...[
-              const Text('ROTEIRO DE PARADAS',
+              Text(context.l10n.stopsItinerary,
                   style: TextStyle(
                       color: AppColors.textSecondary,
                       fontSize: 12,
@@ -203,7 +204,7 @@ class _TripScreenState extends State<TripScreen> {
 
             // ─── QR scan button ────────────────────────────────────────────
             OperationalButton(
-              label: 'SCAN QR PACIENTE',
+              label: context.l10n.scanPatientQr,
               icon: Icons.qr_code_scanner,
               onPressed: () =>
                   Navigator.pushNamed(context, AppRoutes.qrScanner),
@@ -213,7 +214,7 @@ class _TripScreenState extends State<TripScreen> {
             const SizedBox(height: 16),
 
             // ─── Patient list ──────────────────────────────────────────────
-            Text('MANIFESTO (${patients.length} pac.)',
+            Text(context.l10n.manifestWithCount(patients.length),
                 style: const TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: 12,
@@ -221,14 +222,13 @@ class _TripScreenState extends State<TripScreen> {
             const SizedBox(height: 8),
 
             if (patients.isEmpty)
-              const Center(
-                child: Text('Nenhum paciente atribuído',
-                    style: TextStyle(
+              Center(
+                child: Text(context.l10n.noAssignedPassenger,
+                    style: const TextStyle(
                         color: AppColors.textSecondary, fontSize: 14)),
               ),
 
-            for (final trip in patients)
-              _TripPatientCard(trip: trip),
+            for (final trip in patients) _TripPatientCard(trip: trip),
           ],
         ),
       ),
@@ -300,7 +300,8 @@ class _StopCard extends StatelessWidget {
                         ? AppColors.primary.withOpacity(0.2)
                         : AppColors.primary.withOpacity(0.2),
                     border: Border.all(
-                      color: isCompleted ? AppColors.primary : AppColors.primary,
+                      color:
+                          isCompleted ? AppColors.primary : AppColors.primary,
                       width: 2,
                     ),
                   ),
@@ -360,7 +361,7 @@ class _StopCard extends StatelessWidget {
                   if (planned != null) ...[
                     const SizedBox(height: 4),
                     Text(
-                      '📅 Previsto: ${_formatDateTime(planned)}',
+                      context.l10n.plannedArrival(_formatDateTime(planned)),
                       style: const TextStyle(
                           color: AppColors.textSecondary, fontSize: 12),
                     ),
@@ -368,7 +369,7 @@ class _StopCard extends StatelessWidget {
                   if (actual != null) ...[
                     const SizedBox(height: 2),
                     Text(
-                      '✅ Chegou: ${_formatDateTime(actual)}',
+                      context.l10n.actualArrival(_formatDateTime(actual)),
                       style: const TextStyle(
                           color: AppColors.primary, fontSize: 12),
                     ),
@@ -383,7 +384,8 @@ class _StopCard extends StatelessWidget {
                         onPressed: () => NavigationService.showNavigationPicker(
                           context,
                           OpsNavDestination(
-                            type: ['RETURN', 'DROPOFF'].contains(type.toUpperCase())
+                            type: ['RETURN', 'DROPOFF']
+                                    .contains(type.toUpperCase())
                                 ? OpsNavDestType.returnDest
                                 : OpsNavDestType.hospital,
                             name: name,
@@ -391,10 +393,9 @@ class _StopCard extends StatelessWidget {
                             lng: lng,
                           ),
                         ),
-                        icon: const Text('🗺️',
-                            style: TextStyle(fontSize: 14)),
-                        label: const Text('Navegar',
-                            style: TextStyle(fontSize: 13)),
+                        icon: const Text('🗺️', style: TextStyle(fontSize: 14)),
+                        label: Text(context.l10n.navigate,
+                            style: const TextStyle(fontSize: 13)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
                           foregroundColor: Colors.white,
@@ -416,24 +417,24 @@ class _StopCard extends StatelessWidget {
                       children: [
                         if (status == 'PENDING' || status == 'EN_ROUTE')
                           _ActionChip(
-                            label: '✅ Confirmar Chegada',
+                            label: context.l10n.confirmArrival,
                             color: AppColors.info,
                             onTap: () => onUpdateStatus(stopId, 'ARRIVED'),
                           ),
                         if (status == 'ARRIVED')
                           _ActionChip(
-                            label: '🚶 Iniciar Embarque',
+                            label: context.l10n.startBoarding,
                             color: AppColors.warning,
                             onTap: () => onUpdateStatus(stopId, 'BOARDING'),
                           ),
                         if (status == 'ARRIVED' || status == 'BOARDING')
                           _ActionChip(
-                            label: '✔ Concluir Parada',
+                            label: context.l10n.completeStop,
                             color: AppColors.primary,
                             onTap: () => onUpdateStatus(stopId, 'COMPLETED'),
                           ),
                         _ActionChip(
-                          label: '⏭ Pular',
+                          label: context.l10n.skipStop,
                           color: AppColors.textSecondary,
                           onTap: () => onUpdateStatus(stopId, 'SKIPPED'),
                         ),
@@ -485,7 +486,8 @@ class _ActionChip extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+          style: TextStyle(
+              color: color, fontSize: 12, fontWeight: FontWeight.w600),
         ),
       ),
     );
@@ -536,7 +538,7 @@ class _TripPatientCard extends StatelessWidget {
                   color: AppColors.textSecondary, fontSize: 13)),
           if (risk.isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text('Risco: $risk',
+            Text(context.l10n.riskLabel(risk),
                 style: TextStyle(
                     color: risk == 'CRITICAL' || risk == 'HIGH'
                         ? AppColors.danger
@@ -546,9 +548,8 @@ class _TripPatientCard extends StatelessWidget {
           ],
           if (trip['boardedAt'] != null) ...[
             const SizedBox(height: 4),
-            Text('Embarcou: ${trip['boardedAt']}',
-                style: const TextStyle(
-                    color: AppColors.primary, fontSize: 12)),
+            Text(context.l10n.boardedAt('${trip['boardedAt']}'),
+                style: const TextStyle(color: AppColors.primary, fontSize: 12)),
           ],
           // Navigate to patient home address when coordinates are available
           if (lat != null && lng != null) ...[
@@ -558,15 +559,16 @@ class _TripPatientCard extends StatelessWidget {
                 context,
                 OpsNavDestination(
                   type: OpsNavDestType.patientPickup,
-                  name: patientData['name'] as String? ?? 'Paciente',
+                  name: patientData['name'] as String? ??
+                      context.l10n.passengerLabel,
                   address: patientData['address'] as String?,
                   lat: lat,
                   lng: lng,
                 ),
               ),
               icon: const Text('🗺️', style: TextStyle(fontSize: 14)),
-              label: const Text('Ir até endereço',
-                  style: TextStyle(fontSize: 13)),
+              label: Text(context.l10n.goToAddress,
+                  style: const TextStyle(fontSize: 13)),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.primary,
                 side: BorderSide(color: AppColors.primary),

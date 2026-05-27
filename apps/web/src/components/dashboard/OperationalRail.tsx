@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { AlertTriangle, Clock3, Gauge, MapPin, Truck, Wifi, WifiOff } from 'lucide-react';
 import type { ActivityEvent, QueueItem, VehiclePosition } from '@/types';
+import { UI_TEXT } from '@/lib/ui-text';
 
 type OperationalQueueItem = QueueItem & {
   patient?: { name?: string; mobility?: string; specialNeeds?: string | null };
@@ -75,21 +76,21 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
       <section className='rounded-[24px] border border-white/5 bg-slate-950/80 p-4 shadow-2xl backdrop-blur-xl'>
         <div className='flex items-center justify-between'>
           <div>
-            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>Upcoming pickups</p>
-            <p className='mt-1 text-sm text-slate-300'>{pickups.length} live pickup windows</p>
+            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>{UI_TEXT.operationalRail.upcomingPickups}</p>
+            <p className='mt-1 text-sm text-slate-300'>{pickups.length} {UI_TEXT.operationalRail.livePickupWindows}</p>
           </div>
           <Clock3 size={16} className='text-cyan-300' />
         </div>
         <div className='mt-4 space-y-3 max-h-[260px] overflow-y-auto pr-1'>
           {pickups.length === 0 ? (
             <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-4 text-sm text-slate-500'>
-              No pickup windows right now.
+              {UI_TEXT.operationalRail.noPickupWindows}
             </div>
           ) : (
             pickups.map((item) => {
               const etaMinutes = minutesUntil(item.appointmentDate);
               const etaLabel =
-                etaMinutes == null ? 'ETA live' : etaMinutes <= 0 ? 'ETA now' : `ETA ${etaMinutes}m`;
+                etaMinutes == null ? UI_TEXT.operationalRail.etaLive : etaMinutes <= 0 ? UI_TEXT.operationalRail.etaNow : `ETA ${etaMinutes}m`;
               const mobility = item.patient?.mobility ? item.patient.mobility.toLowerCase() : 'standard';
               return (
                 <div key={item.id} className='rounded-2xl border border-white/5 bg-white/5 p-3 ring-1 ring-white/5'>
@@ -97,7 +98,7 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
                     <div className='min-w-0'>
                       <p className='truncate text-sm font-medium text-slate-100'>{item.patient?.name ?? item.patientId}</p>
                       <p className='mt-1 text-xs text-slate-400'>
-                        {item.healthcareLocation?.name ?? item.destination ?? 'Destination'} · {formatTime(item.appointmentDate)}
+                        {item.healthcareLocation?.name ?? item.destination ?? UI_TEXT.operationalRail.destination} · {formatTime(item.appointmentDate)}
                       </p>
                     </div>
                     <span className='rounded-full bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-300 ring-1 ring-cyan-500/20'>
@@ -119,15 +120,15 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
       <section className='rounded-[24px] border border-white/5 bg-slate-950/80 p-4 shadow-2xl backdrop-blur-xl'>
         <div className='flex items-center justify-between'>
           <div>
-            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>Critical alerts</p>
-            <p className='mt-1 text-sm text-slate-300'>{criticalAlerts.length} active signals</p>
+            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>{UI_TEXT.operationalRail.criticalAlerts}</p>
+            <p className='mt-1 text-sm text-slate-300'>{criticalAlerts.length} {UI_TEXT.operationalRail.activeSignals}</p>
           </div>
           <AlertTriangle size={16} className='text-red-300' />
         </div>
         <div className='mt-4 space-y-2 max-h-[230px] overflow-y-auto pr-1'>
           {criticalAlerts.length === 0 ? (
             <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-4 text-sm text-slate-500'>
-              No critical alerts right now.
+              {UI_TEXT.operationalRail.noCriticalAlerts}
             </div>
           ) : (
             criticalAlerts.map((event) => (
@@ -148,9 +149,9 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
       <section className='rounded-[24px] border border-white/5 bg-slate-950/80 p-4 shadow-2xl backdrop-blur-xl'>
         <div className='flex items-center justify-between'>
           <div>
-            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>Fleet status</p>
+            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>{UI_TEXT.operationalRail.fleetStatus}</p>
             <p className='mt-1 text-sm text-slate-300'>
-              {fleetSummary.online}/{fleetSummary.total} connected
+              {fleetSummary.online}/{fleetSummary.total} {UI_TEXT.operationalRail.connected}
             </p>
           </div>
           {connected ? <Wifi size={16} className='text-emerald-300' /> : <WifiOff size={16} className='text-slate-500' />}
@@ -158,19 +159,19 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
 
         <div className='mt-4 grid grid-cols-2 gap-2'>
           <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>Moving</p>
+            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.operationalRail.moving}</p>
             <p className='mt-1 text-lg font-semibold text-slate-100'>{fleetSummary.moving}</p>
           </div>
           <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>Boarding</p>
+            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.operationalRail.boarding}</p>
             <p className='mt-1 text-lg font-semibold text-slate-100'>{fleetSummary.boarding}</p>
           </div>
           <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>Offline</p>
+            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.operationalRail.offline}</p>
             <p className='mt-1 text-lg font-semibold text-slate-100'>{fleetSummary.offline}</p>
           </div>
           <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>Live</p>
+            <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.operationalRail.live}</p>
             <p className='mt-1 text-lg font-semibold text-slate-100'>{fleetSummary.online}</p>
           </div>
         </div>
@@ -178,7 +179,7 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
         <div className='mt-4 space-y-2 max-h-[220px] overflow-y-auto pr-1'>
           {vehicles.length === 0 ? (
             <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-4 text-sm text-slate-500'>
-              No vehicles reporting yet.
+              {UI_TEXT.operationalRail.noVehiclesReporting}
             </div>
           ) : (
             vehicles.slice(0, 6).map((vehicle) => {
@@ -190,7 +191,7 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
                     <div className='min-w-0'>
                       <p className='truncate text-sm font-medium text-slate-100'>{vehicle.plate ?? vehicle.vehicleId}</p>
                       <p className='mt-1 text-xs text-slate-500'>
-                        {vehicle.driverName ?? vehicle.driverId ?? 'Driver pending'} · {formatTime(vehicle.updatedAt ?? vehicle.timestamp)}
+                        {vehicle.driverName ?? vehicle.driverId ?? UI_TEXT.operationalRail.driverPending} · {formatTime(vehicle.updatedAt ?? vehicle.timestamp)}
                       </p>
                     </div>
                     <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTone(status, online)}`}>
@@ -204,11 +205,11 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
                     </span>
                     <span className='inline-flex items-center gap-1'>
                       <MapPin size={12} />
-                      {online ? 'tracking' : 'offline'}
+                      {online ? UI_TEXT.operationalRail.tracking : UI_TEXT.operationalRail.offline.toLowerCase()}
                     </span>
                     <span className='inline-flex items-center gap-1'>
                       <Truck size={12} />
-                      {online ? 'live' : 'stale'}
+                      {online ? UI_TEXT.operationalRail.live.toLowerCase() : UI_TEXT.operationalRail.stale}
                     </span>
                   </div>
                 </div>

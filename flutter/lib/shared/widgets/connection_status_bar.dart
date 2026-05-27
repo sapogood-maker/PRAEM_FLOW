@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../websocket/ws_service.dart';
 import '../../tracking/gps_tracking_service.dart';
 import '../../core/constants.dart';
+import '../../core/l10n.dart';
 import '../../offline_sync/connectivity_service.dart';
 import '../../offline/offline_queue.dart';
 import '../../operational/sync_manager.dart';
@@ -20,7 +21,7 @@ class ConnectionStatusBar extends StatelessWidget {
     final queue = context.watch<OfflineQueue>();
     final syncManager = context.watch<SyncManager>();
     final state = connectivity.state;
-    final statusLabel = _stateLabel(state);
+    final statusLabel = _stateLabel(state, context);
     final statusColor = _stateColor(state);
     return Container(
       color: AppColors.surface,
@@ -49,7 +50,9 @@ class ConnectionStatusBar extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            gps.active ? 'GPS ativo' : 'GPS inativo',
+            gps.active
+                ? context.l10n.connectionGpsActive
+                : context.l10n.connectionGpsInactive,
             style: TextStyle(
               fontSize: 11,
               color: gps.active ? AppColors.primary : AppColors.warning,
@@ -58,27 +61,34 @@ class ConnectionStatusBar extends StatelessWidget {
           ),
           const Spacer(),
           Text(
-            'Pendências: ${queue.pendingCount}',
-            style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+            context.l10n.connectionPending(queue.pendingCount),
+            style:
+                const TextStyle(fontSize: 10, color: AppColors.textSecondary),
           ),
           const SizedBox(width: 12),
           Text(
-            'WS: ${ws.connected ? 'ON' : 'OFF'}',
-            style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+            context.l10n.connectionWs(ws.connected ? 'ON' : 'OFF'),
+            style:
+                const TextStyle(fontSize: 10, color: AppColors.textSecondary),
           ),
           const SizedBox(width: 12),
           Text(
-            'API: ${connectivity.connectivity.contains(ConnectivityResult.none) ? 'OFF' : 'ON'}',
-            style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+            context.l10n.connectionApi(
+                connectivity.connectivity.contains(ConnectivityResult.none)
+                    ? 'OFF'
+                    : 'ON'),
+            style:
+                const TextStyle(fontSize: 10, color: AppColors.textSecondary),
           ),
           const SizedBox(width: 12),
           Text(
             syncManager.lastError == null
                 ? (queue.lastSyncedAt == null
-                    ? 'Último sync: —'
-                    : 'Último sync: ${_format(queue.lastSyncedAt!)}')
+                    ? context.l10n.lastSyncUnknown
+                    : context.l10n.lastSyncAt(_format(queue.lastSyncedAt!)))
                 : syncManager.lastError!,
-            style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+            style:
+                const TextStyle(fontSize: 10, color: AppColors.textSecondary),
           ),
           const SizedBox(width: 12),
           TextButton.icon(
@@ -90,7 +100,7 @@ class ConnectionStatusBar extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.sync, size: 14),
-            label: const Text('SYNC'),
+            label: Text(context.l10n.syncAction),
           ),
         ],
       ),
@@ -123,16 +133,16 @@ class ConnectionStatusBar extends StatelessWidget {
     }
   }
 
-  String _stateLabel(OfflineConnectivityState state) {
+  String _stateLabel(OfflineConnectivityState state, BuildContext context) {
     switch (state) {
       case OfflineConnectivityState.online:
-        return 'ONLINE';
+        return context.l10n.connectivityOnline;
       case OfflineConnectivityState.degraded:
-        return 'DEGRADADO';
+        return context.l10n.connectivityDegraded;
       case OfflineConnectivityState.offline:
-        return 'OFFLINE';
+        return context.l10n.connectivityOffline;
       case OfflineConnectivityState.syncing:
-        return 'SINCRONIZANDO';
+        return context.l10n.connectivitySyncing;
     }
   }
 

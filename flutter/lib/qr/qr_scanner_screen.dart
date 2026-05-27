@@ -21,6 +21,7 @@ import '../operational/sync_manager.dart';
 import '../offline_sync/connectivity_service.dart';
 import '../offline_sync/qr_offline_validator.dart';
 import '../config/app_config.dart';
+import '../core/l10n.dart';
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
@@ -161,9 +162,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
-        title: const Text(
-          'Escanear QR do Passageiro',
-          style: TextStyle(color: AppColors.textPrimary),
+        title: Text(
+          context.l10n.qrScannerTitle,
+          style: const TextStyle(color: AppColors.textPrimary),
         ),
         iconTheme: const IconThemeData(color: AppColors.textPrimary),
         actions: [
@@ -225,12 +226,12 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.check_circle, color: AppColors.primary),
-                SizedBox(width: 8),
+                const Icon(Icons.check_circle, color: AppColors.primary),
+                const SizedBox(width: 8),
                 Text(
-                  'Embarque Confirmado',
+                  context.l10n.boardingConfirmed,
                   style: TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.bold,
@@ -239,14 +240,19 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            _line('Passageiro', _result!['name'] as String? ?? '—'),
-            _line('Destino', _result!['destination'] as String? ?? '—'),
-            _line('Evento', (_result!['checkpoint'] ?? 'BOARDING').toString()),
-            _line('Viagem', (_result!['tripId'] ?? '—').toString()),
+            _line(context.l10n.passengerLabel,
+                _result!['name'] as String? ?? '—'),
+            _line(context.l10n.destinationLabel,
+                _result!['destination'] as String? ?? '—'),
+            _line(context.l10n.eventLabel,
+                (_result!['checkpoint'] ?? 'BOARDING').toString()),
+            _line(
+                context.l10n.tripLabel, (_result!['tripId'] ?? '—').toString()),
             const SizedBox(height: 12),
-            const Text(
-              'Continue escaneando os próximos passageiros...',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            Text(
+              context.l10n.continueScanning,
+              style:
+                  const TextStyle(color: AppColors.textSecondary, fontSize: 12),
             ),
           ],
         ),
@@ -265,12 +271,13 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.warning_amber_rounded, color: AppColors.warning),
-                SizedBox(width: 8),
+                const Icon(Icons.warning_amber_rounded,
+                    color: AppColors.warning),
+                const SizedBox(width: 8),
                 Text(
-                  'Validação operacional falhou',
+                  context.l10n.validationFailed,
                   style: TextStyle(
                       color: AppColors.warning, fontWeight: FontWeight.bold),
                 ),
@@ -282,7 +289,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                     color: AppColors.textPrimary, fontSize: 14)),
             const Spacer(),
             OperationalButton(
-              label: 'LIMPAR',
+              label: context.l10n.clearAction,
               icon: Icons.clear,
               onPressed: () => setState(() => _error = null),
               color: AppColors.warning,
@@ -292,11 +299,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       );
     }
 
-    return const Center(
+    return Center(
       child: Text(
-        'Abra o scanner e escaneie o QR do passageiro para confirmar o embarque.',
+        context.l10n.scannerHint,
         textAlign: TextAlign.center,
-        style: TextStyle(color: AppColors.textSecondary, fontSize: 15),
+        style: const TextStyle(color: AppColors.textSecondary, fontSize: 15),
       ),
     );
   }

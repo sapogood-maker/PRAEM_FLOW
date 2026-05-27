@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
+import '../../core/l10n.dart';
 import '../../operational/operation_controller.dart';
 
 class StaleRecoveryPanel extends StatelessWidget {
@@ -28,8 +29,8 @@ class StaleRecoveryPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Operação anterior detectada',
+              Text(
+                context.l10n.previousOperationDetected,
                 style: TextStyle(
                   color: AppColors.textPrimary,
                   fontSize: 20,
@@ -38,24 +39,33 @@ class StaleRecoveryPanel extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                '${route?['origin'] ?? 'Origem'} → ${route?['destination'] ?? 'Destino'}',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                '${route?['origin'] ?? context.l10n.originFallback} → ${route?['destination'] ?? context.l10n.destinationFallback}',
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 14),
               ),
               const SizedBox(height: 8),
               Text(
-                'Stale: ${ctrl.staleElapsedHours}h · nível ${ctrl.staleLevel}',
+                context.l10n
+                    .staleLevel(ctrl.staleElapsedHours, ctrl.staleLevel),
                 style: const TextStyle(color: AppColors.warning, fontSize: 13),
               ),
               const SizedBox(height: 6),
               Text(
-                'Passageiros embarcados: ${ctrl.boardedCount} · Em trânsito: ${ctrl.hasInTransitPassengers ? 'SIM' : 'NÃO'}',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                context.l10n.stalePassengersSummary(
+                  ctrl.boardedCount,
+                  ctrl.hasInTransitPassengers
+                      ? context.l10n.yes
+                      : context.l10n.no,
+                ),
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 20),
               ElevatedButton.icon(
-                onPressed: ctrl.actionInProgress ? null : ctrl.continueStaleOperation,
+                onPressed:
+                    ctrl.actionInProgress ? null : ctrl.continueStaleOperation,
                 icon: const Icon(Icons.play_arrow),
-                label: const Text('CONTINUAR OPERAÇÃO'),
+                label: Text(context.l10n.continueOperation),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.info,
                   foregroundColor: AppColors.textPrimary,
@@ -64,9 +74,11 @@ class StaleRecoveryPanel extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               ElevatedButton.icon(
-                onPressed: ctrl.actionInProgress ? null : () async => ctrl.finalizeOperationRecovery(),
+                onPressed: ctrl.actionInProgress
+                    ? null
+                    : () async => ctrl.finalizeOperationRecovery(),
                 icon: const Icon(Icons.task_alt),
-                label: const Text('FINALIZAR OPERAÇÃO'),
+                label: Text(context.l10n.finalizeOperation),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.danger,
                   foregroundColor: AppColors.textPrimary,
@@ -77,10 +89,11 @@ class StaleRecoveryPanel extends StatelessWidget {
               const Divider(color: AppColors.textSecondary),
               const SizedBox(height: 8),
               TextButton.icon(
-                onPressed: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
+                onPressed: () =>
+                    Navigator.pushNamed(context, AppRoutes.qrScanner),
                 icon: const Icon(Icons.qr_code_scanner, color: AppColors.info),
-                label: const Text(
-                  'SCAN QR — Embarque de emergência',
+                label: Text(
+                  context.l10n.emergencyBoardingAction,
                   style: TextStyle(color: AppColors.info, fontSize: 13),
                 ),
               ),

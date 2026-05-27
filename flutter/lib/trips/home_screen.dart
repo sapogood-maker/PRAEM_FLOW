@@ -1,4 +1,4 @@
-﻿// lib/trips/home_screen.dart
+// lib/trips/home_screen.dart
 // Main operational screen — slim shell driven by OperationController.
 
 import 'package:flutter/material.dart';
@@ -7,6 +7,7 @@ import '../auth/auth_service.dart';
 import '../driver/driver_state.dart';
 import '../operational/operation_controller.dart';
 import '../core/constants.dart';
+import '../core/l10n.dart';
 import '../shared/widgets/connection_status_bar.dart';
 import '../shared/widgets/destination_info_card.dart';
 import '../shared/widgets/operational_state_header.dart';
@@ -39,7 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
           backgroundColor: AppColors.warning,
           duration: const Duration(seconds: 4),
           action: SnackBarAction(
-            label: 'ABRIR SCANNER',
+            label: context.l10n.openScannerAction,
             textColor: AppColors.textPrimary,
             onPressed: () => Navigator.pushNamed(context, AppRoutes.qrScanner),
           ),
@@ -69,9 +70,9 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'PRAEM OPS',
-              style: TextStyle(
+            Text(
+              context.l10n.appTitle,
+              style: const TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -89,14 +90,14 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.list_alt, color: AppColors.textSecondary),
-            tooltip: 'Detalhes da viagem',
+            tooltip: context.l10n.tripDetailsTooltip,
             onPressed: ctrl.hasActiveRoute
                 ? () => Navigator.pushNamed(context, AppRoutes.trip)
                 : null,
           ),
           IconButton(
             icon: const Icon(Icons.refresh, color: AppColors.textSecondary),
-            tooltip: 'Recarregar rota',
+            tooltip: context.l10n.reloadRouteTooltip,
             onPressed: ctrl.loading ? null : ctrl.loadRoute,
           ),
           PopupMenuButton<String>(
@@ -111,10 +112,10 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'logout',
-                child: Text('Sair',
-                    style: TextStyle(color: AppColors.textPrimary)),
+                child: Text(context.l10n.logout,
+                    style: const TextStyle(color: AppColors.textPrimary)),
               ),
             ],
           ),
@@ -145,13 +146,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
       floatingActionButton: ctrl.hasActiveRoute
           ? FloatingActionButton.extended(
-              backgroundColor: ctrl.isQrScanningValid ? AppColors.info : AppColors.surface,
+              backgroundColor:
+                  ctrl.isQrScanningValid ? AppColors.info : AppColors.surface,
               foregroundColor: ctrl.isQrScanningValid
                   ? AppColors.textPrimary
                   : AppColors.textSecondary,
               onPressed: () => _openQrScanner(context, ctrl),
               icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('SCAN QR'),
+              label: Text(context.l10n.scanQrFab),
             )
           : null,
     );

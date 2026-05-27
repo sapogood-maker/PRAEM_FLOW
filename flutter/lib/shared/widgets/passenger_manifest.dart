@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../operational/operation_controller.dart';
 import '../../core/constants.dart';
+import '../../core/l10n.dart';
 
 class PassengerManifest extends StatelessWidget {
   const PassengerManifest({super.key});
@@ -12,11 +13,11 @@ class PassengerManifest extends StatelessWidget {
     final ctrl = context.watch<OperationController>();
     final patients = ctrl.patients;
     if (patients.isEmpty) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.all(16),
         child: Text(
-          'Nenhum passageiro atribuído',
-          style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+          context.l10n.noAssignedPassenger,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
         ),
       );
     }
@@ -26,7 +27,10 @@ class PassengerManifest extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
           child: Text(
-            'MANIFESTO (${patients.length} passageiro${patients.length != 1 ? 's' : ''})',
+            context.l10n.passengerManifestTitle(
+              patients.length,
+              patients.length != 1 ? 's' : '',
+            ),
             style: const TextStyle(
               color: AppColors.textSecondary,
               fontSize: 11,
@@ -86,23 +90,22 @@ class _PatientCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   dest,
-                  style:
-                      const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                  style: const TextStyle(
+                      color: AppColors.textSecondary, fontSize: 12),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
               color: color.withOpacity(0.12),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: color.withOpacity(0.4)),
             ),
             child: Text(
-              _statusLabel(status),
+              _statusLabel(status, context),
               style: TextStyle(
                 color: color,
                 fontSize: 10,
@@ -116,23 +119,23 @@ class _PatientCard extends StatelessWidget {
     );
   }
 
-  String _statusLabel(String status) {
+  String _statusLabel(String status, BuildContext context) {
     switch (status) {
       case 'BOARDING':
-        return 'EMBARCANDO';
+        return context.l10n.statusBoarding;
       case 'IN_PROGRESS':
       case 'IN_TRANSIT':
-        return 'EM TRÂNSITO';
+        return context.l10n.statusInTransit;
       case 'ARRIVED':
-        return 'CHEGOU';
+        return context.l10n.statusArrived;
       case 'COMPLETED':
-        return 'CONCLUÍDO';
+        return context.l10n.statusCompleted;
       case 'NO_SHOW':
-        return 'NÃO VEIO';
+        return context.l10n.statusNoShow;
       case 'CANCELLED':
-        return 'CANCELADO';
+        return context.l10n.statusCancelled;
       default:
-        return 'AGUARDANDO';
+        return context.l10n.statusWaiting;
     }
   }
 

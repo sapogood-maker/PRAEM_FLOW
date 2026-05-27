@@ -10,6 +10,7 @@ import '../auth/auth_service.dart';
 import '../driver/driver_state.dart';
 import '../config/app_config.dart';
 import '../core/constants.dart';
+import '../core/l10n.dart';
 import '../shared/widgets/operational_button.dart';
 
 class VehicleSelectScreen extends StatefulWidget {
@@ -37,8 +38,7 @@ class _VehicleSelectScreenState extends State<VehicleSelectScreen> {
       final resp = await _dio.get(
         '${AppConfig.apiBaseUrl}/vehicles',
         queryParameters: {'active': true, 'status': 'AVAILABLE'},
-        options: Options(
-            headers: {'Authorization': 'Bearer ${auth.token}'}),
+        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
       );
       final data = resp.data;
       final items = (data is Map ? data['items'] : data) as List? ?? [];
@@ -49,7 +49,7 @@ class _VehicleSelectScreenState extends State<VehicleSelectScreen> {
       });
     } on DioException catch (e) {
       setState(() {
-        _error = 'Erro ao carregar veículos: ${e.message}';
+        _error = context.l10n.vehicleLoadError(e.message ?? '');
         _loading = false;
       });
     }
@@ -66,8 +66,8 @@ class _VehicleSelectScreenState extends State<VehicleSelectScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
-        title: const Text('Selecionar Veículo',
-            style: TextStyle(color: AppColors.textPrimary)),
+        title: Text(context.l10n.vehicleSelectTitle,
+            style: const TextStyle(color: AppColors.textPrimary)),
         automaticallyImplyLeading: false,
       ),
       body: _loading
@@ -84,7 +84,7 @@ class _VehicleSelectScreenState extends State<VehicleSelectScreen> {
                           textAlign: TextAlign.center),
                       const SizedBox(height: 16),
                       OperationalButton(
-                          label: 'TENTAR NOVAMENTE',
+                          label: context.l10n.retry,
                           icon: Icons.refresh,
                           onPressed: () {
                             setState(() {
@@ -121,10 +121,9 @@ class _VehicleSelectScreenState extends State<VehicleSelectScreen> {
                               fontWeight: FontWeight.bold),
                         ),
                         subtitle: Text(
-                          '${v['type']} · Cap. ${v['capacity']} pac.',
+                          '${v['type']} · ${context.l10n.vehicleCapacity(v['capacity'])}',
                           style: const TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 14),
+                              color: AppColors.textSecondary, fontSize: 14),
                         ),
                         trailing: const Icon(Icons.chevron_right,
                             color: AppColors.textSecondary),

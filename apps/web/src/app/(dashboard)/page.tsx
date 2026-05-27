@@ -7,6 +7,7 @@ import { OperationalRail } from '@/components/dashboard/OperationalRail';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useQueue } from '@/hooks/useQueue';
 import { useRealtimeStore } from '@/store/realtime.store';
+import { UI_TEXT } from '@/lib/ui-text';
 import type { QueueItem, OperationalKpis } from '@/types';
 
 const OperationalMap = dynamic(() => import('@/components/map/OperationalMap'), { ssr: false });
@@ -95,22 +96,22 @@ export default function DashboardPage() {
       <header className='space-y-4'>
         <div className='flex flex-wrap items-end justify-between gap-4'>
           <div className='max-w-3xl'>
-            <p className='text-[11px] uppercase tracking-[0.35em] text-cyan-300/70'>PRAEM OPS · live command center</p>
-            <h2 className='mt-2 text-3xl font-semibold text-slate-50'>Operations Today</h2>
+            <p className='text-[11px] uppercase tracking-[0.35em] text-cyan-300/70'>{UI_TEXT.dashboard.overline}</p>
+            <h2 className='mt-2 text-3xl font-semibold text-slate-50'>{UI_TEXT.dashboard.title}</h2>
             <p className='mt-2 text-sm text-slate-400'>
-              Realtime dispatch visibility for vehicles, patient logistics, route execution, and operational alerts.
+              {UI_TEXT.dashboard.description}
             </p>
           </div>
           <div className='flex flex-wrap items-center gap-2 text-xs text-slate-400'>
             <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 ${connected ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
               <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-300 animate-pulse' : 'bg-slate-500'}`} />
-              {connected ? 'Realtime connected' : 'Realtime offline'}
+              {connected ? UI_TEXT.dashboard.realtimeConnected : UI_TEXT.dashboard.realtimeOffline}
             </span>
             <span className='rounded-full border border-white/5 bg-white/5 px-3 py-1 text-slate-300'>
-              {activeRouteCount} routes tracked
+              {activeRouteCount} {UI_TEXT.dashboard.routesTracked}
             </span>
             <span className='rounded-full border border-white/5 bg-white/5 px-3 py-1 text-slate-300'>
-              {boardingEvents.length} boarding events
+              {boardingEvents.length} {UI_TEXT.dashboard.boardingEvents}
             </span>
           </div>
         </div>
@@ -122,22 +123,22 @@ export default function DashboardPage() {
         <OperationalMap pickupPoints={pickupPoints} showFleetList={false} className='h-full' />
         <div className='space-y-4'>
           <div className='rounded-[24px] border border-white/5 bg-slate-950/70 p-4 shadow-2xl backdrop-blur-xl'>
-            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>Active operations</p>
+            <p className='text-[11px] uppercase tracking-[0.3em] text-slate-500'>{UI_TEXT.dashboard.activeOperations}</p>
             <div className='mt-3 grid grid-cols-2 gap-2 text-sm'>
               <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>Routes live</p>
+                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.dashboard.routesLive}</p>
                 <p className='mt-1 text-lg font-semibold text-slate-100'>{activeRouteCount}</p>
               </div>
               <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>Alerts</p>
+                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.dashboard.alerts}</p>
                 <p className='mt-1 text-lg font-semibold text-slate-100'>{liveSignals}</p>
               </div>
               <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>In transit</p>
+                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.dashboard.inTransit}</p>
                 <p className='mt-1 text-lg font-semibold text-slate-100'>{kpis.activeVehicles}</p>
               </div>
               <div className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
-                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>Waiting</p>
+                <p className='text-[11px] uppercase tracking-[0.25em] text-slate-500'>{UI_TEXT.dashboard.waitingBoarding}</p>
                 <p className='mt-1 text-lg font-semibold text-slate-100'>{kpis.waitingPatients}</p>
               </div>
             </div>

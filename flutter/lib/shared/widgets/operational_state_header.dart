@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../operational/operation_state.dart';
 import '../../operational/operation_controller.dart';
 import '../../core/constants.dart';
+import '../../core/l10n.dart';
 
 class OperationalStateHeader extends StatelessWidget {
   const OperationalStateHeader({super.key});
@@ -54,16 +55,20 @@ class OperationalStateHeader extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               '${ctrl.activeRoute!['origin'] ?? ''} → ${ctrl.activeRoute!['destination'] ?? ''}',
-              style: const TextStyle(
-                  color: AppColors.textSecondary, fontSize: 12),
+              style:
+                  const TextStyle(color: AppColors.textSecondary, fontSize: 12),
               overflow: TextOverflow.ellipsis,
             ),
           ],
           if (ctrl.isStaleRoute) ...[
             const SizedBox(height: 6),
             Text(
-              '⚠️ Rota stale (${ctrl.staleElapsedHours}h) · ${ctrl.staleLevel}',
-              style: const TextStyle(color: AppColors.warning, fontSize: 12, fontWeight: FontWeight.bold),
+              context.l10n
+                  .staleRouteWarning(ctrl.staleElapsedHours, ctrl.staleLevel),
+              style: const TextStyle(
+                  color: AppColors.warning,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold),
             ),
           ],
           if (ctrl.lastError != null) ...[

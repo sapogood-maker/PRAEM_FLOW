@@ -8,6 +8,7 @@ import '../trips/trip_screen.dart';
 import '../qr/qr_scanner_screen.dart';
 import '../vehicles/vehicle_select_screen.dart';
 import 'constants.dart';
+import 'l10n.dart';
 
 Route<dynamic> generateRoute(RouteSettings settings) {
   switch (settings.name) {
@@ -23,8 +24,8 @@ Route<dynamic> generateRoute(RouteSettings settings) {
       return MaterialPageRoute(builder: (_) => const VehicleSelectScreen());
     default:
       return MaterialPageRoute(
-        builder: (_) => const Scaffold(
-          body: Center(child: Text('Rota não encontrada')),
+        builder: (context) => Scaffold(
+          body: Center(child: Text(context.l10n.routeNotFound)),
         ),
       );
   }

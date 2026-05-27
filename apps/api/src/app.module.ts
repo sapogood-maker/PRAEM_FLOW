@@ -34,6 +34,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { SchedulingImportModule } from './modules/scheduling-import/scheduling-import.module';
 import { SusImportModule } from './modules/sus-import/sus-import.module';
+import { DispatchEngineModule } from './modules/dispatch-engine/dispatch-engine.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { SusImportModule } from './modules/sus-import/sus-import.module';
     SyncModule,
     SchedulingImportModule,
     SusImportModule,
+    DispatchEngineModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

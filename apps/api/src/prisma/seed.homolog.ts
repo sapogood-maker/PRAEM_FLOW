@@ -262,7 +262,7 @@ async function main() {
     const qrExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
     const patient = await prisma.patient.upsert({
-      where: { tenantId_cpf: { tenantId: tenant.id, cpf: p.cpf } },
+      where: { cpf: p.cpf },
       update: {},
       create: {
         tenantId: tenant.id,

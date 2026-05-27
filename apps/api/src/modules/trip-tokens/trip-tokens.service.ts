@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../gateways/realtime.gateway';
+import { buildTripQrPayload, issueQrToken } from '../../common/qr-payload';
 
 export type TokenType = 'CONFIRMATION' | 'BOARDING' | 'RETURN' | 'REBOOK';
 
@@ -29,7 +29,7 @@ export class TripTokensService {
 
     const ttl = TOKEN_TTL_MINUTES[type] ?? 60;
     const expiresAt = new Date(Date.now() + ttl * 60_000);
-    const token = randomUUID();
+    const token = issueQrToken();
 
     const created = await this.prisma.tripToken.create({
       data: {
@@ -49,6 +49,14 @@ export class TripTokensService {
       expiresAt: created.expiresAt,
       url: `/t/${created.token}`,
       patientName: trip.patient?.name,
+      qrContent: JSON.stringify(buildTripQrPayload({
+        tripId: trip.id,
+        patientId: trip.patientId,
+        routeId: trip.routeId,
+        operationId: trip.routeId,
+        validationToken: created.token,
+        expiresAt,
+      })),
     };
   }
 
@@ -112,6 +120,14 @@ export class TripTokensService {
       expiresAt: record.expiresAt,
       patient: record.patient,
       trip: record.trip,
+      qrContent: JSON.stringify(buildTripQrPayload({
+        tripId: record.trip.id,
+        patientId: record.patient.id,
+        routeId: record.trip.route.id,
+        operationId: record.trip.route.id,
+        validationToken: record.token,
+        expiresAt: record.expiresAt,
+      })),
     };
   }
 
@@ -124,7 +140,7 @@ export class TripTokensService {
       where: { token },
       include: {
         trip: { select: { id: true, status: true, tenantId: true, routeId: true, patientId: true } },
-        patient: { select: { name: true } },
+        patient: { select: { id: true, name: true } },
       },
     });
 

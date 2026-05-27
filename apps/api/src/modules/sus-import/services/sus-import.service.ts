@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, SusImportRowStatus, SusImportStatus } from '@prisma/client';
+import { Prisma, QueueStatus, SusImportRowStatus, SusImportStatus } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { PatientsService } from '../../patients/patients.service';
 import { UploadSusImportDto } from '../dto/upload-sus-import.dto';
 import { ParsedSusRow, SusSpreadsheetParser } from '../parsers/sus-spreadsheet.parser';
 import { SusImportRowValidator } from '../validators/sus-import-row.validator';
@@ -13,6 +14,7 @@ type UploadFile = { buffer?: Buffer; originalname?: string; mimetype?: string; s
 export class SusImportService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly patientsService: PatientsService,
     private readonly parser: SusSpreadsheetParser,
     private readonly validator: SusImportRowValidator,
     private readonly mapper: SusImportRowMapper,
@@ -48,6 +50,13 @@ export class SusImportService {
     let malformedRows = 0;
     let invalidDateRows = 0;
     const seenRowKeys = new Set<string>();
+    const normalizedRows: Array<{
+      lineNumber: number;
+      rawData: Record<string, string>;
+      normalized: ReturnType<SusImportRowMapper['map']>;
+      validation: ReturnType<SusImportRowValidator['validate']>;
+      rowHash: string;
+    }> = [];
 
     const stagedRows: Prisma.SusImportRowCreateManyInput[] = parsedRows.map((row) => {
       const validation = this.validator.validate(row.rawData, {
@@ -63,6 +72,8 @@ export class SusImportService {
 
       if (validation.valid) validRows += 1;
       else invalidRows += 1;
+
+      normalizedRows.push({ lineNumber: row.lineNumber, rawData: row.rawData, normalized, validation, rowHash });
 
       return {
         tenantId,
@@ -100,14 +111,36 @@ export class SusImportService {
       },
     });
 
+    const processingResult = await this.applyOperationalChanges(tenantId, normalizedRows.filter((row) => row.validation.valid).map((row) => row.normalized));
+    const finalStatus = validRows > 0 ? SusImportStatus.PROCESSED : importStatus;
+
+    await this.prisma.susImport.update({
+      where: { id: createdImport.id },
+      data: {
+        status: finalStatus,
+        processedAt: validRows > 0 ? new Date() : null,
+        metadata: {
+          validationCompletedAt: new Date().toISOString(),
+          processingCompletedAt: new Date().toISOString(),
+          canProcess: invalidRows === 0,
+          duplicateRows,
+          malformedRows,
+          invalidDateRows,
+          previewRequired: false,
+          processingResult,
+        },
+      },
+    });
+
     return {
       id: createdImport.id,
-      status: importStatus,
+      status: finalStatus,
       totalRows: stagedRows.length,
       validRows,
       invalidRows,
       previewAvailable: true,
       canProcess: invalidRows === 0,
+      processed: processingResult,
       preview: {
         endpoint: `/sus-import/${createdImport.id}/preview`,
         duplicateRows,
@@ -247,7 +280,212 @@ export class SusImportService {
     }));
   }
 
+  private async applyOperationalChanges(
+    tenantId: string,
+    rows: Array<ReturnType<SusImportRowMapper['map']>>,
+  ) {
+    if (rows.length === 0) {
+      return { createdPatients: 0, reusedPatients: 0, createdQueues: 0, reusedQueues: 0, createdRoutes: 0, createdTrips: 0 };
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { city: true, state: true },
+    });
+    if (!tenant) {
+      throw new BadRequestException('Tenant not found');
+    }
+
+    const groups = new Map<string, Array<{ row: ReturnType<SusImportRowMapper['map']>; patientId: string; queueId: string; destinationId: string }>>();
+    let createdPatients = 0;
+    let reusedPatients = 0;
+    let createdQueues = 0;
+    let reusedQueues = 0;
+
+    for (const row of rows) {
+      const patient = await this.patientsService.upsertFromSusImport(tenantId, {
+        name: row.patient_name,
+        cpf: row.cpf,
+        phone: row.phone,
+        address: row.destination_address || row.destination_hospital,
+        notes: row.notes,
+        specialRequirements: row.special_requirements,
+        emergencyContact: row.phone,
+        recurringPatient: row.return_trip,
+      });
+
+      if ((patient as any)._created) createdPatients += 1;
+      else reusedPatients += 1;
+
+      const destination = await this.findOrCreateDestination(tenantId, row, tenant.city, tenant.state);
+      const queue = await this.findOrCreateQueue(tenantId, patient.id, destination.id, row);
+      if (queue.created) createdQueues += 1;
+      else reusedQueues += 1;
+
+      const key = this.groupKey(row, destination.id);
+      const items = groups.get(key) ?? [];
+      items.push({ row, patientId: patient.id, queueId: queue.id, destinationId: destination.id });
+      groups.set(key, items);
+    }
+
+    const routeResults: Array<{ routeId: string; destination: string; tripCount: number }> = [];
+    let createdRoutes = 0;
+    let createdTrips = 0;
+
+    for (const [, items] of groups) {
+      const first = items[0];
+      const routeDate = new Date(first.row.appointment_at);
+      const dispatchType = routeDate.getTime() > Date.now() ? 'SCHEDULED' : 'IMMEDIATE';
+      const route = await this.findOrCreateRoute(tenantId, first.row, first.destinationId, routeDate, dispatchType);
+      if (route.created) createdRoutes += 1;
+
+      for (const item of items) {
+        const trip = await this.findOrCreateTrip(tenantId, route.id, item.patientId, item.row);
+        if (trip.created) createdTrips += 1;
+        await this.prisma.operationalQueue.update({
+          where: { id: item.queueId },
+          data: { status: dispatchType === 'SCHEDULED' ? QueueStatus.SCHEDULED : QueueStatus.ASSIGNED },
+        });
+      }
+
+      routeResults.push({ routeId: route.id, destination: first.row.destination_hospital, tripCount: items.length });
+    }
+
+    return { createdPatients, reusedPatients, createdQueues, reusedQueues, createdRoutes, createdTrips, routes: routeResults };
+  }
+
   private hashRow(rawData: Record<string, string>): string {
     return createHash('sha256').update(JSON.stringify(rawData)).digest('hex');
+  }
+
+  private groupKey(row: ReturnType<SusImportRowMapper['map']>, destinationId: string) {
+    const minuteKey = row.appointment_at.slice(0, 16);
+    return `${destinationId}|${minuteKey}`;
+  }
+
+  private async findOrCreateDestination(
+    tenantId: string,
+    row: ReturnType<SusImportRowMapper['map']>,
+    fallbackCity: string,
+    fallbackState: string,
+  ) {
+    const existing = await this.prisma.healthcareLocation.findFirst({
+      where: {
+        tenantId,
+        active: true,
+        name: { equals: row.destination_hospital, mode: 'insensitive' },
+        city: { equals: row.origin_city || fallbackCity, mode: 'insensitive' },
+      },
+      select: { id: true, name: true },
+    });
+    if (existing) return existing;
+
+    return this.prisma.healthcareLocation.create({
+      data: {
+        tenantId,
+        name: row.destination_hospital,
+        type: 'HOSPITAL',
+        city: fallbackCity,
+        state: fallbackState,
+        address: row.destination_address || row.destination_hospital,
+        active: true,
+      },
+      select: { id: true, name: true },
+    });
+  }
+
+  private async findOrCreateQueue(
+    tenantId: string,
+    patientId: string,
+    destinationId: string,
+    row: ReturnType<SusImportRowMapper['map']>,
+  ) {
+    const appointmentDate = new Date(row.appointment_at);
+    const existing = await this.prisma.operationalQueue.findFirst({
+      where: {
+        tenantId,
+        patientId,
+        healthcareLocationId: destinationId,
+        appointmentDate,
+        status: { in: [QueueStatus.WAITING, QueueStatus.CONFIRMED, QueueStatus.ASSIGNED, QueueStatus.SCHEDULED] },
+      },
+      select: { id: true },
+    });
+    if (existing) return { id: existing.id, created: false };
+
+    const created = await this.prisma.operationalQueue.create({
+      data: {
+        tenantId,
+        patientId,
+        healthcareLocationId: destinationId,
+        destination: row.destination_hospital,
+        appointmentDate,
+        priority: row.priority,
+        queueType: 'LOGISTICS',
+        status: 'WAITING',
+        confirmationStatus: 'PENDING',
+        notes: row.notes,
+      },
+    });
+    return { id: created.id, created: true };
+  }
+
+  private async findOrCreateRoute(
+    tenantId: string,
+    row: ReturnType<SusImportRowMapper['map']>,
+    destinationId: string,
+    routeDate: Date,
+    dispatchType: 'SCHEDULED' | 'IMMEDIATE',
+  ) {
+    const existing = await this.prisma.route.findFirst({
+      where: {
+        tenantId,
+        destination: row.destination_hospital,
+        date: routeDate,
+        dispatchType,
+      },
+      select: { id: true },
+    });
+    if (existing) return { id: existing.id, created: false };
+
+    const created = await this.prisma.route.create({
+      data: {
+        tenantId,
+        origin: row.origin_city || 'Central PRAEM OPS',
+        destination: row.destination_hospital,
+        date: routeDate,
+        scheduledAt: dispatchType === 'SCHEDULED' ? routeDate : null,
+        dispatchType,
+        status: dispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED',
+        waypoints: { destinationId, source: 'sus-import' },
+      },
+      select: { id: true },
+    });
+    return { id: created.id, created: true };
+  }
+
+  private async findOrCreateTrip(
+    tenantId: string,
+    routeId: string,
+    patientId: string,
+    row: ReturnType<SusImportRowMapper['map']>,
+  ) {
+    const existing = await this.prisma.trip.findFirst({
+      where: { tenantId, routeId, patientId },
+      select: { id: true },
+    });
+    if (existing) return { id: existing.id, created: false };
+
+    const created = await this.prisma.trip.create({
+      data: {
+        tenantId,
+        routeId,
+        patientId,
+        status: 'SCHEDULED',
+        notes: row.notes ?? null,
+      },
+      select: { id: true },
+    });
+    return { id: created.id, created: true };
   }
 }

@@ -4,8 +4,10 @@ import { SusImportService } from './services/sus-import.service';
 import { SusSpreadsheetParser } from './parsers/sus-spreadsheet.parser';
 import { SusImportRowValidator } from './validators/sus-import-row.validator';
 import { SusImportRowMapper } from './mappers/sus-import-row.mapper';
+import { PatientsModule } from '../patients/patients.module';
 
 @Module({
+  imports: [PatientsModule],
   controllers: [SusImportController],
   providers: [
     SusImportService,
@@ -16,4 +18,3 @@ import { SusImportRowMapper } from './mappers/sus-import-row.mapper';
   exports: [SusImportService],
 })
 export class SusImportModule {}
-

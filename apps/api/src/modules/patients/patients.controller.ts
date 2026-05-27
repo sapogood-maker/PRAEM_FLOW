@@ -95,7 +95,8 @@ export class PatientsController {
   validateQr(
     @Request() req: AuthRequest,
     @Body() body: {
-      qrToken: string;
+      qrToken?: string;
+      payload?: Record<string, any>;
       vehicleId?: string;
       checkpoint?: string;
       gpsLat?: number;
@@ -113,6 +114,7 @@ export class PatientsController {
       req.user.tenantId,
       {
         ...safeBody,
+        payload: safeBody.payload ?? undefined,
         operatorId: req.user.driverId ?? req.user.userId,
         source: safeBody.source ?? 'TABLET',
       },
@@ -127,7 +129,8 @@ export class PatientsController {
   scanQr(
     @Request() req: AuthRequest,
     @Body() body: {
-      qrToken: string;
+      qrToken?: string;
+      payload?: Record<string, any>;
       vehicleId?: string;
       routeId?: string;
       deviceId?: string;
@@ -142,6 +145,7 @@ export class PatientsController {
       req.user.tenantId,
       {
         ...safeBody,
+        payload: safeBody.payload ?? undefined,
         operatorId: req.user.driverId ?? req.user.userId,
         source: safeBody.source ?? 'TABLET',
       },

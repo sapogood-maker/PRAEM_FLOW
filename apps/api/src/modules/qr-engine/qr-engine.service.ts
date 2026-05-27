@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { createHmac, randomUUID } from 'crypto';
+import { createHmac } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GenerateQrPayloadDto, QrCheckpoint } from './dto/generate-qr-payload.dto';
 import { ValidateQrPayloadDto } from './dto/validate-qr-payload.dto';
+import { buildPatientQrPayload, buildTripQrPayload, issueQrToken } from '../../common/qr-payload';
 
 type QrPayload = {
   version: number;
@@ -28,38 +29,55 @@ export class QrEngineService {
   constructor(private readonly prisma: PrismaService) {}
 
   async generatePayload(tenantId: string, body: GenerateQrPayloadDto) {
-    const patient = await this.prisma.patient.findFirst({
-      where: { id: body.patientId, tenantId },
-      select: { id: true, name: true },
-    });
-    if (!patient) throw new NotFoundException('Patient not found');
-
-    const checkpoint = this.normalizeCheckpoint(body.checkpoint);
     const validityMinutes = this.normalizeValidityMinutes(body.validityMinutes);
     const issuedAt = new Date();
     const expiration = new Date(issuedAt.getTime() + validityMinutes * 60_000);
-    const operationReference = body.operationReference ?? body.tripId ?? body.routeId ?? `OPS-${randomUUID()}`;
+    const kind = String(body.kind ?? (body.tripId ? 'TRIP' : 'PATIENT')).toUpperCase() as 'PATIENT' | 'TRIP';
 
-    const unsigned: Omit<QrPayload, 'secureHash' | 'signature'> = {
-      version: 1,
-      uniqueId: randomUUID(),
-      operationReference,
-      patientReference: body.patientId,
-      checkpoint,
-      expiration: expiration.toISOString(),
-      issuedAt: issuedAt.toISOString(),
-      tripId: body.tripId ?? null,
-      routeId: body.routeId ?? null,
-      patientId: body.patientId,
-      boardingCode: operationReference,
-      expiresAt: expiration.toISOString(),
-    };
-    const signature = this.sign(unsigned);
-    const payload: QrPayload = {
-      ...unsigned,
-      secureHash: signature,
-      signature,
-    };
+    if (kind === 'TRIP' || body.tripId) {
+      const trip = await this.prisma.trip.findFirst({
+        where: { id: body.tripId, tenantId },
+        include: {
+          route: { select: { id: true, destination: true } },
+          patient: { select: { id: true, name: true, praemId: true, operationalId: true } },
+        },
+      });
+      if (!trip) throw new NotFoundException('Trip not found');
+
+      const validationToken = body.validationToken ?? issueQrToken();
+      const payload = buildTripQrPayload({
+        tripId: trip.id,
+        patientId: trip.patientId,
+        routeId: trip.routeId,
+        operationId: body.operationReference ?? trip.routeId,
+        validationToken,
+        issuedAt,
+        expiresAt: expiration,
+      });
+
+      return {
+        valid: true,
+        payload,
+        qrContent: JSON.stringify(payload),
+        trip,
+        validityMinutes,
+      };
+    }
+
+    const patient = await this.prisma.patient.findFirst({
+      where: { id: body.patientId, tenantId },
+      select: { id: true, name: true, praemId: true, operationalId: true, qrToken: true, qrIssuedAt: true, qrExpiresAt: true },
+    });
+    if (!patient) throw new NotFoundException('Patient not found');
+
+    const validationToken = body.validationToken ?? patient.qrToken ?? issueQrToken();
+    const payload = buildPatientQrPayload({
+      patientId: patient.id,
+      praemId: patient.praemId ?? patient.operationalId ?? `PRAEM-${patient.id.replace(/-/g, '').slice(-6)}`,
+      validationToken,
+      issuedAt: patient.qrIssuedAt ?? issuedAt,
+      expiresAt: patient.qrExpiresAt ?? null,
+    });
 
     return {
       valid: true,
@@ -73,6 +91,83 @@ export class QrEngineService {
   async validatePayload(tenantId: string, body: ValidateQrPayloadDto) {
     const payload = this.parsePayload(body);
     const normalized = this.normalizePayload(payload);
+
+    if (normalized.kind === 'PATIENT' || normalized.kind === 'TRIP') {
+      const isTrip = normalized.kind === 'TRIP';
+      if (!normalized.validationToken || !normalized.secureHash) {
+        throw new BadRequestException('QR payload is incomplete');
+      }
+      if (isTrip && !normalized.tripId) {
+        throw new BadRequestException('QR payload is incomplete');
+      }
+      if (isTrip && !normalized.expiresAt) {
+        throw new BadRequestException('QR payload is incomplete');
+      }
+      if (!isTrip && !normalized.patientId && !normalized.praemId) {
+        throw new BadRequestException('QR payload is incomplete');
+      }
+      const expectedCheckpoint = body.expectedCheckpoint ? this.normalizeCheckpoint(body.expectedCheckpoint) : null;
+      if (expectedCheckpoint && normalized.checkpoint && normalized.checkpoint !== expectedCheckpoint) {
+        throw new BadRequestException(`QR checkpoint mismatch: expected ${expectedCheckpoint}, got ${normalized.checkpoint}`);
+      }
+
+      if (isTrip) {
+        const trip = await this.prisma.trip.findFirst({
+          where: { tenantId, id: normalized.tripId },
+          include: { patient: { select: { id: true, name: true, praemId: true, operationalId: true } }, route: { select: { id: true, destination: true } } },
+        });
+        if (!trip) throw new NotFoundException('Trip not found');
+
+        const expected = buildTripQrPayload({
+          tripId: trip.id,
+          patientId: trip.patientId,
+          routeId: trip.routeId,
+          operationId: normalized.operationId ?? trip.routeId,
+          validationToken: normalized.validationToken,
+          issuedAt: new Date(normalized.issuedAt ?? new Date().toISOString()),
+          expiresAt: new Date(normalized.expiresAt),
+        });
+        if (!this.constantTimeEquals(expected.secure_hash, normalized.secureHash)) {
+          throw new BadRequestException('QR signature mismatch');
+        }
+
+        return {
+          valid: true,
+          payload: normalized,
+          patient: trip.patient,
+          trip,
+        };
+      }
+
+      const patient = await this.prisma.patient.findFirst({
+        where: {
+          tenantId,
+          OR: [
+            ...(normalized.patientId ? [{ id: normalized.patientId }] : []),
+            ...(normalized.praemId ? [{ praemId: normalized.praemId }] : []),
+          ],
+        },
+        select: { id: true, name: true, praemId: true, operationalId: true, qrToken: true, qrIssuedAt: true, qrExpiresAt: true },
+      });
+      if (!patient) throw new NotFoundException('Patient not found');
+
+      const expected = buildPatientQrPayload({
+        patientId: patient.id,
+        praemId: patient.praemId ?? patient.operationalId ?? patient.id,
+        validationToken: normalized.validationToken,
+        issuedAt: patient.qrIssuedAt ?? new Date(),
+        expiresAt: patient.qrExpiresAt ?? null,
+      });
+      if (!this.constantTimeEquals(expected.secure_hash, normalized.secureHash)) {
+        throw new BadRequestException('QR signature mismatch');
+      }
+
+      return {
+        valid: true,
+        payload: normalized,
+        patient,
+      };
+    }
 
     if (!normalized.uniqueId || !normalized.patientReference || !normalized.operationReference || !normalized.expiration || !normalized.signature) {
       throw new BadRequestException('QR payload is incomplete');
@@ -103,7 +198,7 @@ export class QrEngineService {
           uniqueId: normalized.uniqueId,
           operationReference: normalized.operationReference,
           patientReference: normalized.patientReference,
-          checkpoint: normalized.checkpoint,
+          checkpoint: normalized.checkpoint ?? 'BOARDING',
           expiration: normalized.expiration,
           issuedAt: normalized.issuedAt ?? new Date().toISOString(),
           tripId: normalized.tripId,
@@ -149,6 +244,32 @@ export class QrEngineService {
   }
 
   private normalizePayload(payload: Record<string, any>) {
+    const kindRaw = String(payload.type ?? payload.kind ?? '').trim().toUpperCase();
+    const patientId = payload.patient_id?.toString() ?? payload.patientId?.toString() ?? payload.patientReference?.toString() ?? null;
+    const praemId = payload.praem_id?.toString() ?? payload.praemId?.toString() ?? null;
+    const tripId = payload.trip_id?.toString() ?? payload.tripId?.toString() ?? null;
+    const routeId = payload.route_id?.toString() ?? payload.routeId?.toString() ?? null;
+    const operationId = payload.operation_id?.toString() ?? payload.operationId?.toString() ?? null;
+    const validationToken = payload.validation_token?.toString() ?? payload.validationToken?.toString() ?? payload.qrToken?.toString() ?? null;
+    const secureHash = payload.secure_hash?.toString() ?? payload.secureHash?.toString() ?? payload.signature?.toString() ?? null;
+    const expiresAt = payload.expires_at?.toString() ?? payload.expiresAt?.toString() ?? null;
+
+    if (kindRaw === 'PATIENT' || kindRaw === 'TRIP' || patientId || tripId || routeId) {
+      return {
+        kind: kindRaw === 'TRIP' || tripId ? 'TRIP' : 'PATIENT',
+        patientId,
+        praemId,
+        tripId,
+        routeId,
+        operationId,
+        validationToken,
+        secureHash,
+        expiresAt,
+        checkpoint: payload.checkpoint ? this.normalizeCheckpoint(payload.checkpoint) : null,
+        issuedAt: payload.issued_at?.toString() ?? payload.issuedAt?.toString() ?? null,
+      };
+    }
+
     const uniqueId = payload.uniqueId?.toString() ?? payload.id?.toString() ?? null;
     const patientReference = payload.patientReference?.toString() ?? payload.patientId?.toString() ?? null;
     const operationReference = payload.operationReference?.toString() ?? payload.boardingCode?.toString() ?? payload.operationRef?.toString() ?? null;
@@ -222,4 +343,3 @@ export class QrEngineService {
     return out === 0;
   }
 }
-

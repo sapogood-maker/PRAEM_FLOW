@@ -101,6 +101,13 @@ export class TripsService {
       source: 'TRIP_COMPLETED',
     });
 
+    if (result.trip?.patientId) {
+      await this.prisma.patient.update({
+        where: { id: result.trip.patientId },
+        data: { lastTransportDate: new Date() },
+      }).catch(() => undefined);
+    }
+
     // [WHATSAPP] Notify patient of trip completion
     if (this.whatsapp && result.trip) {
       const trip = result.trip as { patientId?: string };

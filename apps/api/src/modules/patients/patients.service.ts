@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { QrScanSource } from '@prisma/client';
-import { createHash, randomUUID } from 'crypto';
+import { QrScanSource, Prisma, Patient } from '@prisma/client';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
+import { buildPatientQrPayload, buildTripQrPayload, issueQrToken, normalizeCpf, stableHash } from '../../common/qr-payload';
 
 export interface ListPatientsQuery {
   tenantId: string;
@@ -13,35 +13,58 @@ export interface ListPatientsQuery {
   limit?: number;
 }
 
-/** SHA-256 hash of a raw QR token — only the hash is stored in DB */
-function hashToken(raw: string): string {
-  return createHash('sha256').update(raw).digest('hex');
-}
-
 /** Fields returned in operational/public contexts — CPF never included */
 const SAFE_SELECT = {
   id: true,
   name: true,
+  cpf: true,
   mobility: true,
   clinicalRisk: true,
   requiresCompanion: true,
   operationalId: true,
+  praemId: true,
+  qrCodeUrl: true,
+  qrHash: true,
   qrTokenHash: true,
+  qrToken: true,
   qrIssuedAt: true,
   qrActive: true,
   qrLastReadAt: true,
   qrExpiresAt: true,
+  qrRevokedAt: true,
   qrVersion: true,
   address: true,
   lat: true,
   lng: true,
+  birthDate: true,
+  phone: true,
+  notes: true,
+  specialRequirements: true,
+  emergencyContact: true,
+  recurringPatient: true,
+  recurrent: true,
+  lastTransportDate: true,
+  queues: {
+    select: {
+      healthcareLocationId: true,
+      destination: true,
+      priority: true,
+      status: true,
+      appointmentDate: true,
+      healthcareLocation: {
+        select: { name: true, city: true, address: true, specialties: { select: { specialty: true } } },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 1,
+  },
 };
 
 const VALID_QR_SOURCES = new Set<QrScanSource>(['TABLET', 'TABLET_SMART_SCANNER', 'TOTEM', 'MOBILE', 'API']);
 
 /** Strip CPF and other PII before returning to caller */
 function stripSensitive(patient: Record<string, unknown>) {
-  const { cpf: _cpf, birthDate: _bd, companionDocument: _cd, ...safe } = patient;
+  const { cpf: _cpf, birthDate: _bd, companionDocument: _cd, qrToken: _qt, qrTokenHash: _qth, ...safe } = patient;
   return safe;
 }
 
@@ -51,6 +74,253 @@ export class PatientsService {
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
   ) {}
+
+  async findByCpf(tenantId: string, cpf: string) {
+    const normalizedCpf = normalizeCpf(cpf);
+    if (!normalizedCpf) throw new BadRequestException('CPF is required');
+    return this.prisma.patient.findFirst({ where: { tenantId, cpf: normalizedCpf } });
+  }
+
+  async upsertByCpf(
+    tenantId: string,
+    data: any,
+    options?: { source?: 'MANUAL' | 'SUS_IMPORT'; patientId?: string; allowPartial?: boolean },
+  ) {
+    const normalized = this.normalizePatientInput(data);
+    const existing = await this.prisma.patient.findFirst({
+      where: { tenantId, cpf: normalized.cpf },
+    });
+
+    if (existing) {
+      const merged = this.mergePatientData(existing, normalized, options?.allowPartial ?? true, options?.source ?? 'MANUAL');
+      const updated = await this.prisma.patient.update({
+        where: { id: existing.id },
+        data: merged,
+      });
+      return { ...(await this.ensurePatientQrArtifacts(updated)), _created: false };
+    }
+
+    const created = await this.prisma.patient.create({
+      data: this.buildPatientCreateData(tenantId, normalized),
+    });
+    return { ...(await this.ensurePatientQrArtifacts(created)), _created: true };
+  }
+
+  async upsertFromSusImport(tenantId: string, data: any) {
+    return this.upsertByCpf(tenantId, data, { source: 'SUS_IMPORT', allowPartial: true });
+  }
+
+  async ensurePatientQrArtifacts(patient: Patient) {
+    const praemId = this.resolvePraemId(patient);
+    const validationToken = patient.qrToken ?? issueQrToken();
+    const payload = buildPatientQrPayload({
+      patientId: patient.id,
+      praemId,
+      validationToken,
+      issuedAt: patient.qrIssuedAt ?? new Date(),
+      expiresAt: patient.qrExpiresAt ?? null,
+    });
+    const qrContent = JSON.stringify(payload);
+
+    const shouldUpdate =
+      patient.praemId !== praemId ||
+      patient.qrToken !== validationToken ||
+      patient.qrTokenHash !== stableHash(validationToken) ||
+      patient.qrHash !== payload.secure_hash ||
+      patient.qrCode !== qrContent ||
+      patient.qrCodeUrl !== `/patients/${patient.id}/qr/image` ||
+      !patient.qrActive ||
+      !patient.qrIssuedAt;
+
+    if (shouldUpdate) {
+      const updated = await this.prisma.patient.update({
+        where: { id: patient.id },
+        data: {
+          praemId,
+          operationalId: patient.operationalId ?? praemId,
+          qrToken: validationToken,
+          qrTokenHash: stableHash(validationToken),
+          qrHash: payload.secure_hash,
+          qrCode: qrContent,
+          qrCodeUrl: `/patients/${patient.id}/qr/image`,
+          qrIssuedAt: patient.qrIssuedAt ?? new Date(),
+          qrActive: true,
+          qrVersion: patient.qrVersion ?? 1,
+        },
+      });
+      return updated;
+    }
+
+    return patient;
+  }
+
+  private normalizePatientInput(data: any) {
+    const cpf = normalizeCpf(data?.cpf);
+    if (!cpf) {
+      throw new BadRequestException('CPF is required');
+    }
+
+    const birthDate = this.parseBirthDate(data?.birthDate) ?? new Date('1970-01-01T00:00:00Z');
+    const name = String(data?.name ?? data?.patient_name ?? '').trim();
+    const phone = this.normalizeText(data?.phone);
+    const address = this.normalizeText(data?.address) || this.normalizeText(data?.destination_address) || 'Sem endereço informado';
+    const mobility = this.normalizeEnum(data?.mobility, ['NORMAL', 'WHEELCHAIR', 'STRETCHER', 'OXYGEN'], 'NORMAL');
+    const clinicalRisk = this.normalizeEnum(data?.clinicalRisk, ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'], 'LOW');
+    const requiresCompanion = this.toBoolean(data?.requiresCompanion ?? data?.companion);
+    const specialRequirements = this.normalizeText(data?.specialRequirements ?? data?.special_requirements);
+    const emergencyContact = this.normalizeText(data?.emergencyContact ?? data?.companionPhone);
+    const recurringPatient = this.toBoolean(data?.recurringPatient ?? data?.recurrent);
+    const praemId = this.normalizeText(data?.praemId ?? data?.operationalId) || `PRAEM-${cpf.slice(-6).padStart(6, '0')}`;
+    const operationalId = this.normalizeText(data?.operationalId) || praemId;
+
+    return {
+      cpf,
+      birthDate,
+      name,
+      phone: phone || null,
+      address,
+      mobility,
+      clinicalRisk,
+      requiresCompanion,
+      specialRequirements: specialRequirements || null,
+      emergencyContact: emergencyContact || null,
+      recurringPatient,
+      praemId,
+      operationalId,
+      notes: this.normalizeText(data?.notes) || null,
+      companionName: this.normalizeText(data?.companionName) || null,
+      companionPhone: this.normalizeText(data?.companionPhone) || null,
+      lat: this.normalizeNumber(data?.lat),
+      lng: this.normalizeNumber(data?.lng),
+      lastTransportDate: this.parseBirthDate(data?.lastTransportDate) ?? null,
+      qrCodeUrl: `/patients/${data?.id ?? ''}/qr/image`,
+    };
+  }
+
+  private buildPatientCreateData(tenantId: string, normalized: any) {
+    const rawToken = issueQrToken();
+    const qrTokenHash = stableHash(rawToken);
+    const patient = {
+      tenantId,
+      name: normalized.name || 'Paciente sem nome',
+      cpf: normalized.cpf,
+      birthDate: normalized.birthDate,
+      phone: normalized.phone,
+      address: normalized.address,
+      mobility: normalized.mobility,
+      clinicalRisk: normalized.clinicalRisk,
+      recurrent: normalized.recurringPatient,
+      recurringPatient: normalized.recurringPatient,
+      notes: normalized.notes,
+      praemId: normalized.praemId,
+      qrHash: null,
+      qrCode: null,
+      qrCodeUrl: null,
+      operationalId: normalized.operationalId,
+      lastTransportDate: normalized.lastTransportDate,
+      specialRequirements: normalized.specialRequirements,
+      emergencyContact: normalized.emergencyContact,
+      qrToken: rawToken,
+      qrTokenHash,
+      qrIssuedAt: new Date(),
+      qrActive: true,
+      qrVersion: 1,
+      requiresCompanion: normalized.requiresCompanion,
+      companionName: normalized.companionName,
+      companionPhone: normalized.companionPhone,
+      lat: normalized.lat,
+      lng: normalized.lng,
+    } as Prisma.PatientUncheckedCreateInput;
+    return patient;
+  }
+
+  private mergePatientData(
+    existing: Patient,
+    normalized: any,
+    allowPartial: boolean,
+    source: 'MANUAL' | 'SUS_IMPORT',
+  ) {
+    const data: Prisma.PatientUpdateInput = {};
+
+    if (!existing.name?.trim() && normalized.name) data.name = normalized.name;
+    if (!existing.phone?.trim() && normalized.phone) data.phone = normalized.phone;
+    if (!existing.address?.trim() && normalized.address) data.address = normalized.address;
+    if (!existing.specialRequirements?.trim() && normalized.specialRequirements) data.specialRequirements = normalized.specialRequirements;
+    if (!existing.emergencyContact?.trim() && normalized.emergencyContact) data.emergencyContact = normalized.emergencyContact;
+    if (!existing.notes?.trim() && normalized.notes) data.notes = normalized.notes;
+    if (!existing.praemId?.trim() && normalized.praemId) data.praemId = normalized.praemId;
+    if (!existing.operationalId?.trim() && normalized.operationalId) data.operationalId = normalized.operationalId;
+    if (!existing.qrCodeUrl?.trim()) data.qrCodeUrl = `/patients/${existing.id}/qr/image`;
+    if (!existing.qrActive) data.qrActive = true;
+    if (!existing.qrIssuedAt) data.qrIssuedAt = new Date();
+    if (!existing.qrTokenHash && existing.qrToken) data.qrTokenHash = stableHash(existing.qrToken);
+    if (!existing.qrHash && existing.qrToken) data.qrHash = stableHash(existing.qrToken);
+    if (!existing.qrCode && existing.qrToken && existing.praemId) {
+      const payload = buildPatientQrPayload({
+        patientId: existing.id,
+        praemId: existing.praemId,
+        validationToken: existing.qrToken,
+        issuedAt: existing.qrIssuedAt ?? new Date(),
+        expiresAt: existing.qrExpiresAt ?? null,
+      });
+      data.qrCode = JSON.stringify(payload);
+    }
+
+    if (allowPartial || source === 'SUS_IMPORT') {
+      if (existing.birthDate.getTime() === new Date('1970-01-01T00:00:00Z').getTime() && normalized.birthDate) {
+        data.birthDate = normalized.birthDate;
+      }
+      if (existing.lat == null && normalized.lat != null) data.lat = normalized.lat;
+      if (existing.lng == null && normalized.lng != null) data.lng = normalized.lng;
+      if (!existing.recurrent && normalized.recurringPatient) data.recurrent = normalized.recurringPatient;
+      if (!existing.recurringPatient && normalized.recurringPatient) data.recurringPatient = normalized.recurringPatient;
+      if (existing.lastTransportDate == null && normalized.lastTransportDate) data.lastTransportDate = normalized.lastTransportDate;
+      if (!existing.requiresCompanion && normalized.requiresCompanion) data.requiresCompanion = true;
+      if (!existing.companionName?.trim() && normalized.companionName) data.companionName = normalized.companionName;
+      if (!existing.companionPhone?.trim() && normalized.companionPhone) data.companionPhone = normalized.companionPhone;
+    }
+
+    return data;
+  }
+
+  private normalizeText(value: unknown) {
+    const text = String(value ?? '').trim();
+    return text.length > 0 ? text : null;
+  }
+
+  private normalizeNumber(value: unknown) {
+    if (value == null || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  private normalizeEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T) {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    return (allowed as readonly string[]).includes(normalized) ? (normalized as T) : fallback;
+  }
+
+  private toBoolean(value: unknown) {
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y', 'sim', 's'].includes(normalized);
+  }
+
+  private parseBirthDate(value: unknown) {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+    const text = String(value).trim();
+    if (!text) return null;
+    const br = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+    if (br) return new Date(`${br[3]}-${br[2]}-${br[1]}T00:00:00Z`);
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (iso) return new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00Z`);
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  private resolvePraemId(patient: Patient) {
+    return patient.praemId?.trim() || patient.operationalId?.trim() || `PRAEM-${normalizeCpf(patient.cpf).slice(-6).padStart(6, '0')}`;
+  }
 
   async list({ tenantId, search, clinicalRisk, page = 1, limit = 20 }: ListPatientsQuery) {
     const skip = (page - 1) * limit;
@@ -80,45 +350,28 @@ export class PatientsService {
   }
 
   async create(tenantId: string, data: any) {
-    const existing = await this.prisma.patient.findFirst({
-      where: { tenantId, cpf: data.cpf },
-    });
-    if (existing) throw new BadRequestException('CPF already registered for this tenant');
-
-    // Normalize birthDate: Prisma DateTime requires a full ISO-8601 string.
-    // The web form sends a date-only string like "1991-08-18"; append T00:00:00Z.
-    const normalizedData = { ...data };
-    if (normalizedData.birthDate && typeof normalizedData.birthDate === 'string') {
-      const d = normalizedData.birthDate.trim();
-      normalizedData.birthDate = d.length === 10 ? new Date(d + 'T00:00:00Z') : new Date(d);
-    }
-
-    const rawToken = randomUUID();
-    const tokenHash = hashToken(rawToken);
-    const patient = await this.prisma.patient.create({
-      data: {
-        ...normalizedData,
-        tenantId,
-        operationalId: `OP-${randomUUID().slice(0, 8).toUpperCase()}`,
-        qrToken: rawToken,        // kept for legacy lookup, will be phased out
-        qrTokenHash: tokenHash,
-        qrIssuedAt: new Date(),
-        qrActive: true,
-        qrVersion: 1,
-      },
-    });
-    // Return the raw token once at creation so front-end can display QR
-    return { ...patient, _rawQrToken: rawToken };
+    return this.upsertByCpf(tenantId, data, { source: 'MANUAL', allowPartial: false });
   }
 
   async update(id: string, tenantId: string, data: any) {
-    await this.findOne(id, tenantId);
-    const normalizedData = { ...data };
-    if (normalizedData.birthDate && typeof normalizedData.birthDate === 'string') {
-      const d = normalizedData.birthDate.trim();
-      normalizedData.birthDate = d.length === 10 ? new Date(d + 'T00:00:00Z') : new Date(d);
-    }
-    return this.prisma.patient.update({ where: { id }, data: normalizedData });
+    const patient = await this.findOne(id, tenantId);
+    const normalized = this.normalizePatientInput({ ...data, cpf: patient.cpf, praemId: patient.praemId, operationalId: patient.operationalId });
+    const updated = await this.prisma.patient.update({
+      where: { id },
+      data: {
+        ...(normalized.name && !patient.name?.trim() ? { name: normalized.name } : {}),
+        ...(normalized.phone && !patient.phone?.trim() ? { phone: normalized.phone } : {}),
+        ...(normalized.address && !patient.address?.trim() ? { address: normalized.address } : {}),
+        ...(normalized.specialRequirements && !patient.specialRequirements?.trim() ? { specialRequirements: normalized.specialRequirements } : {}),
+        ...(normalized.emergencyContact && !patient.emergencyContact?.trim() ? { emergencyContact: normalized.emergencyContact } : {}),
+        ...(normalized.notes && !patient.notes?.trim() ? { notes: normalized.notes } : {}),
+        ...(normalized.lat != null && patient.lat == null ? { lat: normalized.lat } : {}),
+        ...(normalized.lng != null && patient.lng == null ? { lng: normalized.lng } : {}),
+        ...(normalized.recurringPatient && !patient.recurringPatient ? { recurringPatient: true, recurrent: true } : {}),
+        ...(normalized.requiresCompanion && !patient.requiresCompanion ? { requiresCompanion: true } : {}),
+      },
+    });
+    return this.ensurePatientQrArtifacts(updated);
   }
 
   async remove(id: string, tenantId: string) {
@@ -133,32 +386,21 @@ export class PatientsService {
    * Only the SHA-256 hash is stored in the DB.
    */
   async qr(id: string, tenantId: string) {
-    const patient = await this.findOne(id, tenantId);
-    const needsNew = !patient.qrToken || !patient.qrActive || !patient.qrTokenHash;
-    if (needsNew) {
-      const rawToken = randomUUID();
-      const tokenHash = hashToken(rawToken);
-      await this.prisma.patient.update({
-        where: { id },
-        data: {
-          qrToken: rawToken,
-          qrTokenHash: tokenHash,
-          qrIssuedAt: new Date(),
-          qrActive: true,
-          qrVersion: { increment: 1 },
-          qrRevokedAt: null,
-          qrExpiresAt: null,
-        },
-      });
-      return { patientId: id, qrToken: rawToken };
-    }
-    return { patientId: id, qrToken: patient.qrToken };
+    const patient = await this.ensurePatientQrArtifacts(await this.findOne(id, tenantId));
+    return {
+      patientId: id,
+      praemId: patient.praemId,
+      qrToken: patient.qrToken,
+      qrContent: patient.qrCode,
+      qrCodeUrl: patient.qrCodeUrl,
+      qrHash: patient.qrHash,
+    };
   }
 
   /** Generates a PNG buffer containing the QR Code for a patient */
   async getQrImage(id: string, tenantId: string): Promise<Buffer> {
-    const { qrToken } = await this.qr(id, tenantId);
-    const png = await QRCode.toBuffer(qrToken!, {
+    const patient = await this.ensurePatientQrArtifacts(await this.findOne(id, tenantId));
+    const png = await QRCode.toBuffer(patient.qrCode ?? patient.qrToken ?? '', {
       type: 'png',
       width: 300,
       margin: 2,
@@ -177,6 +419,7 @@ export class PatientsService {
     tenantId: string,
     payload: {
       qrToken: string;
+      payload?: Record<string, any>;
       vehicleId?: string;
       checkpoint?: string;
       gpsLat?: number;
@@ -200,54 +443,34 @@ export class PatientsService {
       }
     }
 
-    const tokenHash = hashToken(payload.qrToken);
-
-    // Look up by hash first (new secure path), then fallback to raw token (legacy)
-    const patient = await this.prisma.patient.findFirst({
-      where: {
-        tenantId,
-        OR: [{ qrTokenHash: tokenHash }, { qrToken: payload.qrToken }],
-      },
-      select: {
-        id: true,
-        tenantId: true,
-        name: true,
-        mobility: true,
-        clinicalRisk: true,
-        requiresCompanion: true,
-        companionName: true,
-        companionPhone: true,
-        operationalId: true,
-        qrActive: true,
-        qrExpiresAt: true,
-        qrRevokedAt: true,
-        qrVersion: true,
-        address: true,
-        lat: true,
-        lng: true,
-        queues: {
-          select: {
-            healthcareLocationId: true,
-            destination: true,
-            priority: true,
-            status: true,
-            appointmentDate: true,
-            healthcareLocation: {
-              select: { name: true, city: true, address: true, specialties: { select: { specialty: true } } },
-            },
+    const parsed = this.parseQrPayload(payload.payload ?? payload.qrToken);
+    const validationToken = parsed.validationToken ?? payload.qrToken;
+    const tokenHash = stableHash(validationToken);
+    const tripToken: any = await this.findTripTokenByValidation(tenantId, parsed, validationToken);
+    const patient: any = tripToken?.patient
+      ? await this.prisma.patient.findFirst({
+          where: { tenantId, id: tripToken.patient.id },
+          select: SAFE_SELECT as any,
+        })
+      : await this.prisma.patient.findFirst({
+          where: {
+            tenantId,
+            OR: [
+              ...(parsed.patientId ? [{ id: parsed.patientId }] : []),
+              ...(parsed.praemId ? [{ praemId: parsed.praemId }] : []),
+              { qrTokenHash: tokenHash },
+              { qrToken: validationToken },
+            ],
           },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-      },
-    });
+          select: SAFE_SELECT as any,
+        });
 
     const rawSource = typeof payload.source === 'string' ? (payload.source as QrScanSource) : 'API';
     const source: QrScanSource = VALID_QR_SOURCES.has(rawSource) ? rawSource : 'API';
     const logBase = {
       tenantId,
       patientId: patient?.id ?? 'unknown',
-      qrToken: payload.qrToken,
+      qrToken: parsed.raw,
       ip: ip ?? null,
       device: device ?? null,
       vehicleId: payload.vehicleId ?? null,
@@ -261,32 +484,69 @@ export class PatientsService {
     };
 
     if (!patient) {
-      if (patient !== null) { /* noop */ }
       await this.prisma.patientQrAccessLog.create({
         data: { ...logBase, patientId: 'unknown', status: 'INVALID' as any },
       }).catch(() => {/* best effort */});
       throw new NotFoundException('QR token not found');
     }
 
-    if (patient.qrRevokedAt) {
-      await this.prisma.patientQrAccessLog.create({
-        data: { ...logBase, patientId: patient.id, status: 'REVOKED' as any },
+    if (parsed.type === 'TRIP' || tripToken) {
+      const trip: any = tripToken?.trip;
+      if (!trip) {
+        throw new NotFoundException('Trip not found');
+      }
+      if (parsed.secureHash) {
+        const tripExpiresAt = tripToken?.expiresAt ?? (parsed.expiresAt ? new Date(parsed.expiresAt) : null);
+        if (!tripExpiresAt || Number.isNaN(tripExpiresAt.getTime())) {
+          throw new BadRequestException('QR payload is incomplete');
+        }
+        const expectedTripPayload = buildTripQrPayload({
+          tripId: trip.id,
+          patientId: trip.patientId,
+          routeId: trip.routeId,
+          operationId: parsed.operationId ?? trip.routeId,
+          validationToken,
+          issuedAt: new Date(),
+          expiresAt: tripExpiresAt,
+        });
+        if (parsed.secureHash !== expectedTripPayload.secure_hash) {
+          throw new ForbiddenException('QR signature mismatch');
+        }
+      }
+    } else {
+      const expectedPatientPayload = buildPatientQrPayload({
+        patientId: patient.id,
+        praemId: patient.praemId ?? patient.operationalId ?? patient.id,
+        validationToken,
+        issuedAt: patient.qrIssuedAt ?? new Date(),
+        expiresAt: patient.qrExpiresAt ?? null,
       });
-      throw new ForbiddenException('This QR token has been revoked');
+      if (parsed.secureHash && parsed.secureHash !== expectedPatientPayload.secure_hash) {
+        throw new ForbiddenException('QR signature mismatch');
+      }
     }
 
-    if (!patient.qrActive) {
-      await this.prisma.patientQrAccessLog.create({
-        data: { ...logBase, patientId: patient.id, status: 'REVOKED' as any },
-      });
-      throw new ForbiddenException('This QR token has been deactivated');
-    }
+    if (parsed.type === 'PATIENT' || !tripToken) {
+      if (patient.qrRevokedAt) {
+        await this.prisma.patientQrAccessLog.create({
+          data: { ...logBase, patientId: patient.id, status: 'REVOKED' as any },
+        });
+        throw new ForbiddenException('This QR token has been revoked');
+      }
 
-    if (patient.qrExpiresAt && patient.qrExpiresAt < new Date()) {
-      await this.prisma.patientQrAccessLog.create({
-        data: { ...logBase, patientId: patient.id, status: 'EXPIRED' as any },
-      });
-      throw new ForbiddenException('This QR token has expired');
+      if (!patient.qrActive) {
+        await this.prisma.patientQrAccessLog.create({
+          data: { ...logBase, patientId: patient.id, status: 'REVOKED' as any },
+        });
+        throw new ForbiddenException('This QR token has been deactivated');
+      }
+
+      if (patient.qrExpiresAt && patient.qrExpiresAt < new Date()) {
+        await this.prisma.patientQrAccessLog.create({
+          data: { ...logBase, patientId: patient.id, status: 'EXPIRED' as any },
+        });
+        throw new ForbiddenException('This QR token has expired');
+      }
     }
 
     // Log successful scan
@@ -297,7 +557,7 @@ export class PatientsService {
     // Update last used timestamp
     await this.prisma.patient.update({
       where: { id: patient.id },
-      data: { qrLastReadAt: new Date(), qrLastUsedAt: new Date() },
+      data: { qrLastReadAt: new Date(), qrLastUsedAt: new Date(), lastTransportDate: new Date() },
     });
 
     const resolvedBoarding = await this.resolveBoardingContext(
@@ -319,16 +579,17 @@ export class PatientsService {
       source: payload.source ?? 'API',
     });
 
-    const activeQueue = patient.queues[0] ?? null;
+    const activeQueue: any = patient.queues?.[0] ?? null;
 
     return {
       valid: true,
       tripId: boardingFlowResult?.trip?.id ?? resolvedBoarding.tripId ?? null,
-      routeId: boardingFlowResult?.route?.id ?? resolvedBoarding.routeId ?? null,
+      routeId: boardingFlowResult?.route?.id ?? resolvedBoarding.routeId ?? tripToken?.trip?.routeId ?? null,
       operationalState: boardingFlowResult?.trip?.status ?? null,
       name: patient.name,
       destination: ((boardingFlowResult?.route as any)?.destination as string | undefined) ?? null,
-      operationalId: patient.operationalId,
+      operationalId: patient.operationalId ?? patient.praemId,
+      praemId: patient.praemId,
       mobility: patient.mobility,
       clinicalRisk: patient.clinicalRisk,
       requiresCompanion: patient.requiresCompanion,
@@ -347,6 +608,77 @@ export class PatientsService {
           }
         : null,
     };
+  }
+
+  private parseQrPayload(input: string | Record<string, any>) {
+    const parsedInput = typeof input === 'string' ? input.trim() : input;
+    if (!parsedInput || (typeof parsedInput === 'string' && !parsedInput.startsWith('{'))) {
+      const raw = typeof parsedInput === 'string' ? parsedInput : JSON.stringify(parsedInput);
+      return { type: 'PATIENT' as const, raw, validationToken: raw };
+    }
+
+    try {
+      const parsed = typeof parsedInput === 'string' ? JSON.parse(parsedInput) : parsedInput;
+      const type = String(parsed?.type ?? 'PATIENT').trim().toUpperCase();
+      const raw = typeof parsedInput === 'string' ? parsedInput : JSON.stringify(parsedInput);
+      return {
+        type: type === 'TRIP' ? ('TRIP' as const) : ('PATIENT' as const),
+        raw,
+        validationToken: String(parsed?.validation_token ?? parsed?.validationToken ?? parsed?.qrToken ?? '').trim() || raw,
+        patientId: String(parsed?.patient_id ?? parsed?.patientId ?? parsed?.patientReference ?? '').trim() || null,
+        praemId: String(parsed?.praem_id ?? parsed?.praemId ?? '').trim() || null,
+        tripId: String(parsed?.trip_id ?? parsed?.tripId ?? '').trim() || null,
+        routeId: String(parsed?.route_id ?? parsed?.routeId ?? '').trim() || null,
+        operationId: String(parsed?.operation_id ?? parsed?.operationId ?? '').trim() || null,
+        secureHash: String(parsed?.secure_hash ?? parsed?.secureHash ?? '').trim() || null,
+        expiresAt: String(parsed?.expires_at ?? parsed?.expiresAt ?? '').trim() || null,
+      };
+    } catch {
+      const raw = typeof parsedInput === 'string' ? parsedInput : JSON.stringify(parsedInput);
+      return { type: 'PATIENT' as const, raw, validationToken: raw };
+    }
+  }
+
+  private async findTripTokenByValidation(
+    tenantId: string,
+    parsed: any,
+    validationToken: string,
+  ) {
+    if (parsed.type !== 'TRIP' && !parsed.tripId && !parsed.routeId) return null;
+
+    const token = await this.prisma.tripToken.findFirst({
+      where: { tenantId, token: validationToken },
+      include: {
+        trip: {
+          select: {
+            id: true,
+            routeId: true,
+            patientId: true,
+            status: true,
+            route: { select: { id: true, driverId: true, status: true, date: true, destination: true } },
+          },
+        },
+        patient: { select: { id: true, name: true } },
+      },
+    });
+
+    if (token) return token;
+    if (!parsed.tripId) return null;
+
+    const trip = await this.prisma.trip.findFirst({
+      where: { tenantId, id: parsed.tripId },
+      include: {
+        route: { select: { id: true, driverId: true, status: true, date: true, destination: true } },
+        patient: { select: { id: true, name: true } },
+      },
+    });
+    if (!trip) return null;
+
+    return {
+      token: validationToken,
+      trip,
+      patient: trip.patient,
+    } as any;
   }
 
   private getTodayWindow() {
@@ -452,8 +784,8 @@ export class PatientsService {
     const patient = await this.prisma.patient.findFirst({
       where: {
         tenantId,
-        ...(payload.qrCode ? { qrToken: payload.qrCode } : {}),
-        ...(payload.cpf ? { cpf: payload.cpf } : {}),
+        ...(payload.qrCode ? { OR: [{ qrToken: payload.qrCode }, { qrCode: payload.qrCode }] } : {}),
+        ...(payload.cpf ? { cpf: normalizeCpf(payload.cpf) } : {}),
       },
     });
     if (!patient) throw new NotFoundException('Patient not found');

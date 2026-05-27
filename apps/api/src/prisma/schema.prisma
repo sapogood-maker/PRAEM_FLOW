@@ -73,7 +73,7 @@ model Patient {
   id                String        @id @default(uuid())
   tenantId          String
   name              String
-  cpf               String
+  cpf               String        @unique
   birthDate         DateTime
   phone             String?
   address           String
@@ -82,9 +82,16 @@ model Patient {
   mobility          MobilityType
   clinicalRisk      RiskLevel
   recurrent         Boolean       @default(false)
+  recurringPatient  Boolean       @default(false)
   notes             String?
+  praemId           String?       @unique
+  qrHash            String?       @unique
+  qrCodeUrl         String?
   qrCode            String?       @unique
   operationalId     String?       @unique
+  lastTransportDate DateTime?
+  specialRequirements String?
+  emergencyContact  String?
   // QR Code seguro (LGPD) — token criptográfico, nunca contém CPF
   qrToken           String?       @unique
   qrIssuedAt        DateTime?
@@ -109,7 +116,6 @@ model Patient {
   tripTokens        TripToken[]
   notificationLogs  NotificationLog[]
 
-  @@unique([tenantId, cpf])
   @@index([tenantId])
   @@index([qrToken])
 }

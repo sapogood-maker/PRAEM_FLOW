@@ -222,15 +222,26 @@ export class SyncService {
         case 'BOARDING':
         case 'QR_SCAN': {
           const checkpoint = String(payload.checkpoint ?? 'BOARDING').toUpperCase();
-          let effectiveTripId = tripId;
+          let effectiveTripId = tripId ?? payload.trip_id ?? payload.tripId ?? null;
+          const validationToken = payload.validation_token ?? payload.validationToken ?? payload.qrToken ?? null;
+          const patientId = payload.patientId ?? payload.patient_id ?? payload.patientReference ?? payload.patient_reference ?? null;
+          const routeRef = routeId ?? payload.route_id ?? payload.routeId ?? null;
+
+          if (!effectiveTripId && validationToken) {
+            const tripToken = await this.prisma.tripToken.findFirst({
+              where: { tenantId, token: String(validationToken) },
+              select: { tripId: true },
+            });
+            effectiveTripId = tripToken?.tripId ?? null;
+          }
+
           if (!effectiveTripId) {
-            const patientId = payload.patientId ?? payload.patientReference;
             if (patientId) {
               const resolvedTrip = await this.prisma.trip.findFirst({
                 where: {
                   tenantId,
                   patientId,
-                  ...(routeId ? { routeId } : {}),
+                  ...(routeRef ? { routeId: routeRef } : {}),
                   status: { notIn: ['COMPLETED', 'CANCELLED', 'NO_SHOW'] as any },
                 },
                 select: { id: true },
@@ -261,9 +272,9 @@ export class SyncService {
             await this.flow.confirmBoarding(
               tenantId,
               {
-                routeId: routeId ?? trip.routeId,
+                routeId: routeRef ?? trip.routeId,
                 tripId: effectiveTripId,
-                patientId: payload.patientId ?? payload.patientReference ?? trip.patientId,
+                patientId: patientId ?? trip.patientId,
               },
               {
                 driverId: actor.driverId ?? payload.driverId ?? null,

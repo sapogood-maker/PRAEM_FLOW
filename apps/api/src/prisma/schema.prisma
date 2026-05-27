@@ -35,6 +35,10 @@ model Tenant {
   geoFenceEvents       GeoFenceEvent[]
   notificationTemplates NotificationTemplate[]
   notificationLogs      NotificationLog[]
+  processedEvents       ProcessedEvent[]
+  conflictLogs          ConflictLog[]
+  susImports            SusImport[]
+  susImportRows         SusImportRow[]
 }
 
 model User {
@@ -596,6 +600,46 @@ model OperationalTimeline {
   @@index([createdAt])
 }
 
+model ProcessedEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  eventId     String
+  operationId String?
+  deviceId    String
+  type        String
+  payload     Json
+  status      String   @default("PROCESSED")
+  processedAt DateTime @default(now())
+  syncedAt    DateTime?
+  retryCount  Int      @default(0)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, eventId])
+  @@index([tenantId])
+  @@index([deviceId])
+  @@map("processed_events")
+}
+
+model ConflictLog {
+  id             String   @id @default(uuid())
+  tenantId       String
+  eventId        String
+  operationId    String?
+  deviceId       String?
+  entityType     String
+  entityId       String?
+  localStateJson Json?
+  serverStateJson Json?
+  resolution     String
+  reason         String
+  createdAt      DateTime @default(now())
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([eventId])
+  @@map("conflict_logs")
+}
+
 // ---------------------------------------------------------------------------
 // DailyOperation — operação do dia (prefeitura pensa em "operação diária")
 // ---------------------------------------------------------------------------
@@ -812,6 +856,78 @@ enum ConnectionStatus {
   IDLE
 }
 
+enum SusImportStatus {
+  UPLOADED
+  PREVIEW_READY
+  VALIDATED
+  PROCESSING
+  PROCESSED
+  FAILED
+  REPROCESSED
+}
+
+enum SusImportRowStatus {
+  PENDING
+  VALID
+  INVALID
+  PROCESSED
+  SKIPPED
+}
+
+model SusImport {
+  id                     String            @id @default(uuid())
+  tenantId               String
+  uploadedByUserId       String?
+  sourceSystem           String            @default("SUS")
+  fileName               String
+  fileMimeType           String?
+  fileSizeBytes          Int?
+  status                 SusImportStatus   @default(UPLOADED)
+  notes                  String?
+  totalRows              Int               @default(0)
+  validRows              Int               @default(0)
+  invalidRows            Int               @default(0)
+  processingAttempts     Int               @default(0)
+  processedAt            DateTime?
+  reprocessedFromImportId String?
+  metadata               Json?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  tenant                 Tenant            @relation(fields: [tenantId], references: [id])
+  rows                   SusImportRow[]
+  reprocessedFrom        SusImport?        @relation("SusImportReprocess", fields: [reprocessedFromImportId], references: [id])
+  reprocessChildren      SusImport[]       @relation("SusImportReprocess")
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@index([reprocessedFromImportId])
+  @@map("sus_imports")
+}
+
+model SusImportRow {
+  id                 String             @id @default(uuid())
+  tenantId           String
+  importId           String
+  lineNumber         Int
+  rowHash            String?
+  status             SusImportRowStatus @default(PENDING)
+  rawData            Json
+  normalizedData     Json?
+  validationErrors   Json?
+  validationWarnings Json?
+  processingAttempts Int                @default(0)
+  processedAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  tenant             Tenant             @relation(fields: [tenantId], references: [id])
+  import             SusImport          @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, lineNumber])
+  @@index([tenantId, importId])
+  @@index([status])
+  @@map("sus_import_rows")
+}
+
 // ---------------------------------------------------------------------------
 // TripToken — tokens operacionais para confirmação, embarque, retorno, etc.
 // Utilizados via QR Code, Telegram, links públicos.
@@ -958,4 +1074,3 @@ model NotificationLog {
   @@index([routeId])
   @@index([createdAt])
 }
-

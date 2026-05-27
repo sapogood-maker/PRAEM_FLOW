@@ -52,6 +52,7 @@ export class PatientsController {
     return this.patientsService.findOne(id, req.user.tenantId);
   }
 
+  /** @deprecated Prefer spreadsheet intake via POST /scheduling-import/upload */
   @Post()
   create(@Request() req: AuthRequest, @Body() body: any) {
     return this.patientsService.create(req.user.tenantId, sanitizePayload(body));

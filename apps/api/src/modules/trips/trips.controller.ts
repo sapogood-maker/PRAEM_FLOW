@@ -23,6 +23,7 @@ export class TripsController {
     return this.tripsService.findAll(req.user.tenantId, { routeId, status, page: page ? Number(page) : 1 });
   }
 
+  /** @deprecated Prefer spreadsheet intake via POST /scheduling-import/upload */
   @Post()
   create(@Request() req: AuthRequest, @Body() body: any) {
     return this.tripsService.create(req.user.tenantId, sanitizePayload(body));

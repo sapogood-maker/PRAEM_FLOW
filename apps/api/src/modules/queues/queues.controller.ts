@@ -46,6 +46,7 @@ export class QueuesController {
     return this.queuesService.findOne(id, req.user.tenantId);
   }
 
+  /** @deprecated Prefer spreadsheet intake via POST /scheduling-import/upload */
   @Post()
   create(@Request() req: AuthRequest, @Body() body: any) {
     return this.queuesService.create(req.user.tenantId, sanitizePayload(body));

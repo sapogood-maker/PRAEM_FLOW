@@ -1,21 +1,25 @@
 import { Injectable } from '@nestjs/common';
 
 export interface NormalizedSusRow {
-  patientName: string;
+  patient_name: string;
   cpf: string;
-  appointmentDate: string;
-  destination: string;
-  queueType: 'LOGISTICS' | 'MEDICAL';
-  priority: 'EMERGENCY' | 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW' | 'PENDING';
+  phone?: string;
+  origin_city: string;
+  destination_hospital: string;
+  destination_address: string;
+  appointment_date: string;
+  appointment_time: string;
+  appointment_at: string;
   notes?: string;
+  priority: 'EMERGENCY' | 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW' | 'PENDING';
+  companion: boolean;
+  return_trip: boolean;
+  special_requirements?: string;
 }
 
-function pick(raw: Record<string, string>, keys: string[]): string {
-  for (const key of keys) {
-    const value = raw[key];
-    if (value != null && String(value).trim().length > 0) return String(value).trim();
-  }
-  return '';
+function pick(raw: Record<string, string>, key: string): string {
+  const value = raw[key];
+  return value == null ? '' : String(value).trim();
 }
 
 function normalizePriority(value: string): NormalizedSusRow['priority'] {
@@ -29,22 +33,54 @@ function normalizePriority(value: string): NormalizedSusRow['priority'] {
 @Injectable()
 export class SusImportRowMapper {
   map(raw: Record<string, string>): NormalizedSusRow {
-    const queueTypeRaw = pick(raw, ['queue_type', 'tipo_fila']).toUpperCase();
-    const queueType: NormalizedSusRow['queueType'] =
-      queueTypeRaw === 'MEDICAL' ? 'MEDICAL' : 'LOGISTICS';
+    const appointmentDate = this.normalizeDate(pick(raw, 'appointment_date')) || '';
+    const appointmentTime = this.normalizeTime(pick(raw, 'appointment_time')) || '';
+    const appointmentAt = appointmentDate && appointmentTime
+      ? new Date(`${appointmentDate}T${appointmentTime}:00`)
+      : null;
 
-    const appointmentRaw = pick(raw, ['appointment_date', 'data_consulta', 'consulta_em']);
-    const appointmentDate = new Date(appointmentRaw);
+    const phone = pick(raw, 'phone').replace(/[^\d()+\-\s]/g, '') || undefined;
+    const notes = pick(raw, 'notes') || undefined;
+    const specialRequirements = pick(raw, 'special_requirements') || undefined;
 
     return {
-      patientName: pick(raw, ['patient_name', 'nome_paciente', 'nome']),
-      cpf: pick(raw, ['cpf', 'documento']).replace(/\D/g, ''),
-      appointmentDate: Number.isNaN(appointmentDate.getTime()) ? '' : appointmentDate.toISOString(),
-      destination: pick(raw, ['destination', 'destino', 'hospital', 'unidade']),
-      queueType,
-      priority: normalizePriority(pick(raw, ['priority', 'prioridade'])),
-      notes: pick(raw, ['notes', 'observacoes']) || undefined,
+      patient_name: pick(raw, 'patient_name'),
+      cpf: pick(raw, 'cpf').replace(/\D/g, ''),
+      phone,
+      origin_city: pick(raw, 'origin_city'),
+      destination_hospital: pick(raw, 'destination_hospital'),
+      destination_address: pick(raw, 'destination_address'),
+      appointment_date: appointmentDate,
+      appointment_time: appointmentTime,
+      appointment_at: appointmentAt && !Number.isNaN(appointmentAt.getTime()) ? appointmentAt.toISOString() : '',
+      notes,
+      priority: normalizePriority(pick(raw, 'priority')),
+      companion: this.toBoolean(pick(raw, 'companion')),
+      return_trip: this.toBoolean(pick(raw, 'return_trip')),
+      special_requirements: specialRequirements,
     };
   }
-}
 
+  private toBoolean(value: string): boolean {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y', 'sim', 's'].includes(normalized);
+  }
+
+  private normalizeDate(value: string): string | null {
+    const trimmed = value.trim();
+    const br = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+    if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  private normalizeTime(value: string): string | null {
+    const trimmed = value.trim();
+    const hhmm = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(trimmed);
+    if (!hhmm) return null;
+    return `${hhmm[1].padStart(2, '0')}:${hhmm[2]}`;
+  }
+}

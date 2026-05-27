@@ -17,6 +17,9 @@ class AppConfig {
   static bool get isDevelopment =>
       (dotenv.env['APP_ENV'] ?? 'development') == 'development';
 
+  static String get offlineQrSecret =>
+      dotenv.env['OFFLINE_QR_SECRET'] ?? dotenv.env['QR_HMAC_SECRET'] ?? 'CHANGE_ME_OFFLINE_QR_SECRET';
+
   // GPS heartbeat interval in seconds (between 5 and 15)
   static const int gpsIntervalSeconds = 10;
 

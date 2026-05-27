@@ -5,14 +5,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:dio/dio.dart';
 import '../auth/auth_service.dart';
-import '../config/app_config.dart';
 import '../driver/driver_state.dart';
 import '../core/constants.dart';
 import '../navigation/navigation_service.dart';
 import '../shared/widgets/operational_button.dart';
 import '../shared/widgets/status_badge.dart';
+import '../offline/offline_queue.dart';
+import '../operational/sync_manager.dart';
 
 // ─── Stop type / status helpers ───────────────────────────────────────────────
 
@@ -85,17 +85,30 @@ class TripScreen extends StatefulWidget {
 }
 
 class _TripScreenState extends State<TripScreen> {
-  final _dio = Dio();
-
   Future<void> _updateStopStatus(String stopId, String status) async {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
+    final offline = context.read<OfflineQueue>();
+    final syncManager = context.read<SyncManager>();
+    final stop = driver.stops.firstWhere((s) => s['id'] == stopId, orElse: () => <String, dynamic>{});
     try {
-      await _dio.patch(
-        '${AppConfig.apiBaseUrl}/trip-stops/$stopId/status',
-        data: {'status': status},
-        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
+      await offline.enqueueOperationalAction(
+        type: 'TRIP_STOP_STATUS',
+        payload: {
+          'stopId': stopId,
+          'status': status,
+          'tripId': stop['tripId'],
+          'routeId': driver.activeRoute?['id'],
+          'vehicleId': driver.vehicle?['id'],
+          'operatorId': auth.driverId,
+          'timestamp': DateTime.now().toIso8601String(),
+        },
+        deviceId: driver.deviceId ?? 'unknown-device',
+        operationId: driver.activeRoute?['id'] as String?,
+        routeId: driver.activeRoute?['id'] as String?,
+        tripId: stop['tripId'] as String?,
       );
+      await syncManager.syncAll();
       driver.updateStopStatus(stopId, status);
     } catch (e) {
       debugPrint('[TripScreen] updateStopStatus error: $e');

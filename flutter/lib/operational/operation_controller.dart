@@ -341,6 +341,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     _activeRoute = _localStore.loadRoute();
     _patients = _localStore.loadPatients();
     _stops = _localStore.loadStops();
+    await _restoreOfflineSnapshot();
 
     debugPrint(
         '[OPS] init — restored state=${operationalStateToString(_state)} routeId=${_activeRoute?['id']}');
@@ -355,8 +356,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
 
   void _attachWsListeners() {
     _ws.on('ws:connected', (_) async {
-      debugPrint('[OPS] WS reconnected — syncing');
-      await _syncManager.syncAll();
+      debugPrint('[OPS] WS reconnected — refreshing state');
       await loadRoute();
       _ensureGps();
     });
@@ -659,27 +659,33 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     _lastError = null;
     notifyListeners();
     try {
-      await _dio.post(
-        '${AppConfig.apiBaseUrl}$path',
-        options:
-            Options(headers: {'Authorization': 'Bearer ${_auth.token}'}),
+      final routeId = _activeRoute?['id'] as String?;
+      final trip = _activeTrip;
+      final tripId = trip?['id'] as String?;
+      final type = _eventTypeFromPath(path);
+      final payload = <String, dynamic>{
+        'path': path,
+        'routeId': routeId,
+        if (tripId != null) 'tripId': tripId,
+        'driverId': _auth.driverId,
+        'vehicleId': _driverState.vehicle?['id'] as String? ?? _auth.vehicle?['id'] as String?,
+        'deviceId': _driverState.deviceId,
+        'tenantId': _auth.tenantId,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      await _offlineQueue.enqueueOperationalAction(
+        type: type,
+        payload: payload,
+        deviceId: _driverState.deviceId ?? 'unknown-device',
+        operationId: routeId,
+        routeId: routeId,
+        tripId: tripId,
       );
+      await _syncManager.syncAll();
       onSuccess();
-    } on DioException catch (e) {
-      if (e.response == null) {
-        // Offline — queue action and optimistically advance state
-        await _offlineQueue.enqueueOperational({'url': path});
-        debugPrint('[OFFLINE] queued action path=$path');
-        onSuccess();
-      } else {
-        final msg =
-            (e.response?.data as Map?)?['message']?.toString() ??
-                e.message ??
-                'Erro';
-        _lastError = msg;
-        debugPrint(
-            '[OPS] API error path=$path status=${e.response?.statusCode} msg=$msg');
-      }
+    } catch (e) {
+      _lastError = e.toString();
+      debugPrint('[OPS] queue action error path=$path error=$e');
     } finally {
       _actionInProgress = false;
       notifyListeners();
@@ -765,12 +771,19 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
               '[STALE_ROUTE] stale route detected routeId=${found['id']} staleLevel=$staleLevel elapsedHours=$staleElapsedHours state=${operationalStateToString(_state)}');
         }
       } else {
-        if (_state != OperationalState.offline) {
+        final snapshot = await _offlineQueue.loadSnapshot();
+        if (snapshot != null) {
+          await _applySnapshot(snapshot);
+        } else if (_state != OperationalState.offline) {
           _transition(OperationalState.offline, force: true);
         }
       }
     } catch (e) {
       debugPrint('[OPS] loadRoute error: $e');
+      final snapshot = await _offlineQueue.loadSnapshot();
+      if (snapshot != null) {
+        await _applySnapshot(snapshot);
+      }
     } finally {
       _setLoading(false);
     }
@@ -965,11 +978,73 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  Future<void> _restoreOfflineSnapshot() async {
+    try {
+      final snapshot = await _offlineQueue.loadSnapshot();
+      if (snapshot == null) return;
+      final currentRoute = snapshot['currentRoute'];
+      if (currentRoute is Map) {
+        _activeRoute = Map<String, dynamic>.from(currentRoute);
+      }
+      final currentTrip = snapshot['currentTrip'];
+      if (currentTrip is Map) {
+        final routeId = _activeRoute?['id'] as String?;
+        if (routeId != null) {
+          _activeRoute ??= {'id': routeId};
+        }
+      }
+      final patients = snapshot['patients'];
+      if (patients is List) {
+        _patients = patients.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      }
+      final stops = snapshot['stops'];
+      if (stops is List) {
+        _stops = stops.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      }
+      final opStatus = snapshot['operationalStatus'] as String?;
+      if (opStatus != null) {
+        _state = operationalStateFromString(opStatus);
+      }
+      _syncToDriverState();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[OPS] restoreOfflineSnapshot error: $e');
+    }
+  }
+
+  String _eventTypeFromPath(String path) {
+    if (path.contains('/routes/') && path.endsWith('/start')) return 'ROUTE_START';
+    if (path.contains('/routes/') && path.endsWith('/complete')) return 'ROUTE_COMPLETE';
+    if (path.contains('/routes/') && path.endsWith('/force-complete')) return 'ROUTE_FORCE_COMPLETE';
+    if (path.contains('/trips/') && path.endsWith('/in-transit')) return 'TRIP_STARTED';
+    if (path.contains('/trips/') && path.endsWith('/arrived')) return 'TRIP_ARRIVED';
+    if (path.contains('/trips/') && path.endsWith('/complete')) return 'TRIP_COMPLETED';
+    if (path.contains('/trips/') && path.endsWith('/boarded')) return 'TRIP_BOARDED';
+    if (path.contains('/trips/') && path.endsWith('/no-show')) return 'TRIP_NO_SHOW';
+    return 'OPERATIONAL_ACTION';
+  }
+
   void _persist() {
     _localStore.saveRoute(_activeRoute);
     _localStore.savePatients(_patients);
     _localStore.saveStops(_stops);
     _localStore.saveOperationalState(_state);
+    unawaited(_offlineQueue.saveSnapshot(
+      snapshot: {
+        'currentRoute': _activeRoute,
+        'currentTrip': _activeTrip,
+        'patients': _patients,
+        'stops': _stops,
+        'driver': {
+          'id': _auth.driverId,
+          'deviceId': _driverState.deviceId,
+        },
+        'vehicle': _driverState.vehicle ?? _auth.vehicle,
+        'timeline': _activeRoute?['timeline'] ?? [],
+        'operationalStatus': operationalStateToString(_state),
+        'routeId': _activeRoute?['id'] as String? ?? 'global',
+      },
+    ));
   }
 
   void _syncToDriverState() {
@@ -977,6 +1052,28 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     _driverState.setPatients(_patients);
     _driverState.setStops(_stops);
     _driverState.setOperationalStatus(operationalStateToString(_state));
+  }
+
+  Future<void> _applySnapshot(Map<String, dynamic> snapshot) async {
+    final currentRoute = snapshot['currentRoute'];
+    if (currentRoute is Map) {
+      _activeRoute = Map<String, dynamic>.from(currentRoute);
+    }
+    final patients = snapshot['patients'];
+    if (patients is List) {
+      _patients = patients.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    final stops = snapshot['stops'];
+    if (stops is List) {
+      _stops = stops.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    final status = snapshot['operationalStatus'] as String?;
+    if (status != null) {
+      _state = operationalStateFromString(status);
+    }
+    _syncToDriverState();
+    _persist();
+    notifyListeners();
   }
 
   void _setLoading(bool v) {

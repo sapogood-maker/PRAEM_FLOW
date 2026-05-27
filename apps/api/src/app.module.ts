@@ -35,6 +35,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { SchedulingImportModule } from './modules/scheduling-import/scheduling-import.module';
 import { SusImportModule } from './modules/sus-import/sus-import.module';
 import { DispatchEngineModule } from './modules/dispatch-engine/dispatch-engine.module';
+import { QrEngineModule } from './modules/qr-engine/qr-engine.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { DispatchEngineModule } from './modules/dispatch-engine/dispatch-engine.
     SchedulingImportModule,
     SusImportModule,
     DispatchEngineModule,
+    QrEngineModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

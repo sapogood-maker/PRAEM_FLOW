@@ -11,14 +11,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
-import 'package:dio/dio.dart';
 
 import '../auth/auth_service.dart';
 import '../driver/driver_state.dart';
-import '../config/app_config.dart';
 import '../core/constants.dart';
 import '../shared/widgets/operational_button.dart';
 import '../offline/offline_queue.dart';
+import '../operational/sync_manager.dart';
+import '../offline_sync/connectivity_service.dart';
+import '../offline_sync/qr_offline_validator.dart';
+import '../config/app_config.dart';
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
@@ -33,7 +35,6 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     detectionSpeed: DetectionSpeed.normal,
     torchEnabled: false,
   );
-  final _dio = Dio();
 
   bool _loading = false;
   Map<String, dynamic>? _result;
@@ -48,7 +49,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     if (code == null || code.isEmpty) return;
 
     final now = DateTime.now();
-    if (_lastToken == code && _lastScanAt != null && now.difference(_lastScanAt!) < const Duration(seconds: 2)) {
+    if (_lastToken == code &&
+        _lastScanAt != null &&
+        now.difference(_lastScanAt!) < const Duration(seconds: 2)) {
       return;
     }
     _lastToken = code;
@@ -68,90 +71,81 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
     final offline = context.read<OfflineQueue>();
-
-    await _flushQueuedQr(auth, offline);
-
-    final payload = {
+    final syncManager = context.read<SyncManager>();
+    final connectivity = context.read<ConnectivityService>();
+    final validator = QrOfflineValidator(secret: AppConfig.offlineQrSecret);
+    final validation = validator.validate(token);
+    final payload = validation.payload ?? <String, dynamic>{'raw': token};
+    final deviceId = driver.deviceId ?? 'unknown-device';
+    final checkpoint =
+        (payload['checkpoint']?.toString() ?? 'BOARDING').toUpperCase();
+    final eventPayload = {
       'qrToken': token,
+      'tripId': payload['tripId'],
+      'patientId': payload['patientReference'] ?? payload['patientId'],
+      'patientReference': payload['patientReference'] ?? payload['patientId'],
+      'operationReference':
+          payload['operationReference'] ?? payload['boardingCode'],
+      'boardingCode': payload['operationReference'] ?? payload['boardingCode'],
+      'expiration': payload['expiration'] ?? payload['expiresAt'],
+      'expiresAt': payload['expiration'] ?? payload['expiresAt'],
+      'uniqueId': payload['uniqueId'],
+      'secureHash': payload['signature'],
+      'signature': payload['signature'],
+      'checkpoint': checkpoint,
       'vehicleId': driver.vehicle?['id'],
       'routeId': driver.activeRoute?['id'],
-      'deviceId': driver.deviceId,
+      'deviceId': deviceId,
+      'operatorId': auth.driverId,
       'source': 'TABLET_SMART_SCANNER',
       'timestamp': DateTime.now().toIso8601String(),
     };
 
-    try {
-      final resp = await _dio.post(
-        '${AppConfig.apiBaseUrl}/patients/qr/scan',
-        data: payload,
-        options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-      );
-      final data = resp.data as Map<String, dynamic>;
-      _clearTimer?.cancel();
-      _clearTimer = Timer(const Duration(seconds: 6), () {
-        if (!mounted) return;
-        setState(() {
-          _result = null;
-          _error = null;
-        });
-      });
+    if (!validation.valid) {
       if (!mounted) return;
       setState(() {
-        _result = {
-          'name': data['name'] ?? data['patient']?['name'] ?? '—',
-          'destination': data['destination'] ?? data['queue']?['destination'] ?? '—',
-          'status': 'SUCCESS',
-          'tripId': data['tripId'],
-          'routeId': data['routeId'],
-        };
+        _error = validation.reason;
+        _result = null;
+      });
+      HapticFeedback.lightImpact();
+      return;
+    }
+
+    await offline.enqueueQrScan(
+      payload: eventPayload,
+      deviceId: deviceId,
+      operationId: driver.activeRoute?['id'] as String?,
+      routeId: driver.activeRoute?['id'] as String?,
+      tripId: payload['tripId']?.toString(),
+    );
+    await syncManager.syncAll();
+
+    _clearTimer?.cancel();
+    _clearTimer = Timer(const Duration(seconds: 6), () {
+      if (!mounted) return;
+      setState(() {
+        _result = null;
         _error = null;
       });
-      HapticFeedback.mediumImpact();
-      SystemSound.play(SystemSoundType.click);
-    } on DioException catch (e) {
-      if (e.response == null) {
-        await offline.enqueueQr({
-          ...payload,
-          'offline': true,
-        });
-        if (!mounted) return;
-        setState(() {
-          _error = 'Sem conexão — scan salvo offline';
-          _result = null;
-        });
-      } else {
-        final responseBody = e.response?.data;
-        final apiMessage = responseBody is Map ? responseBody['message']?.toString() : null;
-        if (!mounted) return;
-        setState(() {
-          _error = apiMessage ?? 'QR inválido';
-          _result = null;
-        });
-      }
-      HapticFeedback.lightImpact();
-    }
-  }
-
-  Future<void> _flushQueuedQr(AuthService auth, OfflineQueue offline) async {
-    final pending = await offline.pendingQr();
-    if (pending.isEmpty) return;
-    final remaining = <Map<String, dynamic>>[];
-    for (final item in pending) {
-      try {
-        await _dio.post(
-          '${AppConfig.apiBaseUrl}/patients/qr/scan',
-          data: item,
-          options: Options(headers: {'Authorization': 'Bearer ${auth.token}'}),
-        );
-      } on DioException catch (e) {
-        if (e.response == null) {
-          remaining.add(item);
-          remaining.addAll(pending.skip(pending.indexOf(item) + 1));
-          break;
-        }
-      }
-    }
-    await offline.replaceQr(remaining);
+    });
+    if (!mounted) return;
+    setState(() {
+      _result = {
+        'name': payload['patientReference']?.toString() ??
+            payload['patientId']?.toString() ??
+            '—',
+        'destination': payload['operationReference']?.toString() ??
+            payload['boardingCode']?.toString() ??
+            '—',
+        'status': connectivity.websocketConnected ? 'SYNCED' : 'PENDING_SYNC',
+        'checkpoint': checkpoint,
+        'tripId': payload['tripId'],
+        'routeId': driver.activeRoute?['id'],
+      };
+      _error = null;
+    });
+    HapticFeedback.mediumImpact();
+    SystemSound.play(SystemSoundType.click);
   }
 
   @override
@@ -199,7 +193,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                     alignment: Alignment.topCenter,
                     child: Padding(
                       padding: EdgeInsets.only(top: 16),
-                      child: CircularProgressIndicator(color: AppColors.primary),
+                      child:
+                          CircularProgressIndicator(color: AppColors.primary),
                     ),
                   ),
               ],
@@ -235,14 +230,18 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 Icon(Icons.check_circle, color: AppColors.primary),
                 SizedBox(width: 8),
                 Text(
-                'Embarque Confirmado',
-                  style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 16),
+                  'Embarque Confirmado',
+                  style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             _line('Passageiro', _result!['name'] as String? ?? '—'),
             _line('Destino', _result!['destination'] as String? ?? '—'),
+            _line('Evento', (_result!['checkpoint'] ?? 'BOARDING').toString()),
             _line('Viagem', (_result!['tripId'] ?? '—').toString()),
             const SizedBox(height: 12),
             const Text(
@@ -271,13 +270,16 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 Icon(Icons.warning_amber_rounded, color: AppColors.warning),
                 SizedBox(width: 8),
                 Text(
-                'Validação operacional falhou',
-                  style: TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold),
+                  'Validação operacional falhou',
+                  style: TextStyle(
+                      color: AppColors.warning, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+            Text(_error!,
+                style: const TextStyle(
+                    color: AppColors.textPrimary, fontSize: 14)),
             const Spacer(),
             OperationalButton(
               label: 'LIMPAR',
@@ -305,12 +307,15 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+          Text(label,
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 12)),
           Expanded(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  color: AppColors.textPrimary, fontWeight: FontWeight.bold),
               overflow: TextOverflow.ellipsis,
             ),
           ),

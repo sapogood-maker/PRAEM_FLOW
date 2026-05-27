@@ -35,6 +35,8 @@ dependencies:
   # Local offline queue storage
   hive_flutter: ^1.1.0
   hive: ^2.2.3
+  sqflite: ^2.3.3
+  path: ^1.9.0
 
   # Permission handler (camera for QR, location)
   permission_handler: ^11.3.1
@@ -47,6 +49,9 @@ dependencies:
 
   # Environment configuration
   flutter_dotenv: ^5.1.0
+
+  # HMAC for offline QR validation
+  crypto: ^3.0.3
 
   # Battery info
   battery_plus: ^6.0.1

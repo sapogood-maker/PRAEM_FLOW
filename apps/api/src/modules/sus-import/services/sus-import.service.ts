@@ -44,11 +44,22 @@ export class SusImportService {
 
     let validRows = 0;
     let invalidRows = 0;
+    let duplicateRows = 0;
+    let malformedRows = 0;
+    let invalidDateRows = 0;
+    const seenRowKeys = new Set<string>();
 
     const stagedRows: Prisma.SusImportRowCreateManyInput[] = parsedRows.map((row) => {
-      const validation = this.validator.validate(row.rawData);
+      const validation = this.validator.validate(row.rawData, {
+        lineNumber: row.lineNumber,
+        seenRowKeys,
+      });
       const normalized = this.mapper.map(row.rawData);
       const rowHash = this.hashRow(row.rawData);
+
+      if (validation.errors.some((e) => e.includes('DUPLICATE_ROW'))) duplicateRows += 1;
+      if (validation.errors.some((e) => e.includes('MALFORMED_ROW'))) malformedRows += 1;
+      if (validation.errors.some((e) => e.includes('INVALID_DATE'))) invalidDateRows += 1;
 
       if (validation.valid) validRows += 1;
       else invalidRows += 1;
@@ -81,6 +92,10 @@ export class SusImportService {
         metadata: {
           validationCompletedAt: new Date().toISOString(),
           canProcess: invalidRows === 0,
+          duplicateRows,
+          malformedRows,
+          invalidDateRows,
+          previewRequired: true,
         },
       },
     });
@@ -93,6 +108,12 @@ export class SusImportService {
       invalidRows,
       previewAvailable: true,
       canProcess: invalidRows === 0,
+      preview: {
+        endpoint: `/sus-import/${createdImport.id}/preview`,
+        duplicateRows,
+        malformedRows,
+        invalidDateRows,
+      },
     };
   }
 

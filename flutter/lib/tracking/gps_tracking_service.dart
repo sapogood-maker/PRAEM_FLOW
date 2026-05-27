@@ -8,15 +8,13 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:battery_plus/battery_plus.dart';
-import 'package:dio/dio.dart';
-import '../config/app_config.dart';
 import '../websocket/ws_service.dart';
 import '../offline/offline_queue.dart';
+import '../config/app_config.dart';
 
 class GpsTrackingService extends ChangeNotifier {
   final WsService _ws;
   final OfflineQueue _offlineQueue;
-  final Dio _dio = Dio();
 
   StreamSubscription<Position>? _subscription;
   Position? _lastPosition;
@@ -95,9 +93,9 @@ class GpsTrackingService extends ChangeNotifier {
 
     final androidSettings = AndroidSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: 3,
+      distanceFilter: 10,
       forceLocationManager: false,
-      intervalDuration: const Duration(seconds: 5),
+      intervalDuration: Duration(seconds: AppConfig.gpsIntervalSeconds),
       foregroundNotificationConfig: const ForegroundNotificationConfig(
         notificationText: 'PRAEM OPS — rastreamento ativo',
         notificationTitle: 'GPS Operacional',
@@ -112,14 +110,14 @@ class GpsTrackingService extends ChangeNotifier {
     final iosSettings = AppleSettings(
       accuracy: LocationAccuracy.high,
       activityType: ActivityType.automotiveNavigation,
-      distanceFilter: 3,
+      distanceFilter: 10,
       pauseLocationUpdatesAutomatically: false,
       showBackgroundLocationIndicator: true,
     );
 
     const settings = LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: 3,
+      distanceFilter: 10,
     );
 
     final locationSettings = _isAndroid()
@@ -204,6 +202,13 @@ class GpsTrackingService extends ChangeNotifier {
 
    debugPrint('[GPS] fix driverId=${_ws.driverId ?? '-'} routeId=${_routeId ?? '-'} lat=${pos.latitude} lng=${pos.longitude} speed=${payload['speed']} heading=${pos.heading} acc=${pos.accuracy}');
 
+   await _offlineQueue.enqueueGps(
+     payload: payload,
+     deviceId: _deviceId!,
+     operationId: _routeId,
+     routeId: _routeId,
+   );
+
    if (_ws.connected) {
      _ws.emitLocationUpdate(
        vehicleId: _vehicleId!,
@@ -216,34 +221,9 @@ class GpsTrackingService extends ChangeNotifier {
        accuracy: pos.accuracy,
        routeId: _routeId,
      );
-     await _tryFlush();
-   } else {
-     debugPrint('[GPS] socket offline, queueing GPS payload');
-     await _offlineQueue.enqueueGps(payload);
    }
 
    notifyListeners();
-  }
-
-  Future<void> _sendRest(Map<String, dynamic> payload) async {
-   try {
-     await _dio.post(
-       '${AppConfig.apiBaseUrl}/tracking/heartbeat',
-       data: payload,
-       options: Options(headers: {'x-device-token': _authToken}),
-      );
-    } catch (e) {
-      debugPrint('[GpsTracking] REST heartbeat error: $e');
-    }
-  }
-
-  Future<void> _tryFlush() async {
-    final pending = await _offlineQueue.pendingGps();
-    if (pending.isEmpty || !_ws.connected) return;
-    for (final item in pending) {
-      await _sendRest(item);
-    }
-    await _offlineQueue.clearGps();
   }
 
   Future<int> _getBattery() async {

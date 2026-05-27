@@ -20,6 +20,8 @@ import 'offline/offline_queue.dart';
 import 'operational/local_store.dart';
 import 'operational/sync_manager.dart';
 import 'operational/operation_controller.dart';
+import 'offline_sync/connectivity_service.dart';
+import 'offline_sync/realtime_recovery_service.dart';
 import 'core/constants.dart';
 import 'core/app_router.dart';
 
@@ -52,9 +54,12 @@ Future<void> main() async {
   final driverState = DriverState();
   await driverState.init();
 
+  final connectivityService = ConnectivityService();
+  await connectivityService.init();
+
   final wsService = WsService();
   final gpsService = GpsTrackingService(wsService, offlineQueue);
-  final syncManager = SyncManager(offlineQueue, authService);
+  final syncManager = SyncManager(offlineQueue, authService, connectivity: connectivityService);
 
   final operationController = OperationController(
     auth: authService,
@@ -66,6 +71,30 @@ Future<void> main() async {
     syncManager: syncManager,
   );
   await operationController.init();
+
+  late final RealtimeRecoveryService recoveryService;
+  recoveryService = RealtimeRecoveryService(
+    connectivityService,
+    () => syncManager.syncAll(),
+    () async {
+      await operationController.loadRoute();
+      await gpsService.restartIfNeeded();
+    },
+    reconnectWebsocket: () async {
+      if (!wsService.connected &&
+          authService.isAuthenticated &&
+          authService.token != null &&
+          authService.tenantId != null) {
+        wsService.connect(
+          authService.token!,
+          authService.tenantId!,
+          driverId: authService.driverId,
+          vehicleId: driverState.vehicle?['id'] as String?,
+          deviceId: driverState.deviceId,
+        );
+      }
+    },
+  );
 
   // ─── Auto-connect WebSocket when auth state changes ────────────────────────
   authService.addListener(() {
@@ -93,6 +122,13 @@ Future<void> main() async {
     }
   });
 
+  wsService.addListener(() {
+    connectivityService.setWebsocketConnected(wsService.connected);
+    if (wsService.connected) {
+      unawaited(recoveryService.recover());
+    }
+  });
+
   // If already authenticated on startup, connect immediately
   if (authService.isAuthenticated &&
       authService.token != null &&
@@ -113,6 +149,8 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: wsService),
         ChangeNotifierProvider.value(value: gpsService),
         ChangeNotifierProvider.value(value: syncManager),
+        ChangeNotifierProvider.value(value: connectivityService),
+        ChangeNotifierProvider.value(value: recoveryService),
         ChangeNotifierProvider.value(value: operationController),
         Provider.value(value: offlineQueue),
         Provider.value(value: localStore),

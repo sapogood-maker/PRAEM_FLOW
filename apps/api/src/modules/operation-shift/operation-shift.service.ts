@@ -5,14 +5,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class OperationShiftService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findByOperation(dailyOperationId: string, tenantId: string) {
+  async findByOperation(operationId: string, tenantId: string) {
     return this.prisma.operationShift.findMany({
-      where: { dailyOperationId, tenantId },
+      where: { operationId, tenantId },
       orderBy: { startTime: 'asc' },
     });
   }
 
-  async create(tenantId: string, data: { dailyOperationId: string; name: string; startTime: string; endTime: string }) {
+  async create(tenantId: string, data: { operationId: string; name: string; startTime: string; endTime: string }) {
     return this.prisma.operationShift.create({
       data: { tenantId, ...data, status: 'PENDING' },
     });

@@ -11,8 +11,8 @@ export class OperationShiftController {
   constructor(private readonly service: OperationShiftService) {}
 
   @Get()
-  findByOperation(@Request() req: AuthRequest, @Query('dailyOperationId') dailyOperationId: string) {
-    return this.service.findByOperation(dailyOperationId ?? '', req.user.tenantId);
+  findByOperation(@Request() req: AuthRequest, @Query('operationId') operationId: string) {
+    return this.service.findByOperation(operationId ?? '', req.user.tenantId);
   }
 
   @Post()

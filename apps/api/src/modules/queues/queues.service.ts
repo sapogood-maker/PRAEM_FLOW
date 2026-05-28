@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
+import { OperationEventsService } from '../operation-events/operation-events.service';
 
 // SLA limits in minutes per priority
 const SLA_MINUTES: Record<string, number> = {
@@ -40,11 +41,27 @@ const STATUS_TIMESTAMP: Record<string, string> = {
   NO_SHOW: 'noShowAt',
 };
 
+const OPERATION_STATUS_FROM_QUEUE: Record<string, string> = {
+  WAITING: 'PENDING_DISPATCH',
+  ASSIGNED: 'PENDING_DISPATCH',
+  SCHEDULED: 'PENDING_DISPATCH',
+  CALLED: 'DISPATCHED',
+  CONFIRMED: 'PENDING_CONFIRMATION',
+  CHECKED_IN: 'BOARDING',
+  BOARDING: 'BOARDING',
+  IN_TRANSIT: 'IN_TRANSIT',
+  ARRIVED: 'ARRIVED',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  NO_SHOW: 'CANCELLED',
+};
+
 @Injectable()
 export class QueuesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly opsGateway: OperationsGateway,
+    private readonly operationEvents: OperationEventsService,
   ) {}
 
   async findAll(tenantId: string, query: {
@@ -119,8 +136,35 @@ export class QueuesService {
       estimatedDepartureAt,
       slaStatus: 'ON_TIME',
     };
-    const created = await this.prisma.operationalQueue.create({ data: payload });
+    const operationDate = new Date(data.appointmentDate ?? Date.now());
+    operationDate.setHours(0, 0, 0, 0);
+    const operation = await this.prisma.operation.upsert({
+      where: { tenantId_date: { tenantId, date: operationDate } },
+      create: {
+        tenantId,
+        date: operationDate,
+        status: 'IMPORTED' as any,
+        createdAutomatically: false,
+        totalPatients: 1,
+      },
+      update: {
+        totalPatients: { increment: 1 },
+      },
+    });
+    const created = await this.prisma.operationalQueue.create({ data: { ...payload, operationId: operation.id } });
     this.opsGateway.emitToTenant(tenantId, 'queue.updated', { id: created.id, action: 'CREATED', priority: created.priority });
+    await this.operationEvents.record({
+      tenantId,
+      operationId: operation.id,
+      patientId: created.patientId,
+      eventType: 'QUEUE_CREATED',
+      actorType: 'IMPORT',
+      metadata: {
+        queueId: created.id,
+        priority: created.priority,
+        queueType: created.queueType,
+      },
+    });
     return created;
   }
 
@@ -151,6 +195,26 @@ export class QueuesService {
         ...(extra ?? {}),
       },
     });
+    const operationStatus = OPERATION_STATUS_FROM_QUEUE[status];
+    if (operationStatus && q.operationId) {
+      await this.prisma.operation.updateMany({
+        where: { id: q.operationId, tenantId },
+        data: { status: operationStatus as any },
+      });
+      await this.operationEvents.record({
+        tenantId,
+        operationId: q.operationId,
+        patientId: q.patientId,
+        eventType: `QUEUE_STATUS_${String(status).toUpperCase()}`,
+        actorType: 'USER',
+        actorId: null,
+        metadata: {
+          queueId: q.id,
+          status,
+          extra: extra ?? {},
+        },
+      });
+    }
     // Emit domain event
     const eventMap: Record<string, string> = {
       CHECKED_IN: 'patient.checked_in',
@@ -172,13 +236,28 @@ export class QueuesService {
         noShowReason: (reason ?? 'UNKNOWN') as any,
       },
     });
+    if (q.operationId) {
+      await this.prisma.operation.updateMany({
+        where: { id: q.operationId, tenantId },
+        data: { status: 'CANCELLED' as any },
+      });
+      await this.operationEvents.record({
+        tenantId,
+        operationId: q.operationId,
+        patientId: q.patientId,
+        eventType: 'QUEUE_NO_SHOW',
+        actorType: 'USER',
+        actorId: null,
+        metadata: { queueId: q.id, reason: reason ?? 'UNKNOWN' },
+      });
+    }
     this.opsGateway.emitToTenant(tenantId, 'patient.missed', { id, reason, patientId: q.patientId });
     this.opsGateway.emitAlert(tenantId, { type: 'NO_SHOW', message: `Paciente não encontrado — fila ${id}`, severity: 'warning', data: { id, reason } });
     return updated;
   }
 
   async updateConfirmation(id: string, tenantId: string, confirmationStatus: string, channel?: string) {
-    await this.findOne(id, tenantId);
+    const q = await this.findOne(id, tenantId);
     return this.prisma.operationalQueue.update({
       where: { id },
       data: {
@@ -188,6 +267,24 @@ export class QueuesService {
         confirmationAttempts: { increment: 1 },
         lastContactAt: new Date(),
       },
+    }).then(async (updated) => {
+      if (q.operationId) {
+        const operationStatus = confirmationStatus === 'CONFIRMED' ? 'CONFIRMED' : 'PENDING_CONFIRMATION';
+        await this.prisma.operation.updateMany({
+          where: { id: q.operationId, tenantId },
+          data: { status: operationStatus as any },
+        });
+        await this.operationEvents.record({
+          tenantId,
+          operationId: q.operationId,
+          patientId: q.patientId,
+          eventType: confirmationStatus === 'CONFIRMED' ? 'PATIENT_CONFIRMED' : 'PATIENT_CONFIRMATION_UPDATED',
+          actorType: 'USER',
+          actorId: null,
+          metadata: { queueId: q.id, confirmationStatus, channel },
+        });
+      }
+      return updated;
     });
   }
 
@@ -204,6 +301,16 @@ export class QueuesService {
     if (slaStatus === 'DELAYED' || slaStatus === 'CRITICAL') {
       const event = slaStatus === 'CRITICAL' ? 'queue.critical' : 'queue.delayed';
       this.opsGateway.emitToTenant(tenantId, event, { id, slaStatus, delayMinutes, remainingMinutes, patientId: q.patientId });
+      if (q.operationId) {
+        await this.operationEvents.record({
+          tenantId,
+          operationId: q.operationId,
+          patientId: q.patientId,
+          eventType: slaStatus === 'CRITICAL' ? 'OPERATION_CRITICAL_DELAY' : 'OPERATION_DELAYED',
+          actorType: 'SYSTEM',
+          metadata: { queueId: q.id, slaStatus, delayMinutes, remainingMinutes },
+        });
+      }
       if (slaStatus === 'CRITICAL') {
         this.opsGateway.emitAlert(tenantId, {
           type: 'SLA_CRITICAL',
@@ -322,4 +429,3 @@ export class QueuesService {
     return { tenantId, suggestions };
   }
 }
-

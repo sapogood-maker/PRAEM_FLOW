@@ -293,7 +293,7 @@ class _MissionCard extends StatelessWidget {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  onPressed: ctrl.loading ? null : ctrl.startRoute,
+                  onPressed: ctrl.loading ? null : ctrl.startMission,
                   icon: ctrl.loading
                       ? const SizedBox(
                           width: 16, height: 16,

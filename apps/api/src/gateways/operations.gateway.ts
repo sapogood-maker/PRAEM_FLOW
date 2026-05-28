@@ -280,6 +280,13 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     if (!vehicleId || Number.isNaN(lat) || Number.isNaN(lng)) {
       return { ok: false, error: 'invalid_payload' };
     }
+    const linkedRoute = routeId
+      ? await this.prisma.route.findFirst({
+          where: { id: routeId, tenantId: user.tenantId },
+          select: { operationId: true },
+        })
+      : null;
+    const operationId = linkedRoute?.operationId ?? null;
     const key = `${user.tenantId}:${vehicleId}:${routeId ?? '-'}`;
     const payloadTimestamp = typeof safe['timestamp'] === 'string' ? new Date(safe['timestamp']) : null;
     const cachedLatestTs = this.lastPayloadTimestampByKey.get(key);
@@ -322,6 +329,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
           vehicleId,
           driverId,
           routeId,
+          operationId,
           lat,
           lng,
           speed: speed != null && !Number.isNaN(speed) ? speed : null,
@@ -365,6 +373,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
           data: {
             tenantId: user.tenantId,
             routeId,
+            operationId,
             driverId,
             vehicleId,
             lat,
@@ -378,6 +387,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
           data: {
             tenantId: user.tenantId,
             routeId,
+            operationId,
             driverId,
             vehicleId,
             eventType: 'GPS_CHECKPOINT',
@@ -677,6 +687,13 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       }
     }
 
+    const linkedRoute = input.routeId
+      ? await this.prisma.route.findFirst({
+          where: { id: input.routeId, tenantId },
+          select: { operationId: true },
+        })
+      : null;
+
     const lastGeoEvent = await this.prisma.geoFenceEvent.findFirst({
       where: { tenantId, vehicleId: input.vehicleId, routeId: input.routeId ?? undefined },
       orderBy: { detectedAt: 'desc' },
@@ -693,6 +710,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
             tenantId,
             vehicleId: input.vehicleId,
             routeId: input.routeId,
+            operationId: linkedRoute?.operationId ?? null,
             eventType: 'ARRIVED_AT_DESTINATION',
             locationId: nearest.id,
             locationName: nearest.name,
@@ -745,6 +763,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
           tenantId,
           vehicleId: input.vehicleId,
           routeId: input.routeId,
+          operationId: linkedRoute?.operationId ?? null,
           eventType: 'LEFT_DESTINATION',
           locationId: nearest.id,
           locationName: nearest.name,
@@ -884,6 +903,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
         status: { in: ['DISPATCHED', 'SCHEDULED', 'PLANNED', 'PREPARING', 'ACTIVE', 'RETURNING'] as any[] },
       },
       include: {
+        operation: { select: { id: true, status: true, date: true } },
         trips: {
           include: {
             patient: true,
@@ -905,7 +925,10 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     });
     const trackingPoints = activeRoute
       ? await this.prisma.trackingPoint.findMany({
-        where: { tenantId, routeId: activeRoute.id },
+        where: {
+          tenantId,
+          ...(activeRoute.operation?.id ? { operationId: activeRoute.operation.id } : { routeId: activeRoute.id }),
+        },
         orderBy: { timestamp: 'desc' },
         take: 200,
       })
@@ -915,8 +938,11 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
       typeof activeRoute?.operationalState === 'string' ? activeRoute.operationalState : null,
     );
     const timeline = activeRoute
-      ? await this.prisma.operationalTimeline.findMany({
-        where: { tenantId, routeId: activeRoute.id },
+      ? await this.prisma.operationEvent.findMany({
+        where: {
+          tenantId,
+          ...(activeRoute.operation?.id ? { operationId: activeRoute.operation.id } : { routeId: activeRoute.id }),
+        },
         orderBy: { createdAt: 'desc' },
         take: 300,
       })

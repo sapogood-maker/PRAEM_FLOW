@@ -25,11 +25,12 @@ model Tenant {
   trips                Trip[]
   checkpoints          Checkpoint[]
   auditLogs            AuditLog[]
-  dailyOperations      DailyOperation[]
+  operations           Operation[]
   operationShifts      OperationShift[]
   vehicleTrackings     VehicleTracking[]
   trackingPoints       TrackingPoint[]
   operationalTimelines OperationalTimeline[]
+  operationEvents      OperationEvent[]
   healthcareLocations  HealthcareLocation[]
   devices              Device[]
   geoFenceEvents       GeoFenceEvent[]
@@ -206,6 +207,7 @@ enum VehicleStatus {
 model OperationalQueue {
   id                     String              @id @default(uuid())
   tenantId               String
+  operationId            String?
   patientId              String
   appointmentDate        DateTime
   destination            String?
@@ -247,11 +249,13 @@ model OperationalQueue {
   noShowReason           NoShowReason?
   createdAt              DateTime            @default(now())
   tenant                 Tenant              @relation(fields: [tenantId], references: [id])
+  operation              Operation?          @relation(fields: [operationId], references: [id], onDelete: SetNull)
   patient                Patient             @relation(fields: [patientId], references: [id])
   healthcareLocation     HealthcareLocation? @relation(fields: [healthcareLocationId], references: [id])
 
   @@index([tenantId])
   @@index([patientId])
+  @@index([operationId])
   @@index([confirmationStatus])
   @@index([healthcareLocationId])
   @@index([status])
@@ -329,6 +333,7 @@ enum NoShowReason {
 model Route {
   id                      String       @id @default(uuid())
   tenantId                String
+  operationId             String?
   driverId                String?      // optional — may be assigned later when scheduling
   vehicleId               String?      // optional — may be assigned later when scheduling
   date                    DateTime
@@ -349,15 +354,18 @@ model Route {
   operationalVersion      Int          @default(1)
   createdAt               DateTime     @default(now())
   tenant                  Tenant       @relation(fields: [tenantId], references: [id])
+  operation               Operation?   @relation(fields: [operationId], references: [id], onDelete: SetNull)
   driver                  Driver?      @relation(fields: [driverId], references: [id])
   vehicle                 Vehicle?     @relation(fields: [vehicleId], references: [id])
   trips                   Trip[]
+  operationEvents         OperationEvent[]
   checkpoints             Checkpoint[]
   timelines               OperationalTimeline[]
   trackingPoints          TrackingPoint[]
   notificationLogs        NotificationLog[]
 
   @@index([tenantId])
+  @@index([operationId])
   @@index([scheduledAt])
 }
 
@@ -409,6 +417,7 @@ enum DispatchType {
 model Trip {
   id          String     @id @default(uuid())
   tenantId    String
+  operationId String?
   routeId     String
   patientId   String
   status      TripStatus
@@ -418,15 +427,18 @@ model Trip {
   version     Int        @default(1)
   notes       String?
   tenant      Tenant     @relation(fields: [tenantId], references: [id])
+  operation   Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
   route       Route      @relation(fields: [routeId], references: [id])
   patient     Patient    @relation(fields: [patientId], references: [id])
   checkpoints Checkpoint[]
   tokens      TripToken[]
   stops       TripStop[]
   timelines   OperationalTimeline[]
+  operationEvents OperationEvent[]
   notificationLogs NotificationLog[]
 
   @@index([tenantId])
+  @@index([operationId])
 }
 
 enum TripStatus {
@@ -498,6 +510,7 @@ model AuditLog {
 model VehicleTracking {
   id                    String                   @id @default(uuid())
   tenantId              String
+  operationId           String?
   vehicleId             String
   routeId               String?
   driverId              String?
@@ -516,9 +529,11 @@ model VehicleTracking {
   lastMovementAt        DateTime?                // last time speed > 0
   timestamp             DateTime                 @default(now())
   tenant                Tenant                   @relation(fields: [tenantId], references: [id])
+  operation             Operation?               @relation(fields: [operationId], references: [id], onDelete: SetNull)
   vehicle               Vehicle                  @relation(fields: [vehicleId], references: [id])
 
   @@index([tenantId])
+  @@index([operationId])
   @@index([vehicleId])
   @@index([routeId])
   @@index([operationalStatus])
@@ -545,6 +560,7 @@ enum VehicleOperationalStatus {
 model GeoFenceEvent {
   id                   String   @id @default(uuid())
   tenantId             String
+  operationId          String?
   vehicleId            String
   routeId              String?
   tripId               String?
@@ -555,8 +571,10 @@ model GeoFenceEvent {
   lng                  Float
   detectedAt           DateTime @default(now())
   tenant               Tenant   @relation(fields: [tenantId], references: [id])
+  operation            Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
+  @@index([operationId])
   @@index([vehicleId])
   @@index([routeId])
 }
@@ -564,6 +582,7 @@ model GeoFenceEvent {
 model TrackingPoint {
   id         String   @id @default(uuid())
   tenantId   String
+  operationId String?
   routeId    String?
   driverId   String?
   vehicleId  String
@@ -573,9 +592,11 @@ model TrackingPoint {
   heading    Float?
   timestamp  DateTime @default(now())
   tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  operation  Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
   route      Route?   @relation(fields: [routeId], references: [id])
 
   @@index([tenantId])
+  @@index([operationId])
   @@index([routeId])
   @@index([driverId])
   @@index([vehicleId])
@@ -585,6 +606,7 @@ model TrackingPoint {
 model OperationalTimeline {
   id            String   @id @default(uuid())
   tenantId      String
+  operationId   String?
   routeId       String?
   tripId        String?
   patientId     String?
@@ -597,15 +619,43 @@ model OperationalTimeline {
   metadata      Json?
   createdAt     DateTime @default(now())
   tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  operation     Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
   route         Route?   @relation(fields: [routeId], references: [id])
   trip          Trip?    @relation(fields: [tripId], references: [id])
 
   @@index([tenantId])
+  @@index([operationId])
   @@index([routeId])
   @@index([tripId])
   @@index([patientId])
   @@index([eventType])
   @@index([createdAt])
+}
+
+model OperationEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  operationId String
+  routeId     String?
+  tripId      String?
+  patientId   String?
+  eventType   String
+  actorType   String?
+  actorId     String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  route       Route?    @relation(fields: [routeId], references: [id])
+  trip        Trip?     @relation(fields: [tripId], references: [id])
+
+  @@index([tenantId])
+  @@index([operationId])
+  @@index([routeId])
+  @@index([tripId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("operation_events")
 }
 
 model ProcessedEvent {
@@ -649,13 +699,13 @@ model ConflictLog {
 }
 
 // ---------------------------------------------------------------------------
-// DailyOperation — operação do dia (prefeitura pensa em "operação diária")
+// Operation — operação central (fonte de verdade da lifecycle operacional)
 // ---------------------------------------------------------------------------
-model DailyOperation {
+model Operation {
   id                   String          @id @default(uuid())
   tenantId             String
   date                 DateTime
-  status               OperationStatus @default(PLANNING)
+  status               OperationStatus @default(IMPORTED)
   totalVehicles        Int             @default(0)
   totalDrivers         Int             @default(0)
   totalPatients        Int             @default(0)
@@ -663,17 +713,33 @@ model DailyOperation {
   notes                String?
   createdAutomatically Boolean         @default(false)
   createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
   tenant               Tenant          @relation(fields: [tenantId], references: [id])
   shifts               OperationShift[]
+  queues               OperationalQueue[]
+  routes               Route[]
+  trips                Trip[]
+  vehicleTrackings     VehicleTracking[]
+  geoFenceEvents       GeoFenceEvent[]
+  trackingPoints       TrackingPoint[]
+  timelines            OperationalTimeline[]
+  operationEvents      OperationEvent[]
 
   @@unique([tenantId, date])
   @@index([tenantId])
+  @@map("DailyOperation")
 }
 
 enum OperationStatus {
-  PLANNING
-  ACTIVE
-  CLOSED
+  IMPORTED
+  PENDING_DISPATCH
+  DISPATCHED
+  PENDING_CONFIRMATION
+  CONFIRMED
+  BOARDING
+  IN_TRANSIT
+  ARRIVED
+  COMPLETED
   CANCELLED
 }
 
@@ -683,17 +749,17 @@ enum OperationStatus {
 model OperationShift {
   id               String         @id @default(uuid())
   tenantId         String
-  dailyOperationId String
+  operationId      String
   name             String
   startTime        String         // "06:00"
   endTime          String         // "12:00"
   status           ShiftStatus    @default(PENDING)
   createdAt        DateTime       @default(now())
   tenant           Tenant         @relation(fields: [tenantId], references: [id])
-  dailyOperation   DailyOperation @relation(fields: [dailyOperationId], references: [id])
+  operation        Operation      @relation(fields: [operationId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
-  @@index([dailyOperationId])
+  @@index([operationId])
 }
 
 enum ShiftStatus {

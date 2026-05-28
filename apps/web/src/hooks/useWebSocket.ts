@@ -331,6 +331,10 @@ export function useWebSocket(enabled = true) {
       record(`🧩 Sugestão operacional: rota ${target} → ${suggested}`, 'ops');
     });
 
+    socket.on('operation:event', (data: { eventType?: string; operationId?: string; routeId?: string; tripId?: string }) => {
+      record(`🧩 Evento operacional: ${data.eventType ?? 'OPERATION_EVENT'} (${data.operationId ?? data.routeId ?? '—'})`, 'ops');
+    });
+
     socket.on('route:tracking_archived', (data: { routeId?: string; points?: number }) => {
       record(`🗄️ Tracking arquivado: rota ${data.routeId ?? '—'} (${data.points ?? 0} pontos)`, 'replay');
     });

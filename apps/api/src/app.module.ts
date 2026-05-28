@@ -37,6 +37,7 @@ import { SusImportModule } from './modules/sus-import/sus-import.module';
 import { DispatchEngineModule } from './modules/dispatch-engine/dispatch-engine.module';
 import { QrEngineModule } from './modules/qr-engine/qr-engine.module';
 import { NotificationTemplatesModule } from './modules/notification-templates/notification-templates.module';
+import { OperationEventsModule } from './modules/operation-events/operation-events.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { NotificationTemplatesModule } from './modules/notification-templates/no
     DispatchEngineModule,
     QrEngineModule,
     NotificationTemplatesModule,
+    OperationEventsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

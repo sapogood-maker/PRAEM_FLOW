@@ -5,11 +5,11 @@ import { PatientsModule } from '../patients/patients.module';
 import { QueuesModule } from '../queues/queues.module';
 import { RoutesModule } from '../routes/routes.module';
 import { TripsModule } from '../trips/trips.module';
+import { OperationEventsModule } from '../operation-events/operation-events.module';
 
 @Module({
-  imports: [PatientsModule, QueuesModule, RoutesModule, TripsModule],
+  imports: [PatientsModule, QueuesModule, RoutesModule, TripsModule, OperationEventsModule],
   controllers: [SchedulingImportController],
   providers: [SchedulingImportService],
 })
 export class SchedulingImportModule {}
-

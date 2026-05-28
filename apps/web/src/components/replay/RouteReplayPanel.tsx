@@ -78,6 +78,18 @@ function mapEventLabel(evt: ReplayEvent) {
     }
   }
   switch (eventType) {
+    case 'OPERATION_IMPORTED':
+    case 'SPREADSHEET_IMPORTED':
+    case 'SUS_IMPORT_UPLOADED':
+      return 'Importação operacional';
+    case 'OPERATION_CREATED':
+      return 'Operação criada';
+    case 'OPERATION_DISPATCHED':
+      return 'Operação despachada';
+    case 'DRIVER_ASSIGNED':
+      return 'Motorista atribuído';
+    case 'VEHICLE_ASSIGNED':
+      return 'Veículo atribuído';
     case 'ROUTE_ACCEPTED':
       return 'Rota aceita';
     case 'TRIP_BOARDED':
@@ -94,6 +106,12 @@ function mapEventLabel(evt: ReplayEvent) {
       return 'Override supervisor';
     case 'GPS_CHECKPOINT':
       return 'Checkpoint GPS';
+    case 'VEHICLE_OFFLINE':
+      return 'Veículo offline';
+    case 'OPERATION_DELAYED':
+      return 'Operação atrasada';
+    case 'OPERATION_CRITICAL_DELAY':
+      return 'Atraso crítico';
     case 'RECOVERY':
     case 'RECOVERY_STALE_ROUTE':
       return 'Recuperação operacional';

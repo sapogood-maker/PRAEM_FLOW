@@ -3,6 +3,7 @@ import { Prisma, QueueStatus, SusImportRowStatus, SusImportStatus } from '@prism
 import { createHash } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PatientsService } from '../../patients/patients.service';
+import { OperationEventsService } from '../../operation-events/operation-events.service';
 import { UploadSusImportDto } from '../dto/upload-sus-import.dto';
 import { ParsedSusRow, SusSpreadsheetParser } from '../parsers/sus-spreadsheet.parser';
 import { SusImportRowValidator } from '../validators/sus-import-row.validator';
@@ -18,6 +19,7 @@ export class SusImportService {
     private readonly parser: SusSpreadsheetParser,
     private readonly validator: SusImportRowValidator,
     private readonly mapper: SusImportRowMapper,
+    private readonly operationEvents: OperationEventsService,
   ) {}
 
   async upload(
@@ -42,6 +44,35 @@ export class SusImportService {
         processingAttempts: 1,
       },
       select: { id: true },
+    });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const operation = await this.prisma.operation.upsert({
+      where: { tenantId_date: { tenantId, date: today } },
+      create: {
+        tenantId,
+        date: today,
+        status: 'IMPORTED' as any,
+        createdAutomatically: false,
+        totalPatients: parsedRows.length,
+      },
+      update: {
+        totalPatients: { increment: parsedRows.length },
+      },
+    });
+    await this.operationEvents.record({
+      tenantId,
+      operationId: operation.id,
+      eventType: 'SUS_IMPORT_UPLOADED',
+      actorType: userId ? 'USER' : 'IMPORT',
+      actorId: userId ?? null,
+      metadata: {
+        sourceSystem: dto.sourceSystem?.trim() || 'SUS',
+        fileName: file?.originalname ?? null,
+        rowCount: parsedRows.length,
+        reprocessFromImportId: dto.reprocessFromImportId ?? null,
+      },
     });
 
     let validRows = 0;

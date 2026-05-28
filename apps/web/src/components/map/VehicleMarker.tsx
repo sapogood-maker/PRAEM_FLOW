@@ -15,6 +15,8 @@ type VehicleMarkerProps = {
   operationalStatus?: string;
   online?: boolean;
   updatedAt?: string;
+  focused?: boolean;
+  onSelect?: () => void;
 };
 
 const statusColors: Record<string, string> = {
@@ -82,6 +84,8 @@ export function VehicleMarker({
   operationalStatus,
   online,
   updatedAt,
+  focused,
+  onSelect,
 }: VehicleMarkerProps) {
   const [animatedPosition, setAnimatedPosition] = useState<[number, number]>(position);
   const [animatedHeading, setAnimatedHeading] = useState<number>(heading ?? 0);
@@ -150,8 +154,8 @@ export function VehicleMarker({
     () =>
       L.divIcon({
         className: 'vehicle-marker',
-        iconSize: [44, 44],
-        iconAnchor: [22, 22],
+        iconSize: [52, 52],
+        iconAnchor: [26, 26],
         html: `
           <style>
             @keyframes mapPulse {
@@ -160,14 +164,14 @@ export function VehicleMarker({
               100% { transform: scale(1.25); opacity: 0; }
             }
           </style>
-          <div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center;">
+          <div style="position:relative;width:52px;height:52px;display:flex;align-items:center;justify-content:center;filter:${focused ? 'drop-shadow(0 0 12px rgba(34,211,238,.35))' : 'none'};">
             ${
               online !== false
-                ? `<span style="position:absolute;width:30px;height:30px;border-radius:9999px;background:${color};animation:mapPulse 1.6s infinite;"></span>`
+                ? `<span style="position:absolute;width:${focused ? 36 : 30}px;height:${focused ? 36 : 30}px;border-radius:9999px;background:${color};animation:mapPulse 1.6s infinite;"></span>`
                 : ''
             }
             <div style="position:relative;z-index:2;transform-origin:center center;transform:translate(0, 0) rotate(${rotate}deg);transition:transform 180ms linear;">
-              <svg width="30" height="30" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <svg width="${focused ? 36 : 30}" height="${focused ? 36 : 30}" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect x="8" y="20" width="48" height="24" rx="8" fill="#0d1117" stroke="${color}" stroke-width="4"/>
                 <rect x="16" y="24" width="32" height="12" rx="4" fill="${color}" fill-opacity="0.22"/>
                 <circle cx="20" cy="48" r="6" fill="#0d1117" stroke="${color}" stroke-width="3"/>
@@ -178,11 +182,15 @@ export function VehicleMarker({
           </div>
         `,
       }),
-    [color, online, rotate],
+    [color, focused, online, rotate],
   );
 
   return (
-    <Marker position={animatedPosition} icon={icon}>
+    <Marker
+      position={animatedPosition}
+      icon={icon}
+      eventHandlers={onSelect ? { click: onSelect } : undefined}
+    >
       <Popup>
         <div className='min-w-[220px] text-xs text-slate-200'>
           <p className='text-sm font-semibold text-slate-100'>Veículo: {label}</p>
@@ -191,6 +199,7 @@ export function VehicleMarker({
           <p className='text-slate-300'>Velocidade: {speedLabel}</p>
           <p className='text-slate-300'>Status: {statusLabel}</p>
           <p className='text-slate-400'>Última atualização: {formatUpdatedAt(updatedAt)}</p>
+          {focused && <p className='mt-2 text-cyan-300'>Foco operacional ativo</p>}
         </div>
       </Popup>
     </Marker>

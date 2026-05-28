@@ -52,9 +52,16 @@ export class TrackingController {
     @Request() req: AuthRequest,
     @Query('routeId') routeId?: string,
     @Query('tripId') tripId?: string,
+    @Query('operationId') operationId?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.trackingService.getOperationalTimeline(req.user.tenantId, routeId, tripId, limit ? Number(limit) : undefined);
+    return this.trackingService.getOperationalTimeline(
+      req.user.tenantId,
+      routeId,
+      tripId,
+      operationId,
+      limit ? Number(limit) : undefined,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

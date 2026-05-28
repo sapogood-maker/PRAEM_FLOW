@@ -7,6 +7,7 @@ import { PatientsService } from '../patients/patients.service';
 import { QueuesService } from '../queues/queues.service';
 import { RoutesService } from '../routes/routes.service';
 import { TripsService } from '../trips/trips.service';
+import { OperationEventsService } from '../operation-events/operation-events.service';
 
 type ImportMode = 'PREVIEW' | 'APPLY';
 type DispatchType = 'SCHEDULED' | 'IMMEDIATE';
@@ -159,6 +160,7 @@ export class SchedulingImportService {
     private readonly queuesService: QueuesService,
     private readonly routesService: RoutesService,
     private readonly tripsService: TripsService,
+    private readonly operationEvents: OperationEventsService,
   ) {}
 
   async importSpreadsheet(
@@ -188,6 +190,36 @@ export class SchedulingImportService {
       select: { city: true, state: true },
     });
     if (!tenant) throw new BadRequestException('Tenant not found');
+
+    const operationDate = new Date();
+    operationDate.setHours(0, 0, 0, 0);
+    const operation = await this.prisma.operation.upsert({
+      where: { tenantId_date: { tenantId, date: operationDate } },
+      create: {
+        tenantId,
+        date: operationDate,
+        status: 'IMPORTED' as any,
+        createdAutomatically: false,
+        totalPatients: rows.length,
+      },
+      update: {
+        status: 'IMPORTED' as any,
+        totalPatients: { increment: rows.length },
+      },
+    });
+
+    await this.operationEvents.record({
+      tenantId,
+      operationId: operation.id,
+      eventType: 'SPREADSHEET_IMPORTED',
+      actorType: 'IMPORT',
+      metadata: {
+        fileName: file.originalname ?? null,
+        rowCount: rows.length,
+        mode: options.mode,
+        planCount: plan.length,
+      },
+    });
 
     const groups = new Map<string, Array<{ row: NormalizedRow; patientId: string; queueId: string; destinationId: string }>>();
     let createdPatients = 0;

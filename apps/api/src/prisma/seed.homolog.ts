@@ -333,19 +333,19 @@ async function main() {
   console.log(`✅ ${savedPatients.length} filas operacionais criadas`);
 
   // ── Operação do dia homolog ───────────────────────────────────────────────
-  const dailyOp = await prisma.dailyOperation.upsert({
+  const dailyOp = await prisma.operation.upsert({
     where: { tenantId_date: { tenantId: tenant.id, date: today } },
     update: {},
     create: {
       tenantId: tenant.id,
       date: today,
-      status: 'ACTIVE',
+      status: 'PENDING_DISPATCH',
       totalVehicles: vehicles.length,
       totalDrivers: drivers.length,
       totalPatients: savedPatients.length,
     },
   });
-  console.log('✅ DailyOperation:', dailyOp.id);
+  console.log('✅ Operation:', dailyOp.id);
 
   // ── Turnos ────────────────────────────────────────────────────────────────
   const shifts = [
@@ -360,7 +360,7 @@ async function main() {
       create: {
         id: `${dailyOp.id}-${s.name}`,
         tenantId: tenant.id,
-        dailyOperationId: dailyOp.id,
+        operationId: dailyOp.id,
         name: s.name,
         startTime: s.startTime,
         endTime: s.endTime,

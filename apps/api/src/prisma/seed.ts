@@ -59,17 +59,17 @@ async function main() {
   // ── Operação do dia ────────────────────────────────────────────────────────
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const dailyOp = await prisma.dailyOperation.upsert({
+  const dailyOp = await prisma.operation.upsert({
     where: { tenantId_date: { tenantId: tenant.id, date: today } },
     update: {},
     create: {
       tenantId: tenant.id,
       date: today,
-      status: 'PLANNING',
+      status: 'IMPORTED',
       totalVehicles: vehicles.length,
     },
   });
-  console.log('✅ DailyOperation:', dailyOp.id);
+  console.log('✅ Operation:', dailyOp.id);
 
   // ── Turnos demo ────────────────────────────────────────────────────────────
   const shifts = [
@@ -84,7 +84,7 @@ async function main() {
       create: {
         id: `${dailyOp.id}-${s.name}`,
         tenantId: tenant.id,
-        dailyOperationId: dailyOp.id,
+        operationId: dailyOp.id,
         name: s.name,
         startTime: s.startTime,
         endTime: s.endTime,

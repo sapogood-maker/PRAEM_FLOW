@@ -5,6 +5,7 @@ import { OperationsGateway } from '../../gateways/operations.gateway';
 import { sanitizePayload } from '../../common/sanitize';
 import { AuditService } from '../audit/audit.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
+import { OperationEventsService } from '../operation-events/operation-events.service';
 import {
   distanceMeters,
   loadTrackingPolicy,
@@ -53,6 +54,7 @@ export class TrackingService {
     private readonly opsGateway: OperationsGateway,
     private readonly audit: AuditService,
     private readonly flow: OperationalFlowService,
+    private readonly operationEvents: OperationEventsService,
   ) {}
 
   /**
@@ -70,6 +72,13 @@ export class TrackingService {
     }
 
     const now = new Date();
+    const linkedRoute = payload.routeId
+      ? await this.prisma.route.findFirst({
+          where: { id: payload.routeId, tenantId: payload.tenantId },
+          select: { operationId: true },
+        })
+      : null;
+    const operationId = linkedRoute?.operationId ?? null;
     const operationalStatus = deriveOperationalStatus(payload.speed, true) as any;
     const isMoving = (payload.speed ?? 0) >= 2;
     const key = this.gpsCacheKey(payload.tenantId, payload.vehicleId, payload.routeId ?? null);
@@ -88,6 +97,7 @@ export class TrackingService {
           tenantId: payload.tenantId,
           vehicleId: payload.vehicleId,
           routeId: payload.routeId ?? null,
+          operationId,
           driverId: payload.driverId ?? null,
           lat: payload.lat,
           lng: payload.lng,
@@ -125,6 +135,7 @@ export class TrackingService {
           data: {
             tenantId: payload.tenantId,
             routeId: payload.routeId ?? null,
+            operationId,
             driverId: payload.driverId ?? null,
             vehicleId: payload.vehicleId,
             lat: payload.lat,
@@ -137,6 +148,7 @@ export class TrackingService {
         await this.prisma.operationalTimeline.create({
           data: {
             tenantId: payload.tenantId,
+            operationId,
             routeId: payload.routeId ?? null,
             driverId: payload.driverId ?? null,
             vehicleId: payload.vehicleId,
@@ -158,6 +170,23 @@ export class TrackingService {
           heading: payload.heading ?? null,
           timestamp: now,
         });
+        if (operationId) {
+          await this.operationEvents.record({
+            tenantId: payload.tenantId,
+            operationId,
+            routeId: payload.routeId ?? null,
+            eventType: 'GPS_CHECKPOINT',
+            actorType: 'DEVICE',
+            actorId: payload.deviceId ?? payload.vehicleId,
+            metadata: {
+              lat: payload.lat,
+              lng: payload.lng,
+              speed: payload.speed ?? null,
+              heading: payload.heading ?? null,
+              persistedBy: persistDecision.reason,
+            },
+          });
+        }
         this.logger.log(
           `[TRACKING] [GPS] persisted checkpoint tenantId=${payload.tenantId} vehicleId=${payload.vehicleId} routeId=${payload.routeId ?? '-'} reason=${persistDecision.reason} dist=${persistDecision.distanceMeters.toFixed(1)}m dt=${persistDecision.elapsedSeconds.toFixed(1)}s`,
         );
@@ -293,6 +322,19 @@ export class TrackingService {
         lastSeen: t.lastHeartbeatAt?.toISOString(),
         routeId: t.routeId,
       });
+      const route = t.routeId
+        ? await this.prisma.route.findFirst({ where: { id: t.routeId, tenantId }, select: { operationId: true } })
+        : null;
+      if (route?.operationId) {
+        await this.operationEvents.record({
+          tenantId,
+          operationId: route.operationId,
+          routeId: t.routeId ?? null,
+          eventType: 'VEHICLE_OFFLINE',
+          actorType: 'SYSTEM',
+          metadata: { vehicleId: t.vehicleId, lastSeen: t.lastHeartbeatAt?.toISOString() ?? null },
+        });
+      }
       this.opsGateway.emitAlert(tenantId, {
         type: 'VEHICLE_OFFLINE',
         message: `Veículo offline — sem sinal há mais de ${OFFLINE_THRESHOLD_SECONDS}s`,
@@ -317,9 +359,37 @@ export class TrackingService {
     locationId?: string;
     locationName?: string;
   }) {
+    const linkedRoute = data.routeId
+      ? await this.prisma.route.findFirst({
+          where: { id: data.routeId, tenantId },
+          select: { operationId: true },
+        })
+      : null;
     const event = await this.prisma.geoFenceEvent.create({
-      data: { tenantId, ...data },
+      data: { tenantId, ...data, routeId: data.routeId ?? null, tripId: data.tripId ?? null, operationId: linkedRoute?.operationId ?? null } as any,
     });
+    if (linkedRoute?.operationId) {
+      const mappedEventType = data.eventType === 'ARRIVED_AT_DESTINATION'
+        ? 'ARRIVAL_CONFIRMED'
+        : data.eventType === 'LEFT_DESTINATION'
+          ? 'LEFT_DESTINATION'
+          : data.eventType;
+      await this.operationEvents.record({
+        tenantId,
+        operationId: linkedRoute.operationId,
+        routeId: data.routeId ?? null,
+        tripId: data.tripId ?? null,
+        eventType: mappedEventType,
+        actorType: 'DEVICE',
+        actorId: data.vehicleId,
+        metadata: {
+          locationId: data.locationId ?? null,
+          locationName: data.locationName ?? null,
+          lat: data.lat,
+          lng: data.lng,
+        },
+      });
+    }
     const wsEvent = data.eventType === 'ARRIVED_AT_DESTINATION' ? 'vehicle.arrived_at_destination' : 'vehicle.geofence_event';
     this.opsGateway.emitToTenant(tenantId, wsEvent, {
       vehicleId: data.vehicleId,
@@ -381,17 +451,25 @@ export class TrackingService {
     return { items: items.reverse() };
   }
 
-  async getOperationalTimeline(tenantId: string, routeId?: string, tripId?: string, limit = 500) {
-    const items = await this.prisma.operationalTimeline.findMany({
+  async getOperationalTimeline(tenantId: string, routeId?: string, tripId?: string, operationId?: string, limit = 500) {
+    const items = await this.prisma.operationEvent.findMany({
       where: {
         tenantId,
         ...(routeId ? { routeId } : {}),
         ...(tripId ? { tripId } : {}),
+        ...(operationId ? { operationId } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: Math.min(Math.max(limit, 50), 5000),
     });
-    return { items };
+    return {
+      items: items.map((item) => ({
+        ...item,
+        source: item.actorType ?? null,
+        fromState: (item.metadata as Record<string, unknown> | null)?.fromState ?? null,
+        toState: (item.metadata as Record<string, unknown> | null)?.toState ?? null,
+      })),
+    };
   }
 
   async getRouteReplay(tenantId: string, routeId: string, maxPoints = 3000) {
@@ -409,6 +487,7 @@ export class TrackingService {
       },
     });
     if (!route) return { route: null, points: [], timeline: [], metrics: null };
+    const operationId = route.operationId ?? undefined;
 
     const pointsRaw = await this.prisma.trackingPoint.findMany({
       where: { tenantId, routeId },
@@ -418,8 +497,12 @@ export class TrackingService {
 
     const points = this.downsampleReplayPoints(pointsRaw, Math.min(Math.max(maxPoints, 200), 10000));
 
-    const timeline = await this.prisma.operationalTimeline.findMany({
-      where: { tenantId, routeId },
+    const timeline = await this.prisma.operationEvent.findMany({
+      where: {
+        tenantId,
+        ...(routeId ? { routeId } : {}),
+        ...(operationId ? { operationId } : {}),
+      },
       orderBy: { createdAt: 'asc' },
       take: 2000,
     });
@@ -431,7 +514,12 @@ export class TrackingService {
       points,
       trackingPoints: points,
       tracking_points: points,
-      timeline,
+      timeline: timeline.map((item) => ({
+        ...item,
+        source: item.actorType ?? null,
+        fromState: (item.metadata as Record<string, unknown> | null)?.fromState ?? null,
+        toState: (item.metadata as Record<string, unknown> | null)?.toState ?? null,
+      })),
       metrics,
     };
   }

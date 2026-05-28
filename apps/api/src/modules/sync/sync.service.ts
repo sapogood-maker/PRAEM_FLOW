@@ -302,6 +302,23 @@ export class SyncService {
           return { snapshot: null };
         }
 
+        case 'TRIP_ISSUE': {
+          await this.prisma.auditLog.create({
+            data: {
+              tenantId,
+              userId: actor.userId,
+              action: 'TRIP_ISSUE',
+              entity: 'trip',
+              entityId: tripId ?? payload.tripId ?? payload.patientId ?? 'unknown',
+              deviceId: event.deviceId,
+              endpoint: '/driver/mission/issue',
+              method: 'POST',
+              after: payload as any,
+            } as any,
+          });
+          return { snapshot: null };
+        }
+
         case 'GPS_UPDATE': {
           await this.tracking.heartbeat(
             {

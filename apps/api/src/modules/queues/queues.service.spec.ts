@@ -11,6 +11,10 @@ const mockPrisma = {
     findFirst: jest.fn().mockResolvedValue(null),
     delete: jest.fn().mockResolvedValue({}),
   },
+  operation: {
+    upsert: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: 'op-test-id', status: 'IMPORTED', ...args.create })),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+  },
   healthcareLocation: {
     findFirst: jest.fn().mockResolvedValue({ id: 'loc-1', name: 'Hospital X', active: true }),
   },
@@ -21,9 +25,13 @@ const mockGateway = {
   emitAlert: jest.fn(),
 } as any;
 
+const mockOperationEvents = {
+  record: jest.fn().mockResolvedValue({}),
+} as any;
+
 describe('QueuesService', () => {
   it('creates a queue item and returns id', async () => {
-    const service = new QueuesService(mockPrisma, mockGateway);
+    const service = new QueuesService(mockPrisma, mockGateway, mockOperationEvents);
     const result = await service.create('t1', {
       tenantId: 't1',
       patientId: 'p1',
@@ -37,7 +45,7 @@ describe('QueuesService', () => {
   });
 
   it('returns ai suggestions', async () => {
-    const service = new QueuesService(mockPrisma, mockGateway);
+    const service = new QueuesService(mockPrisma, mockGateway, mockOperationEvents);
     (mockPrisma.operationalQueue.findMany as jest.Mock).mockResolvedValueOnce([
       {
         id: 'q1',

@@ -576,6 +576,64 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  Future<void> startMission() async {
+    await performPrimaryAction();
+  }
+
+  Future<void> finalizeMission() async {
+    await finalizeOperationRecovery();
+  }
+
+  Future<void> confirmPassengerBoarded(String tripId) async {
+    await _postTripAction(
+      '/trips/$tripId/boarded',
+      tripId: tripId,
+      onSuccess: () {
+        _updateTripStatus(tripId, 'BOARDED');
+        if (_patients.every((p) {
+          final s = (p['status'] as String? ?? '').toUpperCase();
+          return s == 'COMPLETED' || s == 'CANCELLED' || s == 'NO_SHOW';
+        })) {
+          _transition(OperationalState.boarded, force: true);
+        } else {
+          _transition(OperationalState.boarding, force: true);
+        }
+      },
+    );
+  }
+
+  Future<void> markPassengerNoShow(String tripId) async {
+    await _postTripAction(
+      '/trips/$tripId/no-show',
+      tripId: tripId,
+      onSuccess: () {
+        _updateTripStatus(tripId, 'NO_SHOW');
+        _transition(OperationalState.noShow, force: true);
+      },
+    );
+  }
+
+  Future<void> reportPassengerIssue(String tripId, {String? reason}) async {
+    final routeId = _activeRoute?['id'] as String?;
+    final deviceId = _driverState.deviceId ?? 'unknown-device';
+    await _offlineQueue.enqueueOperationalAction(
+      type: 'TRIP_ISSUE',
+      payload: {
+        'tripId': tripId,
+        'routeId': routeId,
+        'driverId': _auth.driverId,
+        'vehicleId': _driverState.vehicle?['id'] as String? ?? _auth.vehicle?['id'] as String?,
+        'reason': reason ?? 'Issue reported by driver',
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+      deviceId: deviceId,
+      operationId: routeId,
+      routeId: routeId,
+      tripId: tripId,
+    );
+    await _syncManager.syncAll();
+  }
+
   Future<void> _acceptRoute() async {
     final routeId = _activeRoute?['id'] as String?;
     if (routeId == null) {
@@ -686,6 +744,47 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       _lastError = e.toString();
       debugPrint('[OPS] queue action error path=$path error=$e');
+    } finally {
+      _actionInProgress = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _postTripAction(
+    String path, {
+    required String tripId,
+    required VoidCallback onSuccess,
+  }) async {
+    if (_actionInProgress) return;
+    _actionInProgress = true;
+    _lastError = null;
+    notifyListeners();
+    try {
+      final routeId = _activeRoute?['id'] as String?;
+      final type = _eventTypeFromPath(path);
+      final payload = <String, dynamic>{
+        'path': path,
+        'routeId': routeId,
+        'tripId': tripId,
+        'driverId': _auth.driverId,
+        'vehicleId': _driverState.vehicle?['id'] as String? ?? _auth.vehicle?['id'] as String?,
+        'deviceId': _driverState.deviceId,
+        'tenantId': _auth.tenantId,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      await _offlineQueue.enqueueOperationalAction(
+        type: type,
+        payload: payload,
+        deviceId: _driverState.deviceId ?? 'unknown-device',
+        operationId: routeId,
+        routeId: routeId,
+        tripId: tripId,
+      );
+      await _syncManager.syncAll();
+      onSuccess();
+    } catch (e) {
+      _lastError = e.toString();
+      debugPrint('[OPS] queue trip action error path=$path error=$e');
     } finally {
       _actionInProgress = false;
       notifyListeners();

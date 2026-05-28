@@ -5,9 +5,10 @@ import { GatewaysModule } from '../../gateways/gateways.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuditModule } from '../audit/audit.module';
 import { OperationalFlowModule } from '../operational-flow/operational-flow.module';
+import { OperationEventsModule } from '../operation-events/operation-events.module';
 
 @Module({
-  imports: [PrismaModule, GatewaysModule, AuditModule, OperationalFlowModule],
+  imports: [PrismaModule, GatewaysModule, AuditModule, OperationalFlowModule, OperationEventsModule],
   controllers: [TrackingController],
   providers: [TrackingService],
   exports: [TrackingService],

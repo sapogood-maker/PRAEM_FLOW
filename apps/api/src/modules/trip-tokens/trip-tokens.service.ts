@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../gateways/realtime.gateway';
 import { buildTripQrPayload, issueQrToken } from '../../common/qr-payload';
+import { OperationEventsService } from '../operation-events/operation-events.service';
 
 export type TokenType = 'CONFIRMATION' | 'BOARDING' | 'RETURN' | 'REBOOK';
 
@@ -17,6 +18,7 @@ export class TripTokensService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: RealtimeGateway,
+    private readonly operationEvents: OperationEventsService,
   ) {}
 
   /** Gera um token operacional para uma viagem. */
@@ -41,6 +43,19 @@ export class TripTokensService {
         expiresAt,
       },
     });
+
+    if (trip.operationId) {
+      await this.operationEvents.record({
+        tenantId,
+        operationId: trip.operationId,
+        routeId: trip.routeId,
+        tripId: trip.id,
+        patientId: trip.patientId,
+        eventType: 'QR_GENERATED',
+        actorType: 'SYSTEM',
+        metadata: { tokenType: type, expiresAt: expiresAt.toISOString(), tripTokenId: created.id },
+      });
+    }
 
     return {
       id: created.id,
@@ -149,7 +164,7 @@ export class TripTokensService {
     const record = await this.prisma.tripToken.findUnique({
       where: { token },
       include: {
-        trip: { select: { id: true, status: true, tenantId: true, routeId: true, patientId: true } },
+        trip: { select: { id: true, status: true, tenantId: true, routeId: true, patientId: true, operationId: true } },
         patient: { select: { id: true, name: true } },
       },
     });
@@ -180,6 +195,8 @@ export class TripTokensService {
     const gpsStr = action.gpsLat != null && action.gpsLng != null
       ? `${action.gpsLat},${action.gpsLng}`
       : null;
+    const tenantId = record.trip.tenantId;
+    const tripId = record.trip.id;
 
     // Mark as used
     await this.prisma.tripToken.update({
@@ -191,9 +208,6 @@ export class TripTokensService {
         deviceInfo: action.deviceInfo ?? null,
       },
     });
-
-    const tenantId = record.trip.tenantId;
-    const tripId = record.trip.id;
 
     // Apply operational action based on token type
     switch (record.type) {
@@ -237,6 +251,19 @@ export class TripTokensService {
           patientName: record.patient?.name,
           confirmedAt: now,
         });
+        if (record.trip.operationId) {
+          await this.operationEvents.record({
+            tenantId,
+            operationId: record.trip.operationId,
+            routeId: record.trip.routeId,
+            tripId,
+            patientId: record.patientId,
+            eventType: 'PATIENT_CONFIRMED',
+            actorType: 'PATIENT',
+            actorId: record.patientId,
+            metadata: { tokenType: record.type, confirmationChannel: 'WHATSAPP' },
+          });
+        }
         break;
 
       case 'RETURN':
@@ -255,6 +282,20 @@ export class TripTokensService {
           requestedAt: now,
         });
         break;
+    }
+
+    if (record.trip.operationId) {
+      await this.operationEvents.record({
+        tenantId,
+        operationId: record.trip.operationId,
+        routeId: record.trip.routeId,
+        tripId,
+        patientId: record.patientId,
+        eventType: 'QR_SCANNED',
+        actorType: 'PATIENT',
+        actorId: record.patientId,
+        metadata: { tokenType: record.type, usedByIp: action.ip ?? null, usedByGps: gpsStr },
+      });
     }
 
     return { success: true, type: record.type, usedAt: now };

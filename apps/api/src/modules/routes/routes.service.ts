@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
+import { OperationEventsService } from '../operation-events/operation-events.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { TripTokensService } from '../trip-tokens/trip-tokens.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
@@ -14,6 +15,7 @@ export class RoutesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
+    private readonly operationEvents: OperationEventsService,
     private readonly tripTokens: TripTokensService,
     private readonly opsGateway: OperationsGateway,
     @Optional() private readonly whatsapp?: WhatsappService,
@@ -188,6 +190,8 @@ export class RoutesService {
     const routeDate = input.date
       ? new Date(input.date)
       : (scheduledAt ?? queueRows[0]?.appointmentDate ?? new Date());
+    const operationDate = new Date(routeDate);
+    operationDate.setHours(0, 0, 0, 0);
     const routeStatus = normalizedDispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED';
     const queueAssignedStatus = normalizedDispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'ASSIGNED';
     const origin = (input.origin ?? 'Prefeitura Municipal').trim();
@@ -207,10 +211,45 @@ export class RoutesService {
         'Destino não informado';
     }
 
+    const operation = await this.prisma.operation.upsert({
+      where: { tenantId_date: { tenantId, date: operationDate } },
+      create: {
+        tenantId,
+        date: operationDate,
+        status: normalizedDispatchType === 'SCHEDULED' ? 'PENDING_DISPATCH' as any : 'DISPATCHED' as any,
+        createdAutomatically: false,
+        totalPatients: queueIds.length,
+        totalRoutes: 1,
+        totalDrivers: input.driverId ? 1 : 0,
+        totalVehicles: input.vehicleId ? 1 : 0,
+      },
+      update: {
+        status: normalizedDispatchType === 'SCHEDULED' ? 'PENDING_DISPATCH' as any : 'DISPATCHED' as any,
+        totalPatients: { increment: queueIds.length },
+        totalRoutes: { increment: 1 },
+        ...(input.driverId ? { totalDrivers: { increment: 1 } } : {}),
+        ...(input.vehicleId ? { totalVehicles: { increment: 1 } } : {}),
+      },
+    });
+    await this.operationEvents.record({
+      tenantId,
+      operationId: operation.id,
+      eventType: 'OPERATION_CREATED',
+      actorType: context?.actorUserId ? 'USER' : 'SYSTEM',
+      actorId: context?.actorUserId ?? null,
+      metadata: {
+        source: 'routes.dispatch-operation',
+        dispatchType: normalizedDispatchType,
+        queueCount: queueIds.length,
+        routeDate: routeDate.toISOString(),
+      },
+    });
+
     const { route, trips } = await this.prisma.$transaction(async (tx) => {
       const createdRoute = await tx.route.create({
         data: {
           tenantId,
+          operationId: operation.id,
           driverId: input.driverId ?? null,
           vehicleId: input.vehicleId ?? null,
           date: routeDate,
@@ -227,6 +266,7 @@ export class RoutesService {
         const trip = await tx.trip.create({
           data: {
             tenantId,
+            operationId: operation.id,
             routeId: createdRoute.id,
             patientId: row.patientId,
             status: 'SCHEDULED' as any,
@@ -239,12 +279,13 @@ export class RoutesService {
 
       await tx.operationalQueue.updateMany({
         where: { tenantId, id: { in: queueIds } },
-        data: { status: queueAssignedStatus as any },
+        data: { status: queueAssignedStatus as any, operationId: operation.id },
       });
 
       await tx.operationalTimeline.create({
         data: {
           tenantId,
+          operationId: operation.id,
           routeId: createdRoute.id,
           eventType: 'DISPATCH_COMMAND_EXECUTED',
           fromState: 'CREATED',
@@ -270,6 +311,42 @@ export class RoutesService {
         action: 'ASSIGNED_TO_ROUTE',
         routeId: route.id,
         status: queueAssignedStatus,
+      });
+    }
+    await this.operationEvents.record({
+      tenantId,
+      operationId: operation.id,
+      routeId: route.id,
+      eventType: 'OPERATION_DISPATCHED',
+      actorType: context?.actorUserId ? 'USER' : 'SYSTEM',
+      actorId: context?.actorUserId ?? null,
+      metadata: {
+        dispatchType: normalizedDispatchType,
+        queueIds,
+        queueCount: queueIds.length,
+        routeId: route.id,
+      },
+    });
+    if (route.driverId) {
+      await this.operationEvents.record({
+        tenantId,
+        operationId: operation.id,
+        routeId: route.id,
+        eventType: 'DRIVER_ASSIGNED',
+        actorType: context?.actorUserId ? 'USER' : 'SYSTEM',
+        actorId: context?.actorUserId ?? null,
+        metadata: { driverId: route.driverId },
+      });
+    }
+    if (route.vehicleId) {
+      await this.operationEvents.record({
+        tenantId,
+        operationId: operation.id,
+        routeId: route.id,
+        eventType: 'VEHICLE_ASSIGNED',
+        actorType: context?.actorUserId ? 'USER' : 'SYSTEM',
+        actorId: context?.actorUserId ?? null,
+        metadata: { vehicleId: route.vehicleId },
       });
     }
 
@@ -331,19 +408,21 @@ export class RoutesService {
     }
 
     this.opsGateway.emitToTenant(tenantId, 'operation:dispatched', {
+      operationId: operation.id,
       routeId: route.id,
       queueIds,
       tripCount: trips.length,
-      status: normalizedDispatchType === 'IMMEDIATE' ? 'ACTIVE' : 'SCHEDULED',
+      status: operation.status,
       dispatchType: normalizedDispatchType,
       timestamp: new Date().toISOString(),
     });
 
     return {
+      operationId: operation.id,
       routeId: route.id,
       routeStatus: route.status,
       dispatchType: route.dispatchType,
-      operationStatus: normalizedDispatchType === 'IMMEDIATE' ? 'ACTIVE' : 'SCHEDULED',
+      operationStatus: operation.status,
       queueCount: queueIds.length,
       tripsCreated: trips.length,
       notifications: notificationResults,
@@ -358,6 +437,19 @@ export class RoutesService {
     if (payload.date && typeof payload.date === 'string') {
       payload.date = new Date(payload.date);
     }
+    const operationDate = new Date(payload.date ?? payload.scheduledAt ?? Date.now());
+    operationDate.setHours(0, 0, 0, 0);
+    const operation = await this.prisma.operation.upsert({
+      where: { tenantId_date: { tenantId, date: operationDate } },
+      create: {
+        tenantId,
+        date: operationDate,
+        status: payload.dispatchType === 'SCHEDULED' ? 'PENDING_DISPATCH' as any : 'IMPORTED' as any,
+        createdAutomatically: false,
+      },
+      update: {},
+    });
+    payload.operationId = operation.id;
     // Default status for scheduled (future) routes
     if (!payload.status) {
       payload.status = payload.dispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED';
@@ -451,9 +543,13 @@ export class RoutesService {
   }
 
   async getTimeline(id: string, tenantId: string) {
-    await this.findOne(id, tenantId);
-    const events = await this.prisma.operationalTimeline.findMany({
-      where: { tenantId, routeId: id },
+    const route = await this.findOne(id, tenantId);
+    const operationId = route.operationId ?? null;
+    const events = await this.prisma.operationEvent.findMany({
+      where: {
+        tenantId,
+        ...(operationId ? { operationId } : { routeId: id }),
+      },
       orderBy: { createdAt: 'asc' },
       take: 200,
     });
@@ -469,6 +565,9 @@ export class RoutesService {
     return events.map((e) => ({
       ...e,
       patientName: e.patientId ? (patientMap.get(e.patientId) ?? null) : null,
+      source: (e as any).actorType ?? null,
+      fromState: (e.metadata as Record<string, unknown> | null)?.fromState ?? null,
+      toState: (e.metadata as Record<string, unknown> | null)?.toState ?? null,
     }));
   }
 

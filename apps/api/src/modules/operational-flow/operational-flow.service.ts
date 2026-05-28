@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { AuditService } from '../audit/audit.service';
+import { OperationEventsService } from '../operation-events/operation-events.service';
 
 type FlowScope = {
   routeId?: string;
@@ -69,6 +70,7 @@ const TERMINAL_TRIP_STATUSES = ['COMPLETED', 'CANCELLED'];
 type FlowTrip = {
   id: string;
   tenantId: string;
+  operationId: string | null;
   routeId: string;
   patientId: string;
   status: string;
@@ -78,11 +80,13 @@ type FlowTrip = {
   route: {
     id: string;
     tenantId: string;
+    operationId: string | null;
     driverId: string | null;
     vehicleId: string | null;
     status: string;
     operationalVersion: number;
     operationalState?: string | null;
+    operation?: { id: string; status: string; date: Date } | null;
   };
 };
 
@@ -93,6 +97,7 @@ export class OperationalFlowService {
     private readonly prisma: PrismaService,
     private readonly gateway: OperationsGateway,
     private readonly audit: AuditService,
+    private readonly operationEvents: OperationEventsService,
   ) {}
 
   async recordDispatch(tenantId: string, routeId: string, context: FlowContext = {}) {
@@ -246,6 +251,7 @@ export class OperationalFlowService {
       operationalState: 'WAITING_PATIENT',
       timestamp: now,
       context,
+      operationId: updated.route.operation?.id ?? null,
     });
 
     this.emitToRoute(tenantId, context.driverId ?? updated.route.driverId ?? null, 'trip:reinstate', payload);
@@ -265,6 +271,7 @@ export class OperationalFlowService {
     });
     await this.persistTimeline({
       tenantId,
+      operationId: updated.route.operation?.id ?? null,
       routeId: updated.routeId,
       tripId: trip.id,
       patientId: trip.patientId,
@@ -356,6 +363,7 @@ export class OperationalFlowService {
     );
 
     const route = await this.findRoute(tenantId, routeId);
+    const operationId = route.operation?.id ?? null;
     const now = new Date();
 
     const pendingTrips = await this.prisma.trip.findMany({
@@ -439,6 +447,7 @@ export class OperationalFlowService {
       });
       await this.persistTimeline({
         tenantId,
+        operationId,
         routeId,
         tripId: trip.id,
         patientId: trip.patientId,
@@ -466,6 +475,7 @@ export class OperationalFlowService {
     };
     await this.persistTimeline({
       tenantId,
+      operationId,
       routeId,
       driverId: context.driverId ?? route.driverId ?? null,
       vehicleId: context.vehicleId ?? route.vehicleId ?? null,
@@ -527,6 +537,7 @@ export class OperationalFlowService {
     });
     await this.persistTimeline({
       tenantId,
+      operationId,
       routeId,
       driverId: context.driverId ?? route.driverId ?? null,
       vehicleId: context.vehicleId ?? route.vehicleId ?? null,
@@ -553,6 +564,7 @@ export class OperationalFlowService {
     this.logger.log(`[OPS] transition request tenantId=${tenantId} target=${targetState} routeId=${scope.routeId ?? '-'} tripId=${scope.tripId ?? '-'} patientId=${scope.patientId ?? '-'} source=${context.source ?? 'api'}`);
     const entity = await this.loadEntity(tenantId, scope);
     const currentState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
+    const operationId = entity.route.operationId ?? entity.route.operation?.id ?? entity.trip?.operationId ?? entity.trip?.route?.operation?.id ?? null;
     this.logger.log(`[OPS] current state tenantId=${tenantId} current=${currentState} target=${targetState} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'}`);
     const driverOnlyStates: OperationalState[] = [
       'DRIVER_ACCEPTED',
@@ -719,6 +731,14 @@ export class OperationalFlowService {
       }
     }
 
+    const operationStatus = this.mapOperationStatus(targetState);
+    if (operationStatus && operationId) {
+      await this.prisma.operation.updateMany({
+        where: { id: operationId, tenantId },
+        data: { status: operationStatus as any },
+      });
+    }
+
     if (queue && Object.keys(queueUpdate).length > 0) {
       await this.prisma.operationalQueue.update({ where: { id: queue.id }, data: queueUpdate });
     }
@@ -736,6 +756,7 @@ export class OperationalFlowService {
       queueStatus: (queueUpdate.status as string) ?? null,
       timestamp: now,
       context,
+      operationId,
       queueId: queue?.id,
       patientName: patient?.name,
       operationalId: patient?.operationalId,
@@ -748,6 +769,7 @@ export class OperationalFlowService {
     await this.logTransitionAudit(tenantId, scope, currentState, targetState, payload, context);
     await this.persistTimeline({
       tenantId,
+      operationId,
       routeId: route.id,
       tripId: trip?.id ?? scope.tripId ?? null,
       patientId: trip?.patientId ?? null,
@@ -847,6 +869,7 @@ export class OperationalFlowService {
       this.emitToRoute(tenantId, driverId, 'route:cancelled', payload);
     }
     this.emitToRoute(tenantId, driverId, 'operational:state_changed', payload);
+    this.emitToRoute(tenantId, driverId, 'operation:state_changed', payload);
     this.emitToRoute(tenantId, driverId, 'route.status_changed', {
       routeId: payload.routeId,
       status: payload.routeStatus,
@@ -890,6 +913,7 @@ export class OperationalFlowService {
     const route = await this.prisma.route.findFirst({
       where: { id: routeId, tenantId },
       include: {
+        operation: { select: { id: true, status: true, date: true } },
         driver: { include: { user: { select: { name: true } } } },
         vehicle: { select: { id: true, plate: true, model: true, capacity: true } },
       },
@@ -910,6 +934,7 @@ export class OperationalFlowService {
       include: {
         route: {
           include: {
+            operation: { select: { id: true, status: true, date: true } },
             driver: { include: { user: { select: { name: true } } } },
             vehicle: { select: { id: true, plate: true, model: true, capacity: true } },
           },
@@ -1088,13 +1113,17 @@ export class OperationalFlowService {
       this.logger.warn(`[CONFLICT] trip stale update rejected tripId=${tripId} expectedVersion=${expectedVersion}`);
       throw new ConflictException('Trip was updated by another operator. Refresh and retry.');
     }
-    const updated = await this.prisma.trip.findUnique({ where: { id: tripId }, include: { route: true } });
+    const updated = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: { route: { include: { operation: true } } },
+    });
     if (!updated) throw new NotFoundException('Trip not found');
     return updated as any;
   }
 
   private async persistTimeline(params: {
     tenantId: string;
+    operationId?: string | null;
     routeId?: string | null;
     tripId?: string | null;
     patientId?: string | null;
@@ -1110,6 +1139,7 @@ export class OperationalFlowService {
     await this.prisma.operationalTimeline.create({
       data: {
         tenantId: params.tenantId,
+        operationId: params.operationId ?? null,
         routeId: params.routeId ?? null,
         tripId: params.tripId ?? null,
         patientId: params.patientId ?? null,
@@ -1122,11 +1152,67 @@ export class OperationalFlowService {
         metadata: (params.metadata ?? {}) as any,
       },
     });
+    const operationId = params.operationId ?? await this.resolveOperationId(params.tenantId, params.routeId ?? null, params.tripId ?? null);
+    if (operationId) {
+      await this.operationEvents.record({
+        tenantId: params.tenantId,
+        operationId,
+        routeId: params.routeId ?? null,
+        tripId: params.tripId ?? null,
+        patientId: params.patientId ?? null,
+        eventType: params.eventType,
+        actorType: params.source ? 'SYSTEM' : 'SYSTEM',
+        actorId: null,
+        metadata: {
+          fromState: params.fromState ?? null,
+          toState: params.toState ?? null,
+          source: params.source ?? null,
+          ...((params.metadata ?? {}) as Record<string, unknown>),
+        },
+      });
+    }
+  }
+
+  private async resolveOperationId(tenantId: string, routeId: string | null, tripId: string | null) {
+    if (routeId) {
+      const route = await this.prisma.route.findFirst({
+        where: { id: routeId, tenantId },
+        select: { operationId: true },
+      });
+      if (route?.operationId) return route.operationId;
+    }
+    if (tripId) {
+      const trip = await this.prisma.trip.findFirst({
+        where: { id: tripId, tenantId },
+        select: { operationId: true, route: { select: { operationId: true } } },
+      });
+      if (trip?.operationId) return trip.operationId;
+      if (trip?.route?.operationId) return trip.route.operationId;
+    }
+    return null;
+  }
+
+  private mapOperationStatus(state: OperationalState): string {
+    const mapping: Record<OperationalState, string> = {
+      CREATED: 'PENDING_DISPATCH',
+      DISPATCHED: 'DISPATCHED',
+      DRIVER_ACCEPTED: 'DISPATCHED',
+      WAITING_PATIENT: 'PENDING_CONFIRMATION',
+      BOARDING: 'BOARDING',
+      BOARDED: 'BOARDING',
+      IN_TRANSIT: 'IN_TRANSIT',
+      ARRIVED: 'ARRIVED',
+      COMPLETED: 'COMPLETED',
+      NO_SHOW: 'CANCELLED',
+      CANCELLED: 'CANCELLED',
+    };
+    return mapping[state];
   }
 
   private buildPayload(params: {
     trip: { id: string; routeId: string; patientId: string; status: string; boardedAt?: Date | null; completedAt?: Date | null } | null;
     route: { id: string; tenantId: string; driverId: string | null; vehicleId: string | null; status: string };
+    operationId?: string | null;
     routeOperationalState?: RouteDerivedOperationalState | null;
     queueStatus: string | null;
     queueId?: string | null;
@@ -1141,6 +1227,7 @@ export class OperationalFlowService {
     const normalizedOperationalState = this.normalizeRealtimeOperationalState(params.operationalState);
     return {
       routeId: params.route.id,
+      operationId: params.operationId ?? null,
       tripId: params.trip?.id ?? null,
       patientId: params.trip?.patientId ?? null,
       patientName: params.patientName ?? null,

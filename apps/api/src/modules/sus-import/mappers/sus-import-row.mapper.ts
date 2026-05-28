@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
 
 export interface NormalizedSusRow {
   patient_name: string;
@@ -30,11 +31,19 @@ function normalizePriority(value: string): NormalizedSusRow['priority'] {
   return 'NORMAL';
 }
 
+function buildSyntheticCpf(seed: string): string {
+  const hash = createHash('sha256').update(seed).digest('hex');
+  const digits = hash.replace(/[a-f]/gi, '').padEnd(10, '0').slice(0, 10);
+  return `9${digits}`;
+}
+
 @Injectable()
 export class SusImportRowMapper {
   map(raw: Record<string, string>): NormalizedSusRow {
-    const appointmentDate = this.normalizeDate(pick(raw, 'appointment_date')) || '';
-    const appointmentTime = this.normalizeTime(pick(raw, 'appointment_time')) || '';
+    const today = new Date();
+    const fallbackDate = today.toISOString().slice(0, 10);
+    const appointmentDate = this.normalizeDate(pick(raw, 'appointment_date')) || fallbackDate;
+    const appointmentTime = this.normalizeTime(pick(raw, 'appointment_time')) || '08:00';
     const appointmentAt = appointmentDate && appointmentTime
       ? new Date(`${appointmentDate}T${appointmentTime}:00`)
       : null;
@@ -42,17 +51,21 @@ export class SusImportRowMapper {
     const phone = pick(raw, 'phone').replace(/[^\d()+\-\s]/g, '') || undefined;
     const notes = pick(raw, 'notes') || undefined;
     const specialRequirements = pick(raw, 'special_requirements') || undefined;
+    const patientName = pick(raw, 'patient_name');
+    const destinationHospital = pick(raw, 'destination_hospital');
+    const cpfRaw = pick(raw, 'cpf').replace(/\D/g, '');
+    const cpf = cpfRaw.length === 11 ? cpfRaw : buildSyntheticCpf(`${patientName}|${phone ?? ''}|${destinationHospital}`);
 
     return {
-      patient_name: pick(raw, 'patient_name'),
-      cpf: pick(raw, 'cpf').replace(/\D/g, ''),
+      patient_name: patientName,
+      cpf,
       phone,
-      origin_city: pick(raw, 'origin_city'),
-      destination_hospital: pick(raw, 'destination_hospital'),
-      destination_address: pick(raw, 'destination_address'),
+      origin_city: pick(raw, 'origin_city') || 'Sem origem informada',
+      destination_hospital: destinationHospital,
+      destination_address: pick(raw, 'destination_address') || destinationHospital,
       appointment_date: appointmentDate,
       appointment_time: appointmentTime,
-      appointment_at: appointmentAt && !Number.isNaN(appointmentAt.getTime()) ? appointmentAt.toISOString() : '',
+      appointment_at: appointmentAt && !Number.isNaN(appointmentAt.getTime()) ? appointmentAt.toISOString() : new Date(`${appointmentDate}T08:00:00`).toISOString(),
       notes,
       priority: normalizePriority(pick(raw, 'priority')),
       companion: this.toBoolean(pick(raw, 'companion')),

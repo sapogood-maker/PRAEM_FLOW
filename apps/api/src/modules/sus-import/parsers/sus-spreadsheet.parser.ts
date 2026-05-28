@@ -21,14 +21,14 @@ export const SUS_IMPORT_COLUMNS = [
 type SusImportColumn = (typeof SUS_IMPORT_COLUMNS)[number];
 
 const COLUMN_ALIASES: Record<SusImportColumn, string[]> = {
-  patient_name: ['patient_name', 'nome_paciente', 'nome', 'paciente'],
+  patient_name: ['patient_name', 'nome_paciente', 'nome', 'paciente', 'usuario', 'beneficiario'],
   cpf: ['cpf', 'documento', 'patient_cpf'],
   phone: ['phone', 'telefone', 'celular', 'patient_phone'],
   origin_city: ['origin_city', 'cidade_origem', 'origem_cidade', 'cidade_origem_paciente'],
-  destination_hospital: ['destination_hospital', 'hospital_destino', 'destino_hospital', 'hospital'],
-  destination_address: ['destination_address', 'endereco_destino', 'destino_endereco', 'hospital_endereco'],
-  appointment_date: ['appointment_date', 'data_consulta', 'consulta_data', 'appointment_day'],
-  appointment_time: ['appointment_time', 'hora_consulta', 'consulta_hora', 'appointment_hour'],
+  destination_hospital: ['destination_hospital', 'hospital_destino', 'destino_hospital', 'hospital', 'clinica', 'destino', 'unidade'],
+  destination_address: ['destination_address', 'endereco_destino', 'destino_endereco', 'hospital_endereco', 'endereco'],
+  appointment_date: ['appointment_date', 'data_consulta', 'consulta_data', 'appointment_day', 'data', 'dia'],
+  appointment_time: ['appointment_time', 'hora_consulta', 'consulta_hora', 'appointment_hour', 'hora', 'horario'],
   notes: ['notes', 'observacoes', 'obs'],
   priority: ['priority', 'prioridade'],
   companion: ['companion', 'acompanhante', 'tem_acompanhante'],
@@ -88,7 +88,9 @@ export class SusSpreadsheetParser {
       foundColumns.add(canonical);
     });
 
-    const missingColumns = SUS_IMPORT_COLUMNS.filter((column) => !foundColumns.has(column));
+    const missingColumns = ['patient_name', 'destination_hospital'].filter(
+      (column) => !foundColumns.has(column as SusImportColumn),
+    );
     if (missingColumns.length > 0) {
       throw new BadRequestException(
         `Missing required columns: ${missingColumns.join(', ')}`,

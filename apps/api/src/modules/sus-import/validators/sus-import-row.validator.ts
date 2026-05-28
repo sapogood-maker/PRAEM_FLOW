@@ -21,9 +21,7 @@ export class SusImportRowValidator {
     const patientName = this.pick(raw, 'patient_name');
     const cpf = this.pick(raw, 'cpf');
     const phone = this.pick(raw, 'phone');
-    const originCity = this.pick(raw, 'origin_city');
     const destinationHospital = this.pick(raw, 'destination_hospital');
-    const destinationAddress = this.pick(raw, 'destination_address');
     const appointmentDate = this.pick(raw, 'appointment_date');
     const appointmentTime = this.pick(raw, 'appointment_time');
     const priority = this.pick(raw, 'priority').toUpperCase();
@@ -31,22 +29,16 @@ export class SusImportRowValidator {
     const returnTrip = this.pick(raw, 'return_trip');
 
     const populatedFields = SUS_IMPORT_COLUMNS.filter((column) => this.pick(raw, column).length > 0).length;
-    if (populatedFields < 3) {
+    if (populatedFields < 2) {
       errors.push('MALFORMED_ROW: row has insufficient mapped fields');
     }
 
     if (!patientName) errors.push('REQUIRED_FIELD: patient_name is required');
-    if (!cpf) errors.push('REQUIRED_FIELD: cpf is required');
-    if (!originCity) errors.push('REQUIRED_FIELD: origin_city is required');
     if (!destinationHospital) errors.push('REQUIRED_FIELD: destination_hospital is required');
-    if (!destinationAddress) errors.push('REQUIRED_FIELD: destination_address is required');
-    if (!appointmentDate) errors.push('REQUIRED_FIELD: appointment_date is required');
-    if (!appointmentTime) errors.push('REQUIRED_FIELD: appointment_time is required');
-    if (!priority) errors.push('REQUIRED_FIELD: priority is required');
 
     const cpfDigits = cpf.replace(/\D/g, '');
     if (cpf && cpfDigits.length !== 11) {
-      errors.push('MALFORMED_CPF: cpf must contain 11 digits');
+      warnings.push('CPF_WARNING: cpf has non-standard size, synthetic fallback may be used');
     }
 
     if (phone) {
@@ -68,23 +60,20 @@ export class SusImportRowValidator {
       warnings.push('RETURN_TRIP_WARNING: value should be yes/no (fallback false)');
     }
 
-    const appointmentAt = this.parseAppointment(appointmentDate, appointmentTime);
-    if (!appointmentAt) {
-      errors.push('INVALID_DATE: appointment_date/appointment_time is invalid');
+    const appointmentAt = this.parseAppointment(appointmentDate, appointmentTime) ?? new Date();
+    if ((appointmentDate || appointmentTime) && Number.isNaN(appointmentAt.getTime())) {
+      warnings.push('INVALID_DATE: appointment date/time ignored, fallback schedule will be used');
     }
 
-    if (appointmentAt) {
-      const duplicateKey = [
-        cpfDigits,
-        appointmentAt.toISOString(),
-        originCity.toUpperCase(),
-        destinationHospital.toUpperCase(),
-      ].join('|');
-      if (context.seenRowKeys.has(duplicateKey)) {
-        errors.push('DUPLICATE_ROW: duplicated patient schedule row');
-      } else {
-        context.seenRowKeys.add(duplicateKey);
-      }
+    const duplicateKey = [
+      cpfDigits || patientName.toUpperCase(),
+      appointmentAt.toISOString().slice(0, 16),
+      destinationHospital.toUpperCase(),
+    ].join('|');
+    if (context.seenRowKeys.has(duplicateKey)) {
+      warnings.push('DUPLICATE_ROW: duplicated schedule line found');
+    } else {
+      context.seenRowKeys.add(duplicateKey);
     }
 
     return { valid: errors.length === 0, errors, warnings };

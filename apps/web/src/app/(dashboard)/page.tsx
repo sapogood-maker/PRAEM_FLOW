@@ -1,7 +1,9 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useMemo } from 'react';
+import { Upload } from 'lucide-react';
 import { KPIGrid } from '@/components/dashboard/KPIGrid';
 import { OperationalRail } from '@/components/dashboard/OperationalRail';
 import { useDashboard } from '@/hooks/useDashboard';
@@ -103,6 +105,13 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className='flex flex-wrap items-center gap-2 text-xs text-slate-400'>
+            <Link
+              href='/schedule'
+              className='inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500'
+            >
+              <Upload size={16} />
+              Importar Operação
+            </Link>
             <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 ${connected ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
               <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-300 animate-pulse' : 'bg-slate-500'}`} />
               {connected ? UI_TEXT.dashboard.realtimeConnected : UI_TEXT.dashboard.realtimeOffline}

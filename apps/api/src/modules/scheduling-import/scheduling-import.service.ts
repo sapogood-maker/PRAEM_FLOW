@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { QueueStatus, QueueType } from '@prisma/client';
+import { createHash } from 'crypto';
 import * as XLSX from 'xlsx';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientsService } from '../patients/patients.service';
@@ -21,6 +22,7 @@ interface NormalizedRow {
   rowNumber: number;
   patientName: string;
   cpf: string;
+  sourceCpfProvided: boolean;
   birthDate: Date;
   phone?: string;
   address: string;
@@ -58,6 +60,13 @@ interface RouteGroupPlan {
   scheduledAt: string;
   rowCount: number;
   preferredVehiclePlate: string | null;
+}
+
+interface ImportRecurringIntelligence {
+  knownPatients: number;
+  knownDestinations: number;
+  recurringRouteMatches: number;
+  futureHooks: string[];
 }
 
 const MOBILITY_VALUES = ['NORMAL', 'WHEELCHAIR', 'STRETCHER', 'OXYGEN'] as const;
@@ -103,6 +112,45 @@ function enumValue<T extends readonly string[]>(value: unknown, allowed: T, fall
   return (allowed as readonly string[]).includes(normalized) ? (normalized as T[number]) : fallback;
 }
 
+function normalizeText(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function buildSyntheticCpf(seed: string): string {
+  const hash = createHash('sha256').update(seed).digest('hex');
+  const digits = hash.replace(/[a-f]/gi, '').padEnd(10, '0').slice(0, 10);
+  return `9${digits}`;
+}
+
+function parseTimeParts(value: unknown): { hours: number; minutes: number } | null {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const hhmm = /^([01]?\d|2[0-3])[:h]([0-5]\d)$/.exec(text);
+  if (!hhmm) return null;
+  return { hours: Number(hhmm[1]), minutes: Number(hhmm[2]) };
+}
+
+function applyTime(date: Date, timeRaw: unknown): Date {
+  const out = new Date(date);
+  const parsedTime = parseTimeParts(timeRaw);
+  if (parsedTime) {
+    out.setHours(parsedTime.hours, parsedTime.minutes, 0, 0);
+    return out;
+  }
+  out.setHours(8, 0, 0, 0);
+  return out;
+}
+
+function inferDestinationType(destinationName: string): NormalizedRow['destinationType'] {
+  const normalized = normalizeHeader(destinationName);
+  if (normalized.includes('hemodialise')) return 'HEMODIALYSIS';
+  if (normalized.includes('oncolog')) return 'ONCOLOGY_CENTER';
+  if (normalized.includes('ubs')) return 'UBS';
+  if (normalized.includes('laborat') || normalized.includes('lab')) return 'LAB';
+  if (normalized.includes('clinica')) return 'CLINIC';
+  return 'HOSPITAL';
+}
+
 @Injectable()
 export class SchedulingImportService {
   constructor(
@@ -123,6 +171,7 @@ export class SchedulingImportService {
       throw new BadRequestException('No valid rows found in spreadsheet');
     }
 
+    const intelligence = await this.buildRecurringIntelligence(tenantId, rows);
     const plan = this.buildGroupPlan(rows);
     if (options.mode === 'PREVIEW') {
       return {
@@ -130,6 +179,7 @@ export class SchedulingImportService {
         file: { name: file.originalname, rowCount: rows.length },
         warnings,
         plan,
+        intelligence,
       };
     }
 
@@ -221,6 +271,7 @@ export class SchedulingImportService {
         createdRoutes,
         createdTrips,
       },
+      intelligence,
       routes: routeResults,
     };
   }
@@ -242,7 +293,7 @@ export class SchedulingImportService {
     rawRows.forEach((raw, index) => {
       const row = this.normalizeRow(raw, index + 2);
       if (!row) {
-        warnings.push(`Line ${index + 2}: skipped due to missing required fields`);
+        warnings.push(`Line ${index + 2}: skipped (required: patient name and destination)`);
         return;
       }
       rows.push(row);
@@ -263,42 +314,56 @@ export class SchedulingImportService {
       return '';
     };
 
-    const patientName = String(value('patientName', 'patient', 'nomePaciente', 'nome')).trim();
-    const cpf = sanitizeCpf(String(value('cpf', 'documento', 'patientCpf')));
-    const birthDate = parseDate(value('birthDate', 'dataNascimento', 'nascimento'));
-    const address = String(value('address', 'endereco', 'patientAddress')).trim();
-    const appointmentDate = parseDate(value('appointmentDate', 'dataConsulta', 'appointment', 'scheduledAt'));
-    const destinationName = String(value('destination', 'destino', 'hospital', 'healthcareLocation')).trim();
-
-    if (!patientName || cpf.length !== 11 || !birthDate || !address || !appointmentDate || !destinationName) {
+    const patientName = normalizeText(value('patientName', 'patient', 'nomePaciente', 'nome', 'paciente', 'usuario', 'beneficiario'));
+    const cpfRaw = sanitizeCpf(String(value('cpf', 'documento', 'patientCpf', 'cartaoSus', 'sus', 'cns')));
+    const sourceCpfProvided = cpfRaw.length === 11;
+    const destinationName = normalizeText(
+      value('destination', 'destino', 'hospital', 'clinica', 'clínica', 'unidade', 'healthcareLocation'),
+    );
+    if (!patientName || !destinationName) {
       return null;
     }
 
-    const defaultDispatchType = appointmentDate.getTime() > Date.now() ? 'SCHEDULED' : 'IMMEDIATE';
+    const phone = normalizeText(value('phone', 'telefone', 'celular', 'contato')) || undefined;
+    const destinationAddress = normalizeText(
+      value('destinationAddress', 'enderecoDestino', 'hospitalEndereco', 'enderecoHospital', 'endereco', 'logradouro'),
+    );
+    const birthDate = parseDate(value('birthDate', 'dataNascimento', 'nascimento')) ?? new Date('1970-01-01T00:00:00Z');
+    const appointmentDateRaw = value('appointmentDate', 'dataConsulta', 'appointment', 'scheduledAt', 'data', 'dia', 'date');
+    const appointmentBaseDate = parseDate(appointmentDateRaw) ?? new Date();
+    const scheduledAt = applyTime(appointmentBaseDate, value('appointmentTime', 'horaConsulta', 'hora', 'horario', 'time'));
+    const defaultDispatchType = scheduledAt.getTime() > Date.now() ? 'SCHEDULED' : 'IMMEDIATE';
+    const cpf = sourceCpfProvided
+      ? cpfRaw
+      : buildSyntheticCpf(
+          `${normalizeHeader(patientName)}|${normalizeHeader(phone ?? '')}|${normalizeHeader(destinationName)}|${scheduledAt.toISOString().slice(0, 10)}`,
+        );
+
     return {
       rowNumber,
       patientName,
       cpf,
+      sourceCpfProvided,
       birthDate,
-      phone: String(value('phone', 'telefone', 'celular')).trim() || undefined,
-      address,
+      phone,
+      address: normalizeText(value('address', 'patientAddress', 'enderecoPaciente')) || destinationAddress || 'Sem endereço informado',
       mobility: enumValue(value('mobility', 'mobilidade'), MOBILITY_VALUES, 'NORMAL'),
       clinicalRisk: enumValue(value('clinicalRisk', 'risk', 'riscoClinico'), RISK_VALUES, 'LOW'),
       requiresCompanion: toBoolean(value('requiresCompanion', 'acompanhante', 'needsCompanion')),
       companionName: String(value('companionName', 'nomeAcompanhante')).trim() || undefined,
       companionPhone: String(value('companionPhone', 'telefoneAcompanhante')).trim() || undefined,
-      appointmentDate,
+      appointmentDate: scheduledAt,
       destinationName,
       destinationCity: String(value('destinationCity', 'cidadeDestino', 'cidade')).trim() || undefined,
       destinationState: String(value('destinationState', 'estadoDestino', 'uf')).trim() || undefined,
-      destinationAddress: String(value('destinationAddress', 'enderecoDestino')).trim() || undefined,
-      destinationType: enumValue(value('destinationType', 'tipoDestino', 'locationType'), LOCATION_TYPES, 'HOSPITAL'),
+      destinationAddress: destinationAddress || undefined,
+      destinationType: enumValue(value('destinationType', 'tipoDestino', 'locationType'), LOCATION_TYPES, inferDestinationType(destinationName)),
       priority: enumValue(value('priority', 'prioridade'), PRIORITY_VALUES, 'NORMAL'),
       queueType: enumValue(value('queueType', 'tipoFila'), ['MEDICAL', 'LOGISTICS'] as const, 'LOGISTICS'),
       notes: String(value('notes', 'observacoes')).trim() || undefined,
       dispatchType: enumValue(value('dispatchType', 'tipoDespacho'), ['SCHEDULED', 'IMMEDIATE'] as const, defaultDispatchType),
-      scheduledAt: parseDate(value('dispatchAt', 'scheduledAt', 'horarioDespacho')) ?? appointmentDate,
-      origin: String(value('origin', 'origem')).trim() || 'Central PRAEM OPS',
+      scheduledAt: applyTime(parseDate(value('dispatchAt', 'scheduledAt', 'horarioDespacho')) ?? appointmentBaseDate, value('dispatchTime', 'horaDespacho')),
+      origin: normalizeText(value('origin', 'origem', 'cidadeOrigem', 'municipioOrigem')) || 'Central PRAEM OPS',
       preferredVehiclePlate: String(value('vehiclePlate', 'placaVeiculo')).trim() || undefined,
     };
   }
@@ -330,12 +395,26 @@ export class SchedulingImportService {
   }
 
   private async findOrCreatePatient(tenantId: string, row: NormalizedRow) {
-    const existing = await this.prisma.patient.findFirst({
-      where: { tenantId, cpf: row.cpf },
-      select: { id: true },
-    });
+    const existing = row.sourceCpfProvided
+      ? await this.prisma.patient.findFirst({
+          where: { tenantId, cpf: row.cpf },
+          select: { id: true },
+        })
+      : await this.prisma.patient.findFirst({
+          where: {
+            tenantId,
+            OR: [
+              {
+                name: { equals: row.patientName, mode: 'insensitive' },
+                ...(row.phone ? { phone: { equals: row.phone } } : {}),
+              },
+              { cpf: row.cpf },
+            ],
+          },
+          select: { id: true },
+        });
     if (existing) return { id: existing.id, created: false };
-    const created = await this.patientsService.create(tenantId, {
+    const created = await this.patientsService.upsertFromSusImport(tenantId, {
       name: row.patientName,
       cpf: row.cpf,
       birthDate: row.birthDate.toISOString(),
@@ -347,8 +426,9 @@ export class SchedulingImportService {
       companionName: row.companionName,
       companionPhone: row.companionPhone,
       notes: row.notes,
+      recurringPatient: false,
     });
-    return { id: created.id as string, created: true };
+    return { id: created.id as string, created: Boolean((created as any)._created) };
   }
 
   private async findOrCreateDestination(tenantId: string, row: NormalizedRow, fallbackCity: string, fallbackState: string) {
@@ -421,5 +501,60 @@ export class SchedulingImportService {
     const fits = available.filter((v) => v.capacity >= passengerCount);
     if (fits.length > 0) return fits.sort((a, b) => a.capacity - b.capacity)[0];
     return available.sort((a, b) => b.capacity - a.capacity)[0];
+  }
+
+  private async buildRecurringIntelligence(tenantId: string, rows: NormalizedRow[]): Promise<ImportRecurringIntelligence> {
+    const cpfSet = new Set(rows.filter((r) => r.sourceCpfProvided).map((r) => r.cpf));
+    const destinationSet = new Set(rows.map((r) => r.destinationName).filter((name) => name.trim().length > 0));
+    const destinations = Array.from(destinationSet);
+
+    const [knownByCpf, knownDestinations, historicalRoutes] = await Promise.all([
+      cpfSet.size
+        ? this.prisma.patient.findMany({
+            where: { tenantId, cpf: { in: Array.from(cpfSet) } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+      destinations.length
+        ? this.prisma.healthcareLocation.findMany({
+            where: {
+              tenantId,
+              active: true,
+              OR: destinations.map((name) => ({ name: { equals: name, mode: 'insensitive' } })),
+            },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+      this.prisma.route.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { destination: true, scheduledAt: true, date: true },
+      }),
+    ]);
+
+    const routeSignatures = new Set(
+      historicalRoutes.map((r) => {
+        const baseDate = r.scheduledAt ?? r.date;
+        const hour = baseDate ? new Date(baseDate).getHours().toString().padStart(2, '0') : '08';
+        return `${normalizeHeader(r.destination)}|${hour}`;
+      }),
+    );
+    const recurringRouteMatches = rows.reduce((count, row) => {
+      const signature = `${normalizeHeader(row.destinationName)}|${row.scheduledAt.getHours().toString().padStart(2, '0')}`;
+      return routeSignatures.has(signature) ? count + 1 : count;
+    }, 0);
+
+    return {
+      knownPatients: knownByCpf.length,
+      knownDestinations: knownDestinations.length,
+      recurringRouteMatches,
+      futureHooks: [
+        'recurring_patient_recognition',
+        'known_destination_ranking',
+        'suggested_route_grouping',
+        'suggested_schedule_windows',
+      ],
+    };
   }
 }

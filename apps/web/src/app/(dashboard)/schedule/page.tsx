@@ -129,9 +129,9 @@ export default function SchedulePage() {
     <section className='space-y-6'>
       {/* Header */}
       <div>
-        <h2 className='text-2xl font-bold text-slate-100'>Agenda Operacional</h2>
+        <h2 className='text-2xl font-bold text-slate-100'>Importar Operação</h2>
         <p className='text-sm text-slate-400'>
-          Rotas agendadas e programadas — independente de status online/offline
+          Fluxo principal: importar planilha SUS, detectar pacientes/destinos, gerar rotas e despachar.
         </p>
       </div>
 
@@ -150,10 +150,10 @@ export default function SchedulePage() {
         <div className='space-y-3 rounded-xl border border-indigo-900/50 bg-indigo-950/20 p-4'>
           <div className='flex items-center justify-between gap-3'>
             <div>
-              <h3 className='text-base font-semibold text-indigo-200'>Importação SUS (CSV/XLSX)</h3>
-              <p className='text-xs text-slate-400'>Novo fluxo principal: ingestão automática de pacientes, filas, rotas e viagens.</p>
+              <h3 className='text-base font-semibold text-indigo-200'>Entrada SUS bruta (CSV/XLSX)</h3>
+              <p className='text-xs text-slate-400'>Aceita planilhas simples com colunas variáveis. Campos mínimos: paciente e destino.</p>
             </div>
-            <span className='rounded bg-indigo-900/60 px-2 py-1 text-xs text-indigo-300'>Fluxo legado manual mantido</span>
+            <span className='rounded bg-indigo-900/60 px-2 py-1 text-xs text-indigo-300'>1. Importar → 2. Detectar → 3. Gerar</span>
           </div>
           <div className='grid gap-3 md:grid-cols-2'>
             <label className='space-y-1'>
@@ -209,9 +209,9 @@ export default function SchedulePage() {
                 type='button'
                 onClick={() => uploadImport.mutate()}
                 disabled={!selectedFile || uploadImport.isPending}
-                className='w-full rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-600 disabled:opacity-50'
+                className='w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white transition-colors hover:bg-indigo-500 disabled:opacity-50'
               >
-                {uploadImport.isPending ? 'Processando…' : importMode === 'PREVIEW' ? 'Pré-visualizar arquivo' : 'Importar planilha'}
+                {uploadImport.isPending ? 'Processando importação…' : importMode === 'PREVIEW' ? 'Importar Operação (Pré-visualizar)' : 'Importar Operação Agora'}
               </button>
             </div>
           </div>
@@ -228,6 +228,13 @@ export default function SchedulePage() {
                   Pacientes criados/reutilizados: {importResult.summary.createdPatients}/{importResult.summary.reusedPatients} ·
                   Filas criadas/reutilizadas: {importResult.summary.createdQueues}/{importResult.summary.reusedQueues} ·
                   Rotas: {importResult.summary.createdRoutes} · Viagens: {importResult.summary.createdTrips}
+                </p>
+              )}
+              {importResult.intelligence && (
+                <p className='text-cyan-300'>
+                  Inteligência recorrente (prévia): pacientes conhecidos {importResult.intelligence.knownPatients ?? 0} ·
+                  destinos conhecidos {importResult.intelligence.knownDestinations ?? 0} ·
+                  sugestões de agrupamento {importResult.intelligence.recurringRouteMatches ?? 0}
                 </p>
               )}
               {Array.isArray(importResult.warnings) && importResult.warnings.length > 0 && (

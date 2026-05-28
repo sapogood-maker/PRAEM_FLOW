@@ -1,7 +1,9 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { TripTokensService } from '../trip-tokens/trip-tokens.service';
+import { OperationsGateway } from '../../gateways/operations.gateway';
 
 @Injectable()
 export class RoutesService {
@@ -12,6 +14,8 @@ export class RoutesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
+    private readonly tripTokens: TripTokensService,
+    private readonly opsGateway: OperationsGateway,
     @Optional() private readonly whatsapp?: WhatsappService,
   ) {}
 
@@ -136,6 +140,213 @@ export class RoutesService {
       operationalStateDerived: this.deriveRouteOperationalStateFromTrips(route.trips, route.status),
       stalePolicy,
       trips: route.trips,
+    };
+  }
+
+  async dispatchOperation(
+    tenantId: string,
+    input: {
+      queueIds: string[];
+      driverId?: string;
+      vehicleId?: string;
+      locationId?: string;
+      origin?: string;
+      destination?: string;
+      dispatchType?: 'IMMEDIATE' | 'SCHEDULED';
+      scheduledAt?: string;
+      date?: string;
+      sendPatientNotifications?: boolean;
+      sendBoardingQr?: boolean;
+    },
+    context?: { actorUserId?: string },
+  ) {
+    const queueIds = [...new Set((input.queueIds ?? []).filter(Boolean))];
+    if (queueIds.length === 0) {
+      throw new BadRequestException('Selecione pelo menos um paciente da fila operacional para despachar.');
+    }
+
+    const queueRows = await this.prisma.operationalQueue.findMany({
+      where: { tenantId, id: { in: queueIds } },
+      include: {
+        patient: { select: { id: true, name: true } },
+        healthcareLocation: { select: { id: true, name: true } },
+      },
+    });
+    if (queueRows.length !== queueIds.length) {
+      throw new NotFoundException('Um ou mais itens da fila não foram encontrados para este tenant.');
+    }
+
+    const blocked = queueRows.filter((q) =>
+      ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'ARRIVED'].includes(String(q.status).toUpperCase()),
+    );
+    if (blocked.length > 0) {
+      throw new BadRequestException('A fila contém operações já finalizadas/canceladas e não pode ser despachada.');
+    }
+
+    const normalizedDispatchType = input.dispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'IMMEDIATE';
+    const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
+    const routeDate = input.date
+      ? new Date(input.date)
+      : (scheduledAt ?? queueRows[0]?.appointmentDate ?? new Date());
+    const routeStatus = normalizedDispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED';
+    const queueAssignedStatus = normalizedDispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'ASSIGNED';
+    const origin = (input.origin ?? 'Prefeitura Municipal').trim();
+
+    let destination = (input.destination ?? '').trim();
+    if (!destination && input.locationId) {
+      const location = await this.prisma.healthcareLocation.findFirst({
+        where: { id: input.locationId, tenantId },
+        select: { name: true },
+      });
+      destination = location?.name ?? '';
+    }
+    if (!destination) {
+      destination =
+        queueRows[0]?.healthcareLocation?.name ??
+        queueRows[0]?.destination ??
+        'Destino não informado';
+    }
+
+    const { route, trips } = await this.prisma.$transaction(async (tx) => {
+      const createdRoute = await tx.route.create({
+        data: {
+          tenantId,
+          driverId: input.driverId ?? null,
+          vehicleId: input.vehicleId ?? null,
+          date: routeDate,
+          scheduledAt,
+          origin,
+          destination,
+          status: routeStatus as any,
+          dispatchType: normalizedDispatchType as any,
+        },
+      });
+
+      const createdTrips: Array<{ id: string; patientId: string; routeId: string }> = [];
+      for (const row of queueRows) {
+        const trip = await tx.trip.create({
+          data: {
+            tenantId,
+            routeId: createdRoute.id,
+            patientId: row.patientId,
+            status: 'SCHEDULED' as any,
+            qrScanned: false,
+          },
+          select: { id: true, patientId: true, routeId: true },
+        });
+        createdTrips.push(trip);
+      }
+
+      await tx.operationalQueue.updateMany({
+        where: { tenantId, id: { in: queueIds } },
+        data: { status: queueAssignedStatus as any },
+      });
+
+      await tx.operationalTimeline.create({
+        data: {
+          tenantId,
+          routeId: createdRoute.id,
+          eventType: 'DISPATCH_COMMAND_EXECUTED',
+          fromState: 'CREATED',
+          toState: normalizedDispatchType === 'IMMEDIATE' ? 'DISPATCHED' : 'SCHEDULED',
+          source: 'ROUTES_DISPATCH_OPERATION',
+          metadata: {
+            queueIds,
+            queueCount: queueIds.length,
+            tripCount: createdTrips.length,
+            driverId: input.driverId ?? null,
+            vehicleId: input.vehicleId ?? null,
+            actorUserId: context?.actorUserId ?? null,
+          } as any,
+        },
+      });
+
+      return { route: createdRoute, trips: createdTrips };
+    });
+
+    for (const queueId of queueIds) {
+      this.opsGateway.emitToTenant(tenantId, 'queue.updated', {
+        id: queueId,
+        action: 'ASSIGNED_TO_ROUTE',
+        routeId: route.id,
+        status: queueAssignedStatus,
+      });
+    }
+
+    if (route.driverId && normalizedDispatchType === 'IMMEDIATE') {
+      await this.flow.recordDispatch(tenantId, route.id, {
+        driverId: route.driverId,
+        vehicleId: route.vehicleId,
+        actorUserId: context?.actorUserId ?? null,
+        source: 'routes.dispatch-operation',
+      });
+    }
+
+    const notificationsEnabled = input.sendPatientNotifications !== false;
+    const sendBoardingQr = input.sendBoardingQr !== false;
+    const notificationResults: Array<{ tripId: string; patientId: string; confirmation: string; qr: string; boardingToken: string }> = [];
+
+    if (this.whatsapp && notificationsEnabled) {
+      const driver = route.driverId
+        ? await this.prisma.driver.findUnique({
+            where: { id: route.driverId },
+            select: { user: { select: { name: true } } },
+          })
+        : null;
+      const driverName = driver?.user?.name ?? 'A definir';
+      const operationDate = routeDate.toLocaleDateString('pt-BR');
+      const operationTime = routeDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+      const sends = await Promise.allSettled(
+        trips.map(async (trip) => {
+          const [boardingToken, confirmation, qr] = await Promise.allSettled([
+            this.tripTokens.generate(tenantId, trip.id, 'BOARDING'),
+            this.whatsapp!.notifyAppointmentConfirmed(tenantId, trip.patientId, trip.id, {
+              operation_date: operationDate,
+              operation_time: operationTime,
+              pickup_location: origin,
+              destination,
+              driver_name: driverName,
+            }),
+            sendBoardingQr
+              ? this.whatsapp!.sendBoardingQr(tenantId, trip.id)
+              : Promise.resolve({ status: 'SKIPPED' }),
+          ]);
+
+          return {
+            tripId: trip.id,
+            patientId: trip.patientId,
+            confirmation: confirmation.status === 'fulfilled' ? String(confirmation.value?.status ?? 'SENT') : 'FAILED',
+            qr: qr.status === 'fulfilled' ? String(qr.value?.status ?? 'SENT') : 'FAILED',
+            boardingToken: boardingToken.status === 'fulfilled' ? 'GENERATED' : 'FAILED',
+          };
+        }),
+      );
+
+      for (const row of sends) {
+        if (row.status === 'fulfilled') {
+          notificationResults.push(row.value);
+        }
+      }
+    }
+
+    this.opsGateway.emitToTenant(tenantId, 'operation:dispatched', {
+      routeId: route.id,
+      queueIds,
+      tripCount: trips.length,
+      status: normalizedDispatchType === 'IMMEDIATE' ? 'ACTIVE' : 'SCHEDULED',
+      dispatchType: normalizedDispatchType,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      routeId: route.id,
+      routeStatus: route.status,
+      dispatchType: route.dispatchType,
+      operationStatus: normalizedDispatchType === 'IMMEDIATE' ? 'ACTIVE' : 'SCHEDULED',
+      queueCount: queueIds.length,
+      tripsCreated: trips.length,
+      notifications: notificationResults,
     };
   }
 

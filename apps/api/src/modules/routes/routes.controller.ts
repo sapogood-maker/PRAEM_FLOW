@@ -44,6 +44,32 @@ export class RoutesController {
     return this.routesService.create(req.user.tenantId, sanitizePayload(body));
   }
 
+  @Post('dispatch-operation')
+  @Roles('ADMIN', 'OPERATOR', 'COORDINATOR', 'SUPERVISOR')
+  dispatchOperation(
+    @Request() req: AuthRequest,
+    @Body() body: {
+      queueIds: string[];
+      driverId?: string;
+      vehicleId?: string;
+      locationId?: string;
+      origin?: string;
+      destination?: string;
+      dispatchType?: 'IMMEDIATE' | 'SCHEDULED';
+      scheduledAt?: string;
+      date?: string;
+      sendPatientNotifications?: boolean;
+      sendBoardingQr?: boolean;
+    },
+  ) {
+    this.logger.log(
+      `[ROUTE] dispatch-operation tenantId=${req.user.tenantId} queueCount=${body?.queueIds?.length ?? 0} dispatchType=${body?.dispatchType ?? 'IMMEDIATE'}`,
+    );
+    return this.routesService.dispatchOperation(req.user.tenantId, sanitizePayload(body), {
+      actorUserId: req.user.userId,
+    });
+  }
+
   @Put(':id')
   update(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: any) {
     return this.routesService.update(id, req.user.tenantId, sanitizePayload(body));

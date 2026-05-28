@@ -1,9 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ZApiAdapter } from './zapi.adapter';
+import { WHATSAPP_PROVIDER } from './whatsapp.provider';
 import { WhatsappTemplateService } from './whatsapp-template.service';
 import { WhatsappQueueService } from './whatsapp-queue.service';
-import { SendMessageOptions, NotificationTemplateKey } from './whatsapp.types';
+import { IMessageProvider, SendMessageOptions, NotificationTemplateKey } from './whatsapp.types';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import * as QRCode from 'qrcode';
 
@@ -17,7 +17,7 @@ export class WhatsappService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly adapter: ZApiAdapter,
+    @Inject(WHATSAPP_PROVIDER) private readonly adapter: IMessageProvider,
     private readonly templates: WhatsappTemplateService,
     private readonly queue: WhatsappQueueService,
   ) {

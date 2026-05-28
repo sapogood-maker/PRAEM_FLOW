@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
+import { routeService } from '@/services/operational.service';
 import { getPriorityLabel, getDriverStatusLabel, getConfirmationStatusLabel } from '@/lib/i18n';
 import {
   useOperationalDispatchStore,
@@ -227,31 +228,21 @@ export default function DispatchPage() {
   const dispatch = useMutation({
     mutationFn: async (patientIds?: string[]) => {
       const idsToDispatch = patientIds ?? selectedPatients;
-      const loc = locations.find((l) => l.id === locationId);
-      const destinationName = loc?.name ?? 'Destino não informado';
-
-      const routePayload: Record<string, unknown> = {
-        origin,
-        destination: destinationName,
-        date: scheduledAt ?? new Date().toISOString(),
-        scheduledAt: scheduledAt ?? null,
-        dispatchType,
-        status: dispatchType === 'SCHEDULED' ? 'SCHEDULED' : 'PLANNED',
-        ...(driverId && { driverId }),
-        ...(vehicleId && { vehicleId }),
-      };
-
-      const routeRes = await api.post('/routes', routePayload);
-      const route = routeRes.data;
-
       const selectedQueueItems = pendingDispatch.filter((q) => idsToDispatch.includes(q.id));
-      await Promise.all(
-        selectedQueueItems.map((q) =>
-          api.post('/trips', { routeId: route.id, patientId: q.patientId }),
-        ),
-      );
-
-      return { routeId: route.id, patientCount: selectedQueueItems.length };
+      const queueIds = selectedQueueItems.map((q) => q.id);
+      const result = await routeService.dispatchOperation({
+        queueIds,
+        locationId: locationId || undefined,
+        origin,
+        dispatchType,
+        scheduledAt: scheduledAt ?? undefined,
+        date: scheduledAt ?? new Date().toISOString(),
+        ...(driverId ? { driverId } : {}),
+        ...(vehicleId ? { vehicleId } : {}),
+        sendPatientNotifications: true,
+        sendBoardingQr: true,
+      });
+      return { routeId: result.routeId as string, patientCount: selectedQueueItems.length };
     },
     onSuccess: ({ patientCount }) => {
       clearDispatch();
@@ -586,7 +577,7 @@ export default function DispatchPage() {
               ? '⏳ Processando…'
               : dispatchType === 'SCHEDULED'
                 ? `📅 Agendar Rota (${selectedPatients.length} paciente(s))`
-                : `🚐 Despachar Rota (${selectedPatients.length} paciente(s))`}
+                : `🚨 Despachar Operação (${selectedPatients.length} paciente(s))`}
           </button>
 
           {selectedPatients.length === 0 && (

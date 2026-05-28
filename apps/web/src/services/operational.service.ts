@@ -44,6 +44,19 @@ export const routeService = {
     api.get('/routes', { params }).then((r) => r.data),
   get: (id: string) => api.get(`/routes/${id}`).then((r) => r.data),
   create: (data: any) => api.post('/routes', data).then((r) => r.data),
+  dispatchOperation: (data: {
+    queueIds: string[];
+    driverId?: string;
+    vehicleId?: string;
+    locationId?: string;
+    origin?: string;
+    destination?: string;
+    dispatchType?: 'IMMEDIATE' | 'SCHEDULED';
+    scheduledAt?: string;
+    date?: string;
+    sendPatientNotifications?: boolean;
+    sendBoardingQr?: boolean;
+  }) => api.post('/routes/dispatch-operation', data).then((r) => r.data),
   update: (id: string, data: any) => api.put(`/routes/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/routes/${id}`).then((r) => r.data),
 };

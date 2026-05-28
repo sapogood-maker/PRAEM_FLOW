@@ -192,6 +192,35 @@ export class TripTokensService {
           where: { id: tripId },
           data: { status: 'CONFIRMED' },
         });
+        {
+          const latestQueue = await this.prisma.operationalQueue.findFirst({
+            where: { tenantId, patientId: record.patientId },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (latestQueue) {
+            const currentStatus = String(latestQueue.status).toUpperCase();
+            const preserveProgress = ['BOARDING', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED'].includes(currentStatus);
+            await this.prisma.operationalQueue.update({
+              where: { id: latestQueue.id },
+              data: {
+                confirmationStatus: 'CONFIRMED',
+                confirmationChannel: 'WHATSAPP',
+                confirmedAt: now,
+                lastContactAt: now,
+                confirmationAttempts: { increment: 1 },
+                ...(preserveProgress ? {} : { status: 'CONFIRMED' }),
+              } as any,
+            });
+            this.gateway.emitToTenant(tenantId, 'queue.updated', {
+              id: latestQueue.id,
+              patientId: record.patientId,
+              action: 'PATIENT_CONFIRMED',
+              status: preserveProgress ? currentStatus : 'CONFIRMED',
+              confirmationStatus: 'CONFIRMED',
+              confirmedAt: now,
+            });
+          }
+        }
         this.gateway.emitToTenant(tenantId, 'trip:confirmed', {
           tripId,
           patientId: record.patientId,

@@ -766,6 +766,7 @@ export class OperationalFlowService {
   private async loadEntity(tenantId: string, scope: FlowScope) {
     if (scope.tripId || scope.patientId) {
       const trip = await this.findTrip(tenantId, scope, [
+        'PENDING_CONFIRMATION',
         'SCHEDULED',
         'CONFIRMED',
         'BOARDING',
@@ -799,7 +800,7 @@ export class OperationalFlowService {
     if (routeStatus === 'DISPATCHED') return 'DISPATCHED';
     if (
       (routeStatus === 'ACTIVE' || routeStatus === 'RETURNING')
-      && (tripStatus === 'SCHEDULED' || tripStatus === 'CONFIRMED' || tripStatus === null)
+      && (tripStatus === 'SCHEDULED' || tripStatus === 'PENDING_CONFIRMATION' || tripStatus === 'CONFIRMED' || tripStatus === null)
     ) {
       return 'WAITING_PATIENT';
     }
@@ -923,7 +924,7 @@ export class OperationalFlowService {
   }
 
   private async resolveStartTrip(tenantId: string, routeId: string, requestedTripId?: string): Promise<FlowTrip | null> {
-    const activeStatuses = ['SCHEDULED', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_TRANSIT'] as any[];
+    const activeStatuses = ['SCHEDULED', 'PENDING_CONFIRMATION', 'CONFIRMED', 'BOARDING', 'BOARDED', 'IN_TRANSIT'] as any[];
     const allowedOperationalStartStatuses = 'SCHEDULED,CONFIRMED,DRIVER_ACCEPTED,WAITING_PATIENT,BOARDING,BOARDED,IN_TRANSIT';
 
     const routeAnyTenant = await this.prisma.route.findUnique({
@@ -961,6 +962,7 @@ export class OperationalFlowService {
         this.logger.warn(`[OPS] active trip resolution requestedTripInvalidStatus routeId=${routeId} tripId=${requestedTrip.id} status=${requestedTrip.status}`);
       } else {
         const resolvedRequested = await this.findTrip(tenantId, { routeId, tripId: requestedTrip.id }, [
+          'PENDING_CONFIRMATION',
           'SCHEDULED',
           'CONFIRMED',
           'BOARDING',
@@ -991,6 +993,7 @@ export class OperationalFlowService {
     );
     const chosen = autoCandidates[0];
     const resolved = await this.findTrip(tenantId, { routeId, tripId: chosen.id }, [
+      'PENDING_CONFIRMATION',
       'SCHEDULED',
       'CONFIRMED',
       'BOARDING',

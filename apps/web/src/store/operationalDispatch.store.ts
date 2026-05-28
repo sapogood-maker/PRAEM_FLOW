@@ -12,8 +12,15 @@ export interface DispatchQueueItem {
   healthcareLocationId: string | null;
   appointmentDate: string;
   confirmationStatus?: string | null;
+  slaStatus?: string | null;
+  routeId?: string | null;
   notes?: string | null;
   recurrenceType?: string | null;
+  createdAt?: string;
+  arrivedAt?: string | null;
+  boardedAt?: string | null;
+  cancelledAt?: string | null;
+  noShowAt?: string | null;
   patient: { id: string; name: string; mobility: string; clinicalRisk: string };
   healthcareLocation?: {
     id: string;

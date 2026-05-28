@@ -79,6 +79,7 @@ export const QUEUE_STATUS_LABEL: Record<string, string> = {
   CONFIRMED:  'Confirmado',
   NO_SHOW:    'Não Compareceu',
   CANCELLED:  'Cancelado',
+  CLOSED:     'Encerrado',
   // Valores legados mantidos para compatibilidade
   ASSIGNED:   'Atribuído',
   SCHEDULED:  'Agendado',
@@ -91,6 +92,19 @@ export const QUEUE_STATUS_LABEL: Record<string, string> = {
 
 export function getQueueStatusLabel(status: string): string {
   return QUEUE_STATUS_LABEL[status] ?? status;
+}
+
+// ── SLA da Fila ───────────────────────────────────────────────────────────────
+
+export const QUEUE_SLA_STATUS_LABEL: Record<string, string> = {
+  ON_TIME:  'No prazo',
+  WARNING:  'Atenção',
+  DELAYED:  'Atrasado',
+  CRITICAL: 'Crítico',
+};
+
+export function getQueueSlaStatusLabel(status: string): string {
+  return QUEUE_SLA_STATUS_LABEL[status] ?? status;
 }
 
 // ── Status de Confirmação (ConfirmationStatus) ────────────────────────────────
@@ -259,6 +273,7 @@ export function getStatusLabel(status: string): string {
     ROUTE_STATUS_LABEL[status] ??
     DISPATCH_STATUS_LABEL[status] ??
     QUEUE_STATUS_LABEL[status] ??
+    QUEUE_SLA_STATUS_LABEL[status] ??
     DRIVER_STATUS_LABEL[status] ??
     VEHICLE_STATUS_LABEL[status] ??
     OPERATION_STATUS_LABEL[status] ??

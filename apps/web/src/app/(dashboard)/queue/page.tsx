@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -12,6 +13,7 @@ import { useRealtimeStore } from '@/store/realtime.store';
 import {
   getConfirmationStatusLabel,
   getPriorityLabel,
+  getQueueSlaStatusLabel,
   getQueueStatusLabel,
 } from '@/lib/i18n';
 import { buildOperationalSuggestions } from '@/lib/operational-assistant';
@@ -29,42 +31,51 @@ const PRIORITY_BADGE: Record<string, string> = {
 
 const STATUS_BADGE: Record<string, string> = {
   WAITING: 'bg-slate-800 text-slate-300',
-  ASSIGNED: 'bg-cyan-900 text-cyan-300',
+  CALLED: 'bg-slate-800 text-slate-300',
+  CONFIRMED: 'bg-cyan-900 text-cyan-300',
+  CHECKED_IN: 'bg-blue-900 text-blue-300',
   BOARDING: 'bg-amber-900 text-amber-300',
   IN_TRANSIT: 'bg-indigo-900 text-indigo-300',
+  ARRIVED: 'bg-emerald-900 text-emerald-300',
   COMPLETED: 'bg-emerald-900 text-emerald-300',
   CANCELLED: 'bg-red-900 text-red-300',
   NO_SHOW: 'bg-rose-900 text-rose-300',
+  ASSIGNED: 'bg-cyan-900 text-cyan-300',
   SCHEDULED: 'bg-blue-900 text-blue-300',
+  CLOSED: 'bg-slate-700 text-slate-400',
 };
 
-const CONFIRMATION_BADGE: Record<string, string> = {
-  CONFIRMED: 'bg-emerald-900 text-emerald-300',
-  PENDING: 'bg-amber-900 text-amber-300',
-  CANCELED: 'bg-red-900 text-red-300',
-  UNREACHABLE: 'bg-slate-800 text-slate-400',
-  WAITING_MANUAL_CONFIRMATION: 'bg-cyan-900 text-cyan-300',
+const SLA_BADGE: Record<string, string> = {
+  DELAYED: 'bg-amber-900 text-amber-300',
+  CRITICAL: 'bg-red-900 text-red-300',
 };
+
+const LIVE_STATUS_FILTER = 'WAITING,CONFIRMED,BOARDING,IN_TRANSIT,CALLED,CHECKED_IN,ASSIGNED,SCHEDULED';
+const TERMINAL_STATUS_FILTER = 'COMPLETED,CANCELLED,NO_SHOW,ARRIVED';
+const FINALIZED_TODAY_TERMINAL = new Set(['COMPLETED', 'CANCELLED', 'CLOSED']);
+
+type LifecycleTab = 'active' | 'transit' | 'finalizedToday' | 'history';
+type QueueTypeFilter = 'ALL' | QueueType;
 
 type Filters = {
+  queueType: QueueTypeFilter;
   city: string;
   hospital: string;
   time: 'ALL' | 'MORNING' | 'AFTERNOON' | 'EVENING';
   priority: string;
   recurring: 'ALL' | 'ONLY' | 'EXCLUDE';
   vehicle: string;
-  status: string;
   search: string;
 };
 
 const DEFAULT_FILTERS: Filters = {
+  queueType: 'ALL',
   city: '',
   hospital: '',
   time: 'ALL',
   priority: '',
   recurring: 'ALL',
   vehicle: '',
-  status: '',
   search: '',
 };
 
@@ -91,17 +102,89 @@ function buildGroupKey(item: DispatchQueueItem) {
   return `grp-${destination}-${slot}`;
 }
 
+function getFinalizedAt(item: DispatchQueueItem) {
+  return item.arrivedAt ?? item.cancelledAt ?? item.noShowAt ?? item.createdAt ?? null;
+}
+
+function isSameDay(value: string | null, reference = new Date()) {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return (
+    date.getFullYear() === reference.getFullYear() &&
+    date.getMonth() === reference.getMonth() &&
+    date.getDate() === reference.getDate()
+  );
+}
+
+function isTerminalStatus(status: string) {
+  return ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'ARRIVED', 'CLOSED'].includes(String(status).toUpperCase());
+}
+
+function getLiveActionConfig(status: string) {
+  switch (String(status).toUpperCase()) {
+    case 'WAITING':
+    case 'CALLED':
+    case 'ASSIGNED':
+    case 'SCHEDULED':
+    case 'CHECKED_IN':
+      return [
+        { label: 'Confirmar', status: 'CONFIRMED', tone: 'cyan' },
+        { label: 'Cancelar', status: 'CANCELLED', tone: 'red' },
+      ];
+    case 'CONFIRMED':
+      return [
+        { label: 'Embarcar', status: 'BOARDING', tone: 'amber' },
+        { label: 'Cancelar', status: 'CANCELLED', tone: 'red' },
+      ];
+    case 'BOARDING':
+      return [
+        { label: 'Ir p/ trânsito', status: 'IN_TRANSIT', tone: 'indigo' },
+        { label: 'Cancelar', status: 'CANCELLED', tone: 'red' },
+      ];
+    case 'IN_TRANSIT':
+      return [
+        { label: 'Concluir', status: 'COMPLETED', tone: 'emerald' },
+        { label: 'Chegou', status: 'ARRIVED', tone: 'emerald' },
+        { label: 'Cancelar', status: 'CANCELLED', tone: 'red' },
+      ];
+    case 'ARRIVED':
+      return [
+        { label: 'Concluir', status: 'COMPLETED', tone: 'emerald' },
+      ];
+    default:
+      return [];
+  }
+}
+
+function actionButtonClass(tone: string) {
+  switch (tone) {
+    case 'cyan':
+      return 'bg-cyan-900/60 text-cyan-200 hover:bg-cyan-800';
+    case 'amber':
+      return 'bg-amber-900/60 text-amber-200 hover:bg-amber-800';
+    case 'indigo':
+      return 'bg-indigo-900/60 text-indigo-200 hover:bg-indigo-800';
+    case 'emerald':
+      return 'bg-emerald-900/60 text-emerald-200 hover:bg-emerald-800';
+    case 'red':
+      return 'bg-red-900/60 text-red-200 hover:bg-red-800';
+    default:
+      return 'bg-slate-800 text-slate-200 hover:bg-slate-700';
+  }
+}
+
 export default function QueuePage() {
   const router = useRouter();
   const qc = useQueryClient();
   const revision = useRealtimeStore((s) => s.revision);
   const connected = useRealtimeStore((s) => s.connected);
-  const vehiclePositions = useRealtimeStore((s) => s.vehiclePositions);
   const activityFeed = useRealtimeStore((s) => s.activityFeed);
 
-  const [activeTab, setActiveTab] = useState<QueueType>('LOGISTICS');
+  const [activeTab, setActiveTab] = useState<LifecycleTab>('active');
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
   const {
     addToDispatch,
@@ -114,8 +197,18 @@ export default function QueuePage() {
     applyQueueAssignments,
   } = useOperationalDispatchStore();
 
-  const { data, isLoading } = useQueue({ type: activeTab, limit: 200 });
-  const items = (data?.items ?? []) as DispatchQueueItem[];
+  const queueTypeParam = filters.queueType === 'ALL' ? undefined : filters.queueType;
+  const queueQueryParams = useMemo(() => {
+    const base: Record<string, string | number> = { limit: 400 };
+    if (queueTypeParam) base.type = queueTypeParam;
+    return base;
+  }, [queueTypeParam]);
+
+  const liveQueueParams = useMemo(() => ({ ...queueQueryParams, status: LIVE_STATUS_FILTER }), [queueQueryParams]);
+  const terminalQueueParams = useMemo(() => ({ ...queueQueryParams, status: TERMINAL_STATUS_FILTER }), [queueQueryParams]);
+
+  const liveQuery = useQueue(liveQueueParams);
+  const terminalQuery = useQueue(terminalQueueParams);
 
   const { data: vehiclesData } = useQuery({
     queryKey: ['queue-vehicles'],
@@ -147,6 +240,10 @@ export default function QueuePage() {
     qc.invalidateQueries({ queryKey: ['queue-drivers-online'] });
   }, [revision, qc]);
 
+  useEffect(() => {
+    setSelected(new Set());
+  }, [activeTab, filters.queueType]);
+
   const updatePriority = useMutation({
     mutationFn: ({ id, priority }: { id: string; priority: string }) => queueService.updatePriority(id, priority),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['queue'] }),
@@ -154,7 +251,22 @@ export default function QueuePage() {
 
   const updateStatus = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => api.put(`/queue/${id}/status`, { status }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['queue'] }),
+    onSuccess: (_data, variables) => {
+      const terminal = isTerminalStatus(variables.status);
+      if (terminal) {
+        setRemovingIds((prev) => new Set(prev).add(variables.id));
+        window.setTimeout(() => {
+          qc.invalidateQueries({ queryKey: ['queue'] });
+          setRemovingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(variables.id);
+            return next;
+          });
+        }, 220);
+      } else {
+        qc.invalidateQueries({ queryKey: ['queue'] });
+      }
+    },
   });
 
   const updateConfirmation = useMutation({
@@ -218,17 +330,20 @@ export default function QueuePage() {
     },
   });
 
+  const liveItems = (liveQuery.data?.items ?? []) as DispatchQueueItem[];
+  const terminalItems = (terminalQuery.data?.items ?? []) as DispatchQueueItem[];
+
   const cityOptions = useMemo(
-    () => Array.from(new Set(items.map((i) => i.healthcareLocation?.city).filter(Boolean) as string[])).sort(),
-    [items],
+    () => Array.from(new Set(liveItems.map((i) => i.healthcareLocation?.city).filter(Boolean) as string[])).sort(),
+    [liveItems],
   );
   const hospitalOptions = useMemo(
-    () => Array.from(new Set(items.map((i) => i.healthcareLocation?.name ?? i.destination).filter(Boolean) as string[])).sort(),
-    [items],
+    () => Array.from(new Set([...liveItems, ...terminalItems].map((i) => i.healthcareLocation?.name ?? i.destination).filter(Boolean) as string[])).sort(),
+    [liveItems, terminalItems],
   );
 
-  const filtered = useMemo(() => {
-    return items.filter((item) => {
+  const filteredLive = useMemo(() => {
+    return liveItems.filter((item) => {
       const assignment = queueAssignments[item.id];
       const destinationLabel = item.healthcareLocation?.name ?? item.destination ?? '';
       const matchesSearch =
@@ -244,24 +359,64 @@ export default function QueuePage() {
         filters.recurring === 'ALL' ||
         (filters.recurring === 'ONLY' ? recurring : !recurring);
       const matchesVehicle = !filters.vehicle || assignment?.vehicleId === filters.vehicle;
-      const matchesStatus = !filters.status || item.status === filters.status;
-      return matchesSearch && matchesCity && matchesHospital && matchesTime && matchesPriority && matchesRecurring && matchesVehicle && matchesStatus;
+      return matchesSearch && matchesCity && matchesHospital && matchesTime && matchesPriority && matchesRecurring && matchesVehicle;
     });
-  }, [items, queueAssignments, filters]);
+  }, [liveItems, queueAssignments, filters]);
 
-  const selectedItems = filtered.filter((item) => selected.has(item.id));
-  const { suggestions, assignments } = useMemo(() => buildOperationalSuggestions(items, vehicles), [items, vehicles]);
+  const activeRows = useMemo(
+    () => filteredLive.filter((item) => item.status !== 'IN_TRANSIT'),
+    [filteredLive],
+  );
+  const transitRows = useMemo(
+    () => filteredLive.filter((item) => item.status === 'IN_TRANSIT'),
+    [filteredLive],
+  );
+  const todayFinalizedRows = useMemo(() => {
+    return terminalItems
+      .filter((item) => FINALIZED_TODAY_TERMINAL.has(String(item.status).toUpperCase()))
+      .filter((item) => isSameDay(getFinalizedAt(item)));
+  }, [terminalItems]);
+  const historyRows = useMemo(() => {
+    return terminalItems
+      .filter((item) => !FINALIZED_TODAY_TERMINAL.has(String(item.status).toUpperCase()) || !isSameDay(getFinalizedAt(item)))
+      .sort((a, b) => {
+        const aTime = new Date(getFinalizedAt(a) ?? a.createdAt ?? 0).getTime();
+        const bTime = new Date(getFinalizedAt(b) ?? b.createdAt ?? 0).getTime();
+        return bTime - aTime;
+      });
+  }, [terminalItems]);
+
+  const currentRows = useMemo(() => {
+    switch (activeTab) {
+      case 'transit':
+        return transitRows;
+      case 'finalizedToday':
+        return todayFinalizedRows;
+      case 'history':
+        return historyRows;
+      case 'active':
+      default:
+        return activeRows;
+    }
+  }, [activeTab, activeRows, transitRows, todayFinalizedRows, historyRows]);
+
+  const selectedItems = useMemo(() => currentRows.filter((item) => selected.has(item.id)), [currentRows, selected]);
+  const { suggestions, assignments } = useMemo(() => buildOperationalSuggestions(liveItems, vehicles), [liveItems, vehicles]);
 
   const realtimeOverview = useMemo(() => {
-    const confirmed = items.filter((q) => q.confirmationStatus === 'CONFIRMED').length;
-    const boarding = items.filter((q) => q.status === 'BOARDING').length;
-    const delayed = items.filter((q: any) => q.delayMinutes > 0 || ['DELAYED', 'CRITICAL'].includes(String(q.slaStatus ?? '').toUpperCase())).length;
+    const activeQueue = liveItems.filter((q) => q.status !== 'IN_TRANSIT').length;
+    const inTransit = liveItems.filter((q) => q.status === 'IN_TRANSIT').length;
+    const completedToday = todayFinalizedRows.length;
+    const delayed = liveItems.filter((q) => String(q.slaStatus ?? '').toUpperCase() === 'DELAYED').length;
+    const critical = liveItems.filter((q) =>
+      String(q.slaStatus ?? '').toUpperCase() === 'CRITICAL' || String(q.priority ?? '').toUpperCase() === 'CRITICAL',
+    ).length;
     const offlineDrivers = driversOnline.filter((d) => ['OFFLINE', 'GPS_LOST', 'WS_ONLY'].includes(String(d.operationalStatus ?? '').toUpperCase())).length;
-    return { confirmed, boarding, delayed, offlineDrivers };
-  }, [items, driversOnline]);
+    return { activeQueue, inTransit, completedToday, delayed, critical, offlineDrivers };
+  }, [liveItems, todayFinalizedRows.length, driversOnline]);
 
   function toggleAll(checked: boolean) {
-    setSelected(checked ? new Set(filtered.map((q) => q.id)) : new Set());
+    setSelected(checked ? new Set(currentRows.map((q) => q.id)) : new Set());
   }
 
   function toggleOne(id: string) {
@@ -287,47 +442,53 @@ export default function QueuePage() {
     router.push('/dispatch');
   }
 
+  const allowBulkActions = activeTab === 'active';
+  const allowRowOperationalControls = activeTab === 'active' || activeTab === 'transit';
   return (
     <section className='space-y-4'>
       <header className='flex flex-wrap items-end justify-between gap-3'>
         <div>
           <h2 className='text-2xl font-bold text-slate-100'>Fila Operacional</h2>
           <p className='text-sm text-slate-400'>
-            Centro de despacho em tempo real · {filtered.length} de {items.length} pacientes
+            Centro de despacho em tempo real · {currentRows.length} na aba · {realtimeOverview.activeQueue} ativos
           </p>
         </div>
         <div className='flex flex-wrap items-center gap-2'>
-          <button
-            type='button'
-            onClick={() => applyQueueAssignments(assignments, 'assistant')}
-            className='rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-600 transition-colors'
-          >
-            Organizar Automaticamente
-          </button>
-          <button
-            type='button'
-            onClick={groupSelectedManually}
-            disabled={selectedItems.length === 0}
-            className='rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-40'
-          >
-            Agrupar pacientes
-          </button>
-          <button
-            type='button'
-            onClick={() => createRoutes.mutate(selectedItems)}
-            disabled={selectedItems.length === 0 || createRoutes.isPending}
-            className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-600 disabled:opacity-40'
-          >
-            Criar rota
-          </button>
-          <button
-            type='button'
-            onClick={sendSelectedToDispatch}
-            disabled={selectedItems.length === 0}
-            className='rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-950/40 disabled:opacity-40'
-          >
-            Abrir Central de Despacho
-          </button>
+          {allowBulkActions && (
+            <>
+              <button
+                type='button'
+                onClick={() => applyQueueAssignments(assignments, 'assistant')}
+                className='rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-600 transition-colors'
+              >
+                Organizar Automaticamente
+              </button>
+              <button
+                type='button'
+                onClick={groupSelectedManually}
+                disabled={selectedItems.length === 0}
+                className='rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-40'
+              >
+                Agrupar pacientes
+              </button>
+              <button
+                type='button'
+                onClick={() => createRoutes.mutate(selectedItems)}
+                disabled={selectedItems.length === 0 || createRoutes.isPending}
+                className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-600 disabled:opacity-40'
+              >
+                Criar rota
+              </button>
+              <button
+                type='button'
+                onClick={sendSelectedToDispatch}
+                disabled={selectedItems.length === 0}
+                className='rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-950/40 disabled:opacity-40'
+              >
+                Abrir Central de Despacho
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -339,26 +500,31 @@ export default function QueuePage() {
           </p>
         </div>
         <div className='rounded-xl border border-border bg-panel px-4 py-3'>
-          <p className='text-xs uppercase text-slate-500'>Confirmações</p>
-          <p className='text-sm font-semibold text-cyan-300'>{realtimeOverview.confirmed} confirmados</p>
+          <p className='text-xs uppercase text-slate-500'>Fila ativa</p>
+          <p className='text-sm font-semibold text-cyan-300'>{realtimeOverview.activeQueue}</p>
         </div>
         <div className='rounded-xl border border-border bg-panel px-4 py-3'>
-          <p className='text-xs uppercase text-slate-500'>Embarque</p>
-          <p className='text-sm font-semibold text-amber-300'>{realtimeOverview.boarding} em operação</p>
+          <p className='text-xs uppercase text-slate-500'>Em trânsito</p>
+          <p className='text-sm font-semibold text-indigo-300'>{realtimeOverview.inTransit}</p>
         </div>
         <div className='rounded-xl border border-border bg-panel px-4 py-3'>
-          <p className='text-xs uppercase text-slate-500'>GPS ativo</p>
-          <p className='text-sm font-semibold text-indigo-300'>{vehiclePositions.length} veículos</p>
+          <p className='text-xs uppercase text-slate-500'>Finalizados hoje</p>
+          <p className='text-sm font-semibold text-emerald-300'>{realtimeOverview.completedToday}</p>
         </div>
         <div className='rounded-xl border border-border bg-panel px-4 py-3'>
           <p className='text-xs uppercase text-slate-500'>Alertas</p>
           <p className='text-sm font-semibold text-rose-300'>
-            {realtimeOverview.offlineDrivers} offline · {realtimeOverview.delayed} atrasos
+            {realtimeOverview.critical} críticos · {realtimeOverview.delayed} atrasos
           </p>
         </div>
       </div>
 
       <div className='grid gap-2 rounded-xl border border-border bg-panel p-3 md:grid-cols-8'>
+        <select value={filters.queueType} onChange={(e) => setFilters((f) => ({ ...f, queueType: e.target.value as QueueTypeFilter }))} className='rounded bg-slate-900 px-3 py-2 text-sm'>
+          <option value='ALL'>Todas as filas</option>
+          <option value='LOGISTICS'>Fila Logística</option>
+          <option value='MEDICAL'>Fila Médica</option>
+        </select>
         <input
           value={filters.search}
           onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
@@ -392,15 +558,32 @@ export default function QueuePage() {
           <option value=''>Veículo</option>
           {vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate} · {v.model}</option>)}
         </select>
-        <select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} className='rounded bg-slate-900 px-3 py-2 text-sm'>
-          <option value=''>Status</option>
-          {['WAITING', 'ASSIGNED', 'SCHEDULED', 'BOARDING', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED', 'NO_SHOW'].map((s) => (
-            <option key={s} value={s}>{getQueueStatusLabel(s)}</option>
-          ))}
-        </select>
       </div>
 
-      {suggestions.length > 0 && (
+      <div className='grid gap-2 rounded-xl border border-border bg-panel p-1 md:grid-cols-4'>
+        {[
+          { id: 'active' as LifecycleTab, label: 'Fila Ativa', count: activeRows.length },
+          { id: 'transit' as LifecycleTab, label: 'Em Trânsito', count: transitRows.length },
+          { id: 'finalizedToday' as LifecycleTab, label: 'Finalizados Hoje', count: todayFinalizedRows.length },
+          { id: 'history' as LifecycleTab, label: 'Histórico', count: historyRows.length },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type='button'
+            onClick={() => setActiveTab(tab.id)}
+            className={`rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors ${
+              activeTab === tab.id ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+            }`}
+          >
+            <span className='flex items-center justify-between gap-3'>
+              <span>{tab.label}</span>
+              <span className='rounded-full bg-slate-900/70 px-2 py-0.5 text-xs text-slate-300'>{tab.count}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {suggestions.length > 0 && allowRowOperationalControls && (
         <div className='rounded-xl border border-indigo-900/60 bg-indigo-950/20 p-3'>
           <p className='mb-2 text-xs uppercase tracking-wide text-indigo-300'>
             Assistente Operacional · sugestões ativas ({suggestions.length})
@@ -416,23 +599,7 @@ export default function QueuePage() {
         </div>
       )}
 
-      <div className='flex gap-1 rounded-lg border border-border bg-panel p-1 w-fit'>
-        {[
-          { value: 'LOGISTICS' as QueueType, label: 'Fila Logística' },
-          { value: 'MEDICAL' as QueueType, label: 'Fila Médica' },
-        ].map((tab) => (
-          <button
-            key={tab.value}
-            type='button'
-            onClick={() => setActiveTab(tab.value)}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === tab.value ? 'bg-cyan-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {isLoading ? (
+      {liveQuery.isLoading || terminalQuery.isLoading ? (
         <LoadingSpinner />
       ) : (
         <div className='overflow-x-auto rounded-xl border border-border bg-panel'>
@@ -443,8 +610,9 @@ export default function QueuePage() {
                   <input
                     type='checkbox'
                     className='accent-cyan-500'
-                    checked={filtered.length > 0 && filtered.every((q) => selected.has(q.id))}
+                    checked={allowBulkActions && currentRows.length > 0 && currentRows.every((q) => selected.has(q.id))}
                     onChange={(e) => toggleAll(e.target.checked)}
+                    disabled={!allowBulkActions}
                   />
                 </th>
                 <th className='p-3 text-left'>Paciente</th>
@@ -459,22 +627,32 @@ export default function QueuePage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
+              {currentRows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className='p-8 text-center text-slate-500'>Sem itens na fila para os filtros atuais.</td>
+                  <td colSpan={10} className='p-8 text-center text-slate-500'>Sem itens nesta visão.</td>
                 </tr>
               )}
-              {filtered.map((item) => {
+              {currentRows.map((item) => {
                 const assignment = queueAssignments[item.id] ?? {};
                 const routeBadge = assignment.routeId ? `Rota ${assignment.routeId.slice(0, 6)}` : '';
+                const liveActions = getLiveActionConfig(item.status);
+                const terminal = isTerminalStatus(item.status) || activeTab === 'history' || activeTab === 'finalizedToday';
+                const slaStatus = String(item.slaStatus ?? '').toUpperCase();
+                const removing = removingIds.has(item.id);
                 return (
-                  <tr key={item.id} className={`border-t border-border ${selected.has(item.id) ? 'bg-cyan-950/20' : 'hover:bg-slate-900/40'}`}>
+                  <tr
+                    key={item.id}
+                    className={`border-t border-border transition-all duration-200 ${
+                      removing ? 'opacity-0 translate-x-2' : ''
+                    } ${selected.has(item.id) ? 'bg-cyan-950/20' : 'hover:bg-slate-900/40'} ${terminal ? 'text-slate-300' : ''}`}
+                  >
                     <td className='p-3'>
                       <input
                         type='checkbox'
                         className='accent-cyan-500'
                         checked={selected.has(item.id)}
                         onChange={() => toggleOne(item.id)}
+                        disabled={terminal || !allowBulkActions}
                       />
                     </td>
                     <td className='p-3'>
@@ -498,83 +676,119 @@ export default function QueuePage() {
                         value={item.priority}
                         onChange={(e) => updatePriority.mutate({ id: item.id, priority: e.target.value })}
                         className={`rounded px-2 py-1 text-xs font-medium ${PRIORITY_BADGE[item.priority] ?? 'bg-slate-700 text-slate-300'}`}
+                        disabled={terminal}
                       >
                         {['EMERGENCY', 'CRITICAL', 'HIGH', 'NORMAL', 'LOW', 'PENDING'].map((p) => (
                           <option key={p} value={p}>{getPriorityLabel(p)}</option>
                         ))}
                       </select>
                     </td>
-                    <td className='p-3'>
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[item.status] ?? 'bg-slate-800 text-slate-300'}`}>
+                    <td className='p-3 space-y-1'>
+                      <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[item.status] ?? 'bg-slate-800 text-slate-300'}`}>
                         {getQueueStatusLabel(item.status)}
                       </span>
+                      {slaStatus === 'DELAYED' || slaStatus === 'CRITICAL' ? (
+                        <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${SLA_BADGE[slaStatus]}`}>
+                          {getQueueSlaStatusLabel(slaStatus)}
+                        </span>
+                      ) : null}
                     </td>
                     <td className='p-3'>
-                      <select
-                        value={assignment.vehicleId ?? ''}
-                        onChange={(e) => assignQueueVehicle(item.id, e.target.value)}
-                        className='w-full rounded bg-slate-900 px-2 py-1 text-xs'
-                      >
-                        <option value=''>—</option>
-                        {vehicles.map((v) => (
-                          <option key={v.id} value={v.id}>{v.plate} · {v.model}</option>
-                        ))}
-                      </select>
-                      {assignment.recommendedVehicleType && (
-                        <p className='mt-1 text-[10px] text-cyan-300'>Sugestão: {assignment.recommendedVehicleType}</p>
+                      {allowRowOperationalControls ? (
+                        <select
+                          value={assignment.vehicleId ?? ''}
+                          onChange={(e) => assignQueueVehicle(item.id, e.target.value)}
+                          className='w-full rounded bg-slate-900 px-2 py-1 text-xs'
+                          disabled={terminal}
+                        >
+                          <option value=''>—</option>
+                          {vehicles.map((v) => (
+                            <option key={v.id} value={v.id}>{v.plate} · {v.model}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className='text-xs text-slate-500'>—</span>
                       )}
                     </td>
                     <td className='p-3'>
-                      <select
-                        value={assignment.driverId ?? ''}
-                        onChange={(e) => assignQueueDriver(item.id, e.target.value)}
-                        className='w-full rounded bg-slate-900 px-2 py-1 text-xs'
-                      >
-                        <option value=''>—</option>
-                        {drivers.map((d) => (
-                          <option key={d.id} value={d.id}>{d.user?.name ?? d.id}</option>
-                        ))}
-                      </select>
+                      {allowRowOperationalControls ? (
+                        <select
+                          value={assignment.driverId ?? ''}
+                          onChange={(e) => assignQueueDriver(item.id, e.target.value)}
+                          className='w-full rounded bg-slate-900 px-2 py-1 text-xs'
+                          disabled={terminal}
+                        >
+                          <option value=''>—</option>
+                          {drivers.map((d) => (
+                            <option key={d.id} value={d.id}>{d.user?.name ?? d.id}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className='text-xs text-slate-500'>—</span>
+                      )}
                     </td>
                     <td className='p-3'>
                       <button
                         type='button'
                         onClick={() => updateConfirmation.mutate({ id: item.id, status: item.confirmationStatus === 'CONFIRMED' ? 'PENDING' : 'CONFIRMED' })}
-                        className={`rounded px-2 py-1 text-xs font-medium ${CONFIRMATION_BADGE[item.confirmationStatus ?? 'PENDING'] ?? 'bg-slate-800 text-slate-300'}`}
+                        className={`rounded px-2 py-1 text-xs font-medium ${terminal ? 'opacity-60' : ''} ${
+                          item.confirmationStatus === 'CONFIRMED'
+                            ? 'bg-emerald-900 text-emerald-300'
+                            : 'bg-slate-800 text-slate-300'
+                        }`}
+                        disabled={terminal}
                       >
                         {getConfirmationStatusLabel(item.confirmationStatus ?? 'PENDING')}
                       </button>
                     </td>
                     <td className='p-3'>
-                      <div className='space-y-1'>
+                      {terminal ? (
                         <div className='flex flex-wrap gap-1'>
-                          <button type='button' onClick={() => updateStatus.mutate({ id: item.id, status: 'BOARDING' })} className='rounded bg-amber-900/60 px-2 py-1 text-[11px] text-amber-200'>Embarque</button>
-                          <button type='button' onClick={() => updateStatus.mutate({ id: item.id, status: 'CANCELLED' })} className='rounded bg-red-900/60 px-2 py-1 text-[11px] text-red-200'>Cancelar</button>
-                          <button type='button' onClick={() => updateStatus.mutate({ id: item.id, status: 'COMPLETED' })} className='rounded bg-emerald-900/60 px-2 py-1 text-[11px] text-emerald-200'>Concluir</button>
+                          <Link href={`/replay`} className='rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-700'>
+                            Replay
+                          </Link>
+                          <Link href={`/reports`} className='rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-700'>
+                            Relatórios
+                          </Link>
                         </div>
-                        <div className='flex gap-1'>
-                          <select
-                            value={assignment.routeId ?? ''}
-                            onChange={(e) => setQueueRoute(item.id, e.target.value)}
-                            className='rounded bg-slate-900 px-2 py-1 text-[11px]'
-                          >
-                            <option value=''>Reatribuir rota</option>
-                            {openRoutes.map((route) => (
-                              <option key={route.id} value={route.id}>
-                                {route.id.slice(0, 8)} · {route.destination ?? 'Rota'}
-                              </option>
+                      ) : (
+                        <div className='space-y-1'>
+                          <div className='flex flex-wrap gap-1'>
+                            {liveActions.map((action) => (
+                              <button
+                                key={action.status}
+                                type='button'
+                                onClick={() => updateStatus.mutate({ id: item.id, status: action.status })}
+                                className={`rounded px-2 py-1 text-[11px] ${actionButtonClass(action.tone)}`}
+                              >
+                                {action.label}
+                              </button>
                             ))}
-                          </select>
-                          <button
-                            type='button'
-                            onClick={() => clearQueueAssignment(item.id)}
-                            className='rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-400'
-                          >
-                            Limpar
-                          </button>
+                          </div>
+                          <div className='flex gap-1'>
+                            <select
+                              value={assignment.routeId ?? ''}
+                              onChange={(e) => setQueueRoute(item.id, e.target.value)}
+                              className='rounded bg-slate-900 px-2 py-1 text-[11px]'
+                            >
+                              <option value=''>Reatribuir rota</option>
+                              {openRoutes.map((route) => (
+                                <option key={route.id} value={route.id}>
+                                  {route.id.slice(0, 8)} · {route.destination ?? 'Rota'}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type='button'
+                              onClick={() => clearQueueAssignment(item.id)}
+                              className='rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-400'
+                            >
+                              Limpar
+                            </button>
+                          </div>
+                          {routeBadge && <p className='text-[10px] text-cyan-300'>{routeBadge}</p>}
                         </div>
-                        {routeBadge && <p className='text-[10px] text-cyan-300'>{routeBadge}</p>}
-                      </div>
+                      )}
                     </td>
                   </tr>
                 );

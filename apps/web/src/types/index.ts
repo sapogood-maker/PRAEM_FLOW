@@ -1,9 +1,23 @@
 export * from '@praem/shared/src';
 
 // ----- Queue ----------------------------------------------------------------
-export type QueuePriority = 'CRITICAL' | 'HIGH' | 'NORMAL' | 'PENDING';
-export type QueueStatus = 'WAITING' | 'ASSIGNED' | 'CONFIRMED' | 'CANCELLED';
+export type QueuePriority = 'EMERGENCY' | 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW' | 'PENDING';
+export type QueueStatus =
+  | 'WAITING'
+  | 'CALLED'
+  | 'CONFIRMED'
+  | 'CHECKED_IN'
+  | 'BOARDING'
+  | 'IN_TRANSIT'
+  | 'ARRIVED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'NO_SHOW'
+  | 'ASSIGNED'
+  | 'SCHEDULED'
+  | 'CLOSED';
 export type QueueType = 'MEDICAL' | 'LOGISTICS';
+export type QueueSlaStatus = 'ON_TIME' | 'WARNING' | 'DELAYED' | 'CRITICAL';
 export type ConfirmationStatus =
   | 'PENDING'
   | 'CONFIRMED'
@@ -17,13 +31,31 @@ export interface QueueItem {
   id: string;
   patientId: string;
   destination: string;
+  healthcareLocationId?: string | null;
   appointmentDate: string;
   priority: QueuePriority;
   status: QueueStatus;
   queueType: QueueType;
   confirmationStatus: ConfirmationStatus;
+  slaStatus?: QueueSlaStatus;
+  delayMinutes?: number | null;
+  createdAt?: string;
+  arrivedAt?: string | null;
+  cancelledAt?: string | null;
+  noShowAt?: string | null;
+  boardedAt?: string | null;
   requiresCompanion?: boolean;
   recurrenceType?: RecurrenceType;
+  notes?: string | null;
+  patient?: { id: string; name: string; mobility?: string; clinicalRisk?: string };
+  healthcareLocation?: {
+    id: string;
+    name: string;
+    city?: string;
+    type?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+  } | null;
 }
 
 // ----- Vehicle Tracking -----------------------------------------------------

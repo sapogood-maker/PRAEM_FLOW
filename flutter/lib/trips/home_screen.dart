@@ -131,13 +131,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   SliverToBoxAdapter(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: const [
-                        ConnectionStatusBar(),
-                        OperationalStateHeader(),
-                        NextActionPanel(),
-                        DestinationInfoCard(),
-                        PassengerManifest(),
-                        SizedBox(height: 80),
+                      children: [
+                        const ConnectionStatusBar(),
+                        if (ctrl.hasActiveRoute)
+                          _MissionCard(ctrl: ctrl)
+                        else
+                          _NoMissionCard(loading: ctrl.loading),
+                        const OperationalStateHeader(),
+                        const NextActionPanel(),
+                        const DestinationInfoCard(),
+                        const PassengerManifest(),
+                        const SizedBox(height: 80),
                       ],
                     ),
                   ),
@@ -156,6 +160,269 @@ class _HomeScreenState extends State<HomeScreen> {
               label: Text(context.l10n.scanQrFab),
             )
           : null,
+    );
+  }
+}
+
+/// Prominent mission card shown when a route is assigned.
+class _MissionCard extends StatelessWidget {
+  const _MissionCard({required this.ctrl});
+  final OperationController ctrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final route = ctrl.activeRoute!;
+    final destination = route['destination'] as String? ?? '—';
+    final origin = route['origin'] as String? ?? '—';
+    final status = (route['status'] as String? ?? '').toUpperCase();
+    final patientCount = ctrl.patients.length;
+    final boardedCount = ctrl.boardedCount;
+
+    final statusColor = _statusColor(status);
+    final isCreated = status == 'DISPATCHED' || status == 'PENDING' || status == 'CREATED';
+
+    return Container(
+      margin: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF0E7490).withOpacity(0.9),
+            const Color(0xFF164E63),
+          ],
+        ),
+        border: Border.all(color: const Color(0xFF22D3EE).withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.local_shipping, color: Color(0xFF22D3EE), size: 18),
+                const SizedBox(width: 8),
+                const Text(
+                  'MISSÃO ATIVA',
+                  style: TextStyle(
+                    color: Color(0xFF22D3EE),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: statusColor.withOpacity(0.5)),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.trip_origin, color: Color(0xFF94A3B8), size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    origin,
+                    style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.location_on, color: Color(0xFF22D3EE), size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    destination,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _StatChip(
+                  icon: Icons.people,
+                  label: '$patientCount paciente${patientCount != 1 ? 's' : ''}',
+                ),
+                const SizedBox(width: 8),
+                _StatChip(
+                  icon: Icons.how_to_reg,
+                  label: '$boardedCount embarcado${boardedCount != 1 ? 's' : ''}',
+                  highlight: boardedCount > 0,
+                ),
+              ],
+            ),
+            if (isCreated) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0891B2),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: ctrl.loading ? null : ctrl.startRoute,
+                  icon: ctrl.loading
+                      ? const SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.play_arrow),
+                  label: const Text(
+                    'Iniciar Operação',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF22D3EE),
+                    side: const BorderSide(color: Color(0xFF22D3EE), width: 1),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: () => Navigator.pushNamed(context, AppRoutes.trip),
+                  icon: const Icon(Icons.list_alt, size: 16),
+                  label: const Text('Ver detalhes da missão'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'DISPATCHED':
+      case 'PREPARING':
+        return const Color(0xFFFBBF24);
+      case 'ACTIVE':
+      case 'IN_TRANSIT':
+        return const Color(0xFF34D399);
+      case 'COMPLETED':
+        return const Color(0xFF6EE7B7);
+      case 'CANCELLED':
+        return const Color(0xFFF87171);
+      default:
+        return const Color(0xFF94A3B8);
+    }
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  const _StatChip({required this.icon, required this.label, this.highlight = false});
+  final IconData icon;
+  final String label;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: highlight
+            ? const Color(0xFF065F46).withOpacity(0.4)
+            : Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: highlight
+              ? const Color(0xFF34D399).withOpacity(0.5)
+              : Colors.white.withOpacity(0.1),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: highlight ? const Color(0xFF34D399) : const Color(0xFF94A3B8)),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: highlight ? const Color(0xFF6EE7B7) : const Color(0xFFCBD5E1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Placeholder shown when there's no active mission.
+class _NoMissionCard extends StatelessWidget {
+  const _NoMissionCard({required this.loading});
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFF1E293B),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            loading ? Icons.hourglass_empty : Icons.inbox_outlined,
+            size: 40,
+            color: const Color(0xFF475569),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            loading ? 'Carregando missão...' : 'Nenhuma missão atribuída',
+            style: const TextStyle(color: Color(0xFF64748B), fontSize: 14),
+          ),
+          if (!loading) ...[
+            const SizedBox(height: 4),
+            const Text(
+              'Aguardando despacho da central operacional',
+              style: TextStyle(color: Color(0xFF475569), fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

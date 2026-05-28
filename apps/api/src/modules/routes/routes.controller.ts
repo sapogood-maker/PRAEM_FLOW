@@ -85,6 +85,11 @@ export class RoutesController {
     return this.routesService.optimize(id);
   }
 
+  @Get(':id/timeline')
+  getTimeline(@Request() req: AuthRequest, @Param('id') id: string) {
+    return this.routesService.getTimeline(id, req.user.tenantId);
+  }
+
   @Post(':id/start')
   @Roles('DRIVER')
   startRoute(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { tripId?: string; source?: string }) {

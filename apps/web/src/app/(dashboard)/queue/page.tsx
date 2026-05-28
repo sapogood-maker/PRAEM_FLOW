@@ -19,6 +19,7 @@ import {
 import { buildOperationalSuggestions } from '@/lib/operational-assistant';
 import type { QueueType } from '@/types';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { DispatchOperationModal } from '@/components/operations/DispatchOperationModal';
 
 const PRIORITY_BADGE: Record<string, string> = {
   EMERGENCY: 'bg-red-600 text-white animate-pulse',
@@ -185,6 +186,8 @@ export default function QueuePage() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const {
     addToDispatch,
@@ -458,10 +461,10 @@ export default function QueuePage() {
             <>
               <button
                 type='button'
-                onClick={() => applyQueueAssignments(assignments, 'assistant')}
+                onClick={() => setShowSuggestions((v) => !v)}
                 className='rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-600 transition-colors'
               >
-                Organizar Automaticamente
+                🤖 Organizar Automaticamente
               </button>
               <button
                 type='button'
@@ -473,19 +476,16 @@ export default function QueuePage() {
               </button>
               <button
                 type='button'
-                onClick={() => createRoutes.mutate(selectedItems)}
-                disabled={selectedItems.length === 0 || createRoutes.isPending}
-                className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-600 disabled:opacity-40'
-              >
-                Criar rota
-              </button>
-              <button
-                type='button'
-                onClick={sendSelectedToDispatch}
                 disabled={selectedItems.length === 0}
-                className='rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-950/40 disabled:opacity-40'
+                onClick={() => setShowDispatchModal(true)}
+                className='flex items-center gap-2 rounded-xl bg-cyan-600 px-5 py-2 text-sm font-bold text-white shadow-lg hover:bg-cyan-500 disabled:opacity-40 transition-all active:scale-95'
               >
-                Abrir Central de Despacho
+                ⚡ DESPACHAR OPERAÇÃO
+                {selectedItems.length > 0 && (
+                  <span className='rounded-full bg-white/20 px-2 py-0.5 text-xs'>
+                    {selectedItems.length}
+                  </span>
+                )}
               </button>
             </>
           )}
@@ -583,18 +583,58 @@ export default function QueuePage() {
         ))}
       </div>
 
-      {suggestions.length > 0 && allowRowOperationalControls && (
+      {suggestions.length > 0 && allowRowOperationalControls && showSuggestions && (
         <div className='rounded-xl border border-indigo-900/60 bg-indigo-950/20 p-3'>
-          <p className='mb-2 text-xs uppercase tracking-wide text-indigo-300'>
-            Assistente Operacional · sugestões ativas ({suggestions.length})
-          </p>
+          <div className='mb-2 flex items-center justify-between'>
+            <p className='text-xs uppercase tracking-wide text-indigo-300'>
+              🤖 Assistente Operacional · {suggestions.length} sugestões
+            </p>
+            <button
+              type='button'
+              onClick={() => setShowSuggestions(false)}
+              className='text-xs text-slate-500 hover:text-slate-300'
+            >
+              Fechar
+            </button>
+          </div>
           <div className='grid gap-2 md:grid-cols-2 xl:grid-cols-3'>
             {suggestions.slice(0, 6).map((suggestion) => (
-              <div key={suggestion.id} className='rounded border border-indigo-900/60 bg-slate-900/40 px-3 py-2 text-xs'>
-                <p className='font-semibold text-slate-100'>{suggestion.title}</p>
-                <p className='text-slate-400'>{suggestion.description}</p>
+              <div key={suggestion.id} className='rounded border border-indigo-900/60 bg-slate-900/40 px-3 py-2 text-xs flex items-start justify-between gap-2'>
+                <div>
+                  <p className='font-semibold text-slate-100'>{suggestion.title}</p>
+                  <p className='text-slate-400'>{suggestion.description}</p>
+                </div>
+                <button
+                  type='button'
+                  onClick={() => {
+                    applyQueueAssignments(assignments, 'assistant');
+                    // Select the patients in this suggestion
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      for (const id of suggestion.queueIds) next.add(id);
+                      return next;
+                    });
+                  }}
+                  className='shrink-0 rounded bg-indigo-700 px-2 py-1 text-xs text-white hover:bg-indigo-600'
+                >
+                  Aplicar
+                </button>
               </div>
             ))}
+          </div>
+          <div className='mt-2'>
+            <button
+              type='button'
+              onClick={() => {
+                applyQueueAssignments(assignments, 'assistant');
+                const allIds = suggestions.flatMap((s) => s.queueIds);
+                setSelected(new Set(allIds));
+                setShowSuggestions(false);
+              }}
+              className='rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 transition-colors'
+            >
+              ✅ Aplicar todas as sugestões e selecionar
+            </button>
           </div>
         </div>
       )}
@@ -809,6 +849,17 @@ export default function QueuePage() {
           {activityFeed.length === 0 && <p className='text-slate-500'>Aguardando eventos em tempo real...</p>}
         </div>
       </div>
+
+      {/* Inline Dispatch Modal */}
+      <DispatchOperationModal
+        open={showDispatchModal}
+        onClose={() => setShowDispatchModal(false)}
+        patients={selectedItems}
+        onDispatched={(routeId) => {
+          setSelected(new Set());
+          router.push(`/operations/${routeId}`);
+        }}
+      />
     </section>
   );
 }

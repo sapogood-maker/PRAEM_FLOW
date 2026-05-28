@@ -59,6 +59,10 @@ export const routeService = {
   }) => api.post('/routes/dispatch-operation', data).then((r) => r.data),
   update: (id: string, data: any) => api.put(`/routes/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/routes/${id}`).then((r) => r.data),
+  getTimeline: (id: string) => api.get(`/routes/${id}/timeline`).then((r) => r.data),
+  startRoute: (id: string, body?: { tripId?: string; source?: string }) =>
+    api.post(`/routes/${id}/start`, body ?? {}).then((r) => r.data),
+  completeRoute: (id: string) => api.post(`/routes/${id}/complete`, {}).then((r) => r.data),
 };
 
 export const trackingService = {

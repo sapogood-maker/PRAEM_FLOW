@@ -450,6 +450,28 @@ export class RoutesService {
     return { routeId: id, optimized: true, message: 'Rota otimizada por heurística de distância' };
   }
 
+  async getTimeline(id: string, tenantId: string) {
+    await this.findOne(id, tenantId);
+    const events = await this.prisma.operationalTimeline.findMany({
+      where: { tenantId, routeId: id },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    });
+    // Enrich with trip + patient info when patientId is present
+    const patientIds = [...new Set(events.map((e) => e.patientId).filter(Boolean) as string[])];
+    const patients = patientIds.length > 0
+      ? await this.prisma.patient.findMany({
+          where: { id: { in: patientIds }, tenantId },
+          select: { id: true, name: true },
+        })
+      : [];
+    const patientMap = new Map(patients.map((p) => [p.id, p.name]));
+    return events.map((e) => ({
+      ...e,
+      patientName: e.patientId ? (patientMap.get(e.patientId) ?? null) : null,
+    }));
+  }
+
   async recoverStaleRoutes(tenantId: string, cutoffHours?: number, context?: { driverId?: string; actorUserId?: string }) {
     return this.flow.recoverStaleRoutes(tenantId, cutoffHours ?? 12, {
       driverId: context?.driverId ?? null,

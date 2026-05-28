@@ -84,6 +84,7 @@ export class TripTokensService {
                 destination: true,
                 date: true,
                 scheduledAt: true,
+                driver: { select: { id: true, user: { select: { name: true } } } },
               },
             },
           },
@@ -114,12 +115,21 @@ export class TripTokensService {
       console.log(`[QR] Token ${token.substring(0, 8)}… validated: expires=${record.expiresAt.toISOString()}, type=${record.type}`);
     }
 
+    // Fetch boarding QR token for patient confirmation pages
+    const boardingToken = record.type === 'CONFIRMATION'
+      ? await this.prisma.tripToken.findFirst({
+          where: { tripId: record.trip.id, type: 'BOARDING' },
+          select: { token: true },
+        })
+      : null;
+
     return {
       id: record.id,
       type: record.type,
       expiresAt: record.expiresAt,
       patient: record.patient,
       trip: record.trip,
+      boardingQrToken: boardingToken?.token ?? null,
       qrContent: JSON.stringify(buildTripQrPayload({
         tripId: record.trip.id,
         patientId: record.patient.id,

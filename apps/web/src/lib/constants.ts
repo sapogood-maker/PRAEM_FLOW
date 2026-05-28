@@ -18,6 +18,6 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { href: '/vehicles', label: UI_TEXT.menu.vehicles, icon: BusFront },
   { href: '/drivers', label: UI_TEXT.menu.drivers, icon: UserRoundCog },
   { href: '/replay', label: UI_TEXT.menu.alerts, icon: BellRing },
-  { href: '/daily-op', label: UI_TEXT.menu.reports, icon: ChartNoAxesCombined },
+  { href: '/reports', label: UI_TEXT.menu.reports, icon: ChartNoAxesCombined },
   { href: '/admin/notification-templates', label: `${UI_TEXT.menu.settings} · ${UI_TEXT.menu.messageTemplates}`, icon: Settings2 },
 ];

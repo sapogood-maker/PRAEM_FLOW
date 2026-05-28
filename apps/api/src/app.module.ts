@@ -36,6 +36,7 @@ import { SchedulingImportModule } from './modules/scheduling-import/scheduling-i
 import { SusImportModule } from './modules/sus-import/sus-import.module';
 import { DispatchEngineModule } from './modules/dispatch-engine/dispatch-engine.module';
 import { QrEngineModule } from './modules/qr-engine/qr-engine.module';
+import { NotificationTemplatesModule } from './modules/notification-templates/notification-templates.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { QrEngineModule } from './modules/qr-engine/qr-engine.module';
     SusImportModule,
     DispatchEngineModule,
     QrEngineModule,
+    NotificationTemplatesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

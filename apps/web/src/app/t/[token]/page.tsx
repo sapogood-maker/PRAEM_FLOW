@@ -1,16 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 
 type TokenInfo = {
-  id: string;
   type: string;
-  expiresAt: string;
   patient: { name: string };
   trip: {
-    id: string;
-    status: string;
     route: {
       origin: string;
       destination: string;
@@ -18,27 +14,6 @@ type TokenInfo = {
       scheduledAt: string | null;
     };
   };
-};
-
-const TYPE_LABEL: Record<string, string> = {
-  CONFIRMATION: 'Confirmar Viagem',
-  BOARDING:     'Confirmar Embarque',
-  RETURN:       'Solicitar Retorno',
-  REBOOK:       'Reagendar Viagem',
-};
-
-const TYPE_DESCRIPTION: Record<string, string> = {
-  CONFIRMATION: 'Por favor, confirme sua presença para a viagem abaixo.',
-  BOARDING:     'O motorista está aguardando. Confirme seu embarque.',
-  RETURN:       'Solicite o transporte de retorno quando estiver pronto.',
-  REBOOK:       'Solicite o reagendamento desta viagem.',
-};
-
-const TYPE_BUTTON_COLOR: Record<string, string> = {
-  CONFIRMATION: 'bg-blue-600 hover:bg-blue-700',
-  BOARDING:     'bg-slate-600',
-  RETURN:       'bg-cyan-600 hover:bg-cyan-700',
-  REBOOK:       'bg-amber-600 hover:bg-amber-700',
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3010';
@@ -50,8 +25,8 @@ export default function TokenPage() {
   const [info, setInfo] = useState<TokenInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState(false);
-  const [acting, setActing] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -65,41 +40,31 @@ export default function TokenPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  async function handleAction() {
+  async function confirmPresence() {
     if (!token) return;
-    setActing(true);
+    setConfirming(true);
     try {
-      const res = await fetch(`${API_BASE}/trip-tokens/${token}/use`, {
+      const response = await fetch(`${API_BASE}/trip-tokens/${token}/use`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      if (!res.ok) {
-        const e = await res.json();
-        throw new Error(e?.message ?? 'Erro ao processar solicitação.');
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body?.message ?? 'Não foi possível confirmar.');
       }
       setDone(true);
     } catch (e: any) {
-      setError(e?.message ?? 'Erro ao processar solicitação.');
+      setError(e?.message ?? 'Não foi possível confirmar.');
     } finally {
-      setActing(false);
+      setConfirming(false);
     }
   }
 
-  const formatDate = (dateStr: string) =>
-    new Date(dateStr).toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'America/Sao_Paulo',
-    });
-
   if (loading) {
     return (
-      <div className='flex min-h-screen items-center justify-center bg-slate-900'>
-        <div className='text-slate-400'>Carregando…</div>
+      <div className='flex min-h-screen items-center justify-center bg-slate-900 text-slate-400'>
+        Carregando...
       </div>
     );
   }
@@ -107,24 +72,9 @@ export default function TokenPage() {
   if (error) {
     return (
       <div className='flex min-h-screen items-center justify-center bg-slate-900 p-4'>
-        <div className='w-full max-w-md rounded-xl border border-red-700 bg-slate-800 p-6 text-center'>
-          <div className='mb-3 text-4xl'>⚠️</div>
-          <h1 className='mb-2 text-xl font-bold text-red-400'>Token Inválido</h1>
-          <p className='text-sm text-slate-400'>{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (done) {
-    return (
-      <div className='flex min-h-screen items-center justify-center bg-slate-900 p-4'>
-        <div className='w-full max-w-md rounded-xl border border-emerald-700 bg-slate-800 p-6 text-center'>
-          <div className='mb-3 text-5xl'>✅</div>
-          <h1 className='mb-2 text-xl font-bold text-emerald-400'>Confirmado!</h1>
-          <p className='text-sm text-slate-400'>
-            Sua solicitação foi registrada com sucesso. O operador será notificado.
-          </p>
+        <div className='w-full max-w-md rounded-2xl border border-red-900/50 bg-slate-800 p-6 text-center'>
+          <h1 className='text-xl font-bold text-red-300'>Link inválido</h1>
+          <p className='mt-2 text-sm text-slate-400'>{error}</p>
         </div>
       </div>
     );
@@ -132,55 +82,69 @@ export default function TokenPage() {
 
   if (!info) return null;
 
-  const route = info.trip.route;
-  const tripDate = route.scheduledAt ?? route.date;
-  const label = TYPE_LABEL[info.type] ?? info.type;
-  const description = TYPE_DESCRIPTION[info.type] ?? '';
-  const btnColor = TYPE_BUTTON_COLOR[info.type] ?? 'bg-blue-600 hover:bg-blue-700';
-  const boardingDisabled = info.type === 'BOARDING';
+  const fullName = info.patient.name ?? '';
+  const firstName = fullName.trim().split(/\s+/)[0] ?? fullName;
+  const operationDateRef = info.trip.route.scheduledAt ?? info.trip.route.date;
+  const dateLabel = new Date(operationDateRef).toLocaleDateString('pt-BR');
+  const timeLabel = new Date(operationDateRef).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  if (done) {
+    return (
+      <div className='flex min-h-screen items-center justify-center bg-slate-900 p-4'>
+        <div className='w-full max-w-md rounded-2xl border border-emerald-900/50 bg-slate-800 p-6 text-center'>
+          <div className='text-5xl'>✅</div>
+          <h1 className='mt-3 text-2xl font-bold text-emerald-300'>Presença confirmada</h1>
+          <p className='mt-2 text-sm text-slate-400'>
+            Obrigado, {firstName}. O status da operação foi atualizado para <strong>CONFIRMED</strong>.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className='flex min-h-screen flex-col items-center justify-center bg-slate-900 p-4'>
+    <div className='flex min-h-screen items-center justify-center bg-slate-900 p-4'>
       <div className='w-full max-w-md space-y-4'>
-        {/* Logo / Marca */}
         <div className='text-center'>
-          <h1 className='text-2xl font-bold text-blue-400'>PRAEM OPS</h1>
-          <p className='text-xs text-slate-500'>Central de Transporte SUS</p>
+          <h1 className='text-2xl font-bold text-cyan-300'>PRAEM OPS</h1>
+          <p className='text-xs text-slate-500'>Confirmação de presença</p>
         </div>
 
-        {/* Card principal */}
-        <div className='rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-4'>
+        <div className='space-y-4 rounded-2xl border border-slate-700 bg-slate-800 p-6'>
           <div>
-            <p className='text-xs text-slate-500 uppercase tracking-wide'>Paciente</p>
-            <p className='text-lg font-semibold text-slate-100'>{info.patient.name}</p>
+            <p className='text-xs uppercase tracking-wider text-slate-500'>Paciente</p>
+            <p className='text-lg font-semibold text-slate-100'>{firstName}</p>
           </div>
-
           <div>
-            <p className='text-xs text-slate-500 uppercase tracking-wide'>Viagem</p>
-            <p className='text-sm text-slate-300'>
-              {route.origin} → {route.destination}
-            </p>
-            <p className='text-sm text-slate-400'>{formatDate(tripDate)}</p>
+            <p className='text-xs uppercase tracking-wider text-slate-500'>Data</p>
+            <p className='text-sm text-slate-200'>{dateLabel}</p>
           </div>
-
-          <div className='rounded-lg border border-slate-600 bg-slate-700/50 p-3'>
-            <p className='text-sm text-slate-300'>{description}</p>
+          <div>
+            <p className='text-xs uppercase tracking-wider text-slate-500'>Horário</p>
+            <p className='text-sm text-slate-200'>{timeLabel}</p>
           </div>
-
-          <div className='text-xs text-slate-500'>
-            Válido até: {formatDate(info.expiresAt)}
+          <div>
+            <p className='text-xs uppercase tracking-wider text-slate-500'>Saída</p>
+            <p className='text-sm text-slate-200'>{info.trip.route.origin}</p>
+          </div>
+          <div>
+            <p className='text-xs uppercase tracking-wider text-slate-500'>Destino</p>
+            <p className='text-sm text-slate-200'>{info.trip.route.destination}</p>
           </div>
         </div>
 
-        {/* Botão de ação */}
         <button
-          onClick={boardingDisabled ? undefined : handleAction}
-          disabled={acting || boardingDisabled}
-          className={`w-full rounded-xl py-3 text-base font-semibold text-white transition-colors disabled:opacity-50 ${btnColor}`}
+          onClick={confirmPresence}
+          disabled={confirming}
+          className='w-full rounded-xl bg-cyan-700 px-4 py-3 text-base font-semibold text-white transition-colors hover:bg-cyan-600 disabled:opacity-50'
         >
-          {boardingDisabled ? 'Embarque somente pelo app do motorista' : acting ? 'Processando…' : label}
+          {confirming ? 'Confirmando...' : 'Confirmar presença'}
         </button>
       </div>
     </div>
   );
 }
+

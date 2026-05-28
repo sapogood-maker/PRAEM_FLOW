@@ -26,6 +26,7 @@ export interface SendMessageOptions {
 }
 
 export type NotificationTemplateKey =
+  | 'transport_confirmation'
   | 'appointment_confirmation'
   | 'driver_arriving'
   | 'route_started'
@@ -39,6 +40,37 @@ export type NotificationTemplateKey =
   | 'stale_recovery';
 
 export const DEFAULT_TEMPLATES: Record<NotificationTemplateKey, { title: string; message: string; variables: string[] }> = {
+  transport_confirmation: {
+    title: 'Confirmação de Transporte',
+    message: `🚐 PRAEM - Transporte de Saúde
+
+Olá, {{first_name}}.
+
+Seu transporte foi agendado com sucesso.
+
+📅 Data: {{operation_date}}
+🕒 Horário: {{operation_time}}
+📍 Saída: {{pickup_location}}
+🏥 Destino: {{destination}}
+
+👨‍✈️ Motorista: {{driver_name}}
+
+📲 Confirme sua presença:
+{{confirmation_link}}
+
+🎫 QR Code:
+{{qr_code}}`,
+    variables: [
+      'first_name',
+      'operation_date',
+      'operation_time',
+      'pickup_location',
+      'destination',
+      'driver_name',
+      'confirmation_link',
+      'qr_code',
+    ],
+  },
   appointment_confirmation: {
     title: 'Confirmação de Agendamento',
     message: 'Seu transporte PRAEM foi agendado para {{date}} às {{time}}. Confirme sua presença.',

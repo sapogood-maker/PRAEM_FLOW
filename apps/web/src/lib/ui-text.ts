@@ -12,6 +12,7 @@ export const UI_TEXT = {
     alerts: 'Replay Operacional',
     reports: 'Relatórios',
     settings: 'Configurações',
+    messageTemplates: 'Templates de Mensagens',
   },
   topBar: {
     homologationBanner: 'MODO HOMOLOGAÇÃO · OPERAÇÕES SIMULADAS',

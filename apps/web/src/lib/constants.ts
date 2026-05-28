@@ -19,5 +19,5 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { href: '/drivers', label: UI_TEXT.menu.drivers, icon: UserRoundCog },
   { href: '/replay', label: UI_TEXT.menu.alerts, icon: BellRing },
   { href: '/daily-op', label: UI_TEXT.menu.reports, icon: ChartNoAxesCombined },
-  { href: '/admin/whatsapp', label: UI_TEXT.menu.settings, icon: Settings2 },
+  { href: '/admin/notification-templates', label: `${UI_TEXT.menu.settings} · ${UI_TEXT.menu.messageTemplates}`, icon: Settings2 },
 ];

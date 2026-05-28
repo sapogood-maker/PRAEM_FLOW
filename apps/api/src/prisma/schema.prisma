@@ -430,6 +430,8 @@ model Trip {
 }
 
 enum TripStatus {
+  IMPORTED
+  PENDING_CONFIRMATION
   SCHEDULED
   CONFIRMED
   BOARDING

@@ -142,7 +142,89 @@ export class WhatsappService {
   // ─── Operational Event Helpers ─────────────────────────────────────────────
 
   async notifyAppointmentConfirmed(tenantId: string, patientId: string, tripId: string, vars: Record<string, string>) {
-    return this.sendForPatient(tenantId, patientId, tripId, 'appointment_confirmation', vars);
+    const trip = await this.prisma.trip.findFirst({
+      where: { id: tripId, tenantId, patientId },
+      include: {
+        patient: { select: { id: true, name: true, phone: true } },
+        route: {
+          select: {
+            date: true,
+            scheduledAt: true,
+            origin: true,
+            destination: true,
+            driver: { select: { user: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+
+    if (!trip?.patient?.phone) {
+      this.logger.warn(`[WHATSAPP] Patient ${patientId} has no phone — skipping key=transport_confirmation`);
+      return { status: 'SKIPPED' };
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    const existingToken = await this.prisma.tripToken.findFirst({
+      where: {
+        tenantId,
+        tripId,
+        patientId,
+        type: 'CONFIRMATION',
+        usedAt: null,
+        expiresAt: { gte: now },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const confirmationToken =
+      existingToken ??
+      (await this.prisma.tripToken.create({
+        data: {
+          tenantId,
+          tripId,
+          patientId,
+          type: 'CONFIRMATION',
+          expiresAt,
+        },
+      }));
+
+    await this.prisma.trip.updateMany({
+      where: {
+        id: tripId,
+        tenantId,
+        status: { in: ['IMPORTED', 'SCHEDULED'] as any },
+      },
+      data: { status: 'PENDING_CONFIRMATION' as any },
+    });
+
+    const operationDateRef = trip.route.scheduledAt ?? trip.route.date;
+    const firstName = (trip.patient.name ?? '').trim().split(/\s+/)[0] ?? '';
+    const operationDate = vars.operation_date ?? vars.date ?? operationDateRef.toLocaleDateString('pt-BR');
+    const operationTime =
+      vars.operation_time ??
+      vars.time ??
+      operationDateRef.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const confirmationLink = `${process.env.PUBLIC_APP_URL ?? 'http://localhost:8087'}/t/${confirmationToken.token}`;
+
+    return this.sendFromTemplate({
+      tenantId,
+      patientId,
+      tripId,
+      routeId: trip.routeId,
+      phone: trip.patient.phone,
+      templateKey: 'transport_confirmation',
+      variables: {
+        first_name: firstName,
+        operation_date: operationDate,
+        operation_time: operationTime,
+        pickup_location: vars.pickup_location ?? trip.route.origin ?? '',
+        destination: vars.destination ?? trip.route.destination ?? '',
+        driver_name: vars.driver_name ?? trip.route.driver?.user?.name ?? 'A definir',
+        confirmation_link: vars.confirmation_link ?? confirmationLink,
+        qr_code: vars.qr_code ?? confirmationToken.token,
+      },
+    });
   }
 
   async notifyDriverArriving(tenantId: string, patientId: string, tripId: string, routeId: string, vars: Record<string, string>) {

@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { BellRing, ChartNoAxesCombined, Command, Settings2, Users, Route, BusFront, UserRoundCog, Upload } from 'lucide-react';
+import { BellRing, ChartNoAxesCombined, Command, Settings2, Users, Route, BusFront, UserRoundCog, Upload, ListOrdered } from 'lucide-react';
 import { UI_TEXT } from './ui-text';
 
 export const APP_NAME = 'PRAEM OPS';
@@ -13,6 +13,7 @@ export type NavItemConfig = {
 export const NAV_ITEMS: NavItemConfig[] = [
   { href: '/', label: UI_TEXT.menu.operations, icon: Command },
   { href: '/schedule', label: UI_TEXT.menu.trips, icon: Upload },
+  { href: '/queue', label: UI_TEXT.menu.operationalQueue, icon: ListOrdered },
   { href: '/routes', label: UI_TEXT.menu.routes, icon: Route },
   { href: '/patients', label: UI_TEXT.menu.patients, icon: Users },
   { href: '/vehicles', label: UI_TEXT.menu.vehicles, icon: BusFront },

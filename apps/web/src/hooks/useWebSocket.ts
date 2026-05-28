@@ -273,8 +273,24 @@ export function useWebSocket(enabled = true) {
       record(`🏁 Rota finalizada: ${data.routeId}`, 'route');
     });
 
-    socket.on('queue:update', (data: { patientId: string; action: string }) => {
-      record(`Fila atualizada — Paciente ${data.patientId}`, 'queue');
+    socket.on('queue:update', (data: { patientId?: string; id?: string; action?: string }) => {
+      record(`Fila atualizada — ${data.patientId ?? data.id ?? 'operação'}`, 'queue');
+    });
+
+    socket.on('queue.updated', (data: { patientId?: string; id?: string; action?: string }) => {
+      record(`Fila atualizada — ${data.patientId ?? data.id ?? 'operação'}`, 'queue');
+    });
+
+    socket.on('queue.priority_changed', (data: { id?: string; priority?: string }) => {
+      record(`Prioridade alterada: ${data.id ?? 'fila'} → ${data.priority ?? '—'}`, 'queue');
+    });
+
+    socket.on('operational.alert', (data: { message?: string; severity?: string }) => {
+      record(`🚨 ${data.message ?? 'Alerta operacional'}`, 'alert');
+    });
+
+    socket.on('driver.offline', (data: { driverId?: string }) => {
+      record(`⚠️ Motorista offline: ${data.driverId ?? 'desconhecido'}`, 'alert');
     });
 
     socket.on('route:status', (data: { routeId: string; status: string }) => {

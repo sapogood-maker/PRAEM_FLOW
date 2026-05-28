@@ -264,25 +264,62 @@ export class QueuesService {
     return { deleted: true };
   }
 
-  aiSuggest(tenantId: string) {
-    return {
-      suggestions: [
-        {
-          type: 'GROUPING',
-          group: 'Cluster Prioritário',
-          reason: 'Pacientes críticos — embarque prioritário imediato',
-          action: 'ASSIGN_VEHICLE',
-        },
-        {
-          type: 'RECURRENCE_BATCH',
-          group: 'Lote Recorrente',
-          reason: 'Tratamento recorrente — mesma rota, mesma janela de horário',
-          action: 'CREATE_ROUTE',
-        },
-      ],
-      tenantId,
-    };
+  async aiSuggest(tenantId: string) {
+    const queue = await this.prisma.operationalQueue.findMany({
+      where: { tenantId, status: { in: ['WAITING', 'ASSIGNED', 'SCHEDULED'] as any[] } },
+      include: {
+        patient: { select: { id: true, name: true, mobility: true } },
+        healthcareLocation: { select: { id: true, name: true } },
+      },
+      orderBy: [{ appointmentDate: 'asc' }, { createdAt: 'asc' }],
+      take: 200,
+    });
+
+    const byHospitalHour = new Map<string, typeof queue>();
+    for (const item of queue) {
+      const destinationId = item.healthcareLocationId ?? item.destination ?? 'sem-destino';
+      const slot = `${item.appointmentDate.toISOString().slice(0, 10)}-${String(item.appointmentDate.getHours()).padStart(2, '0')}`;
+      const key = `${destinationId}:${slot}`;
+      const rows = byHospitalHour.get(key) ?? [];
+      rows.push(item);
+      byHospitalHour.set(key, rows);
+    }
+
+    const suggestions: Array<{ type: string; group: string; reason: string; action: string; queueIds?: string[] }> = [];
+    for (const [key, rows] of byHospitalHour.entries()) {
+      if (rows.length < 2) continue;
+      suggestions.push({
+        type: 'GROUPING',
+        group: rows[0].healthcareLocation?.name ?? rows[0].destination ?? key,
+        reason: `${rows.length} pacientes para o mesmo destino e janela de horário`,
+        action: 'CREATE_ROUTE',
+        queueIds: rows.map((r) => r.id),
+      });
+    }
+
+    for (const item of queue) {
+      if (item.patient?.mobility !== 'WHEELCHAIR') continue;
+      suggestions.push({
+        type: 'VEHICLE_MATCH',
+        group: item.patient?.name ?? item.patientId,
+        reason: 'Paciente cadeirante — sugerir veículo adaptado',
+        action: 'ASSIGN_VEHICLE',
+        queueIds: [item.id],
+      });
+    }
+
+    for (const item of queue) {
+      if (!item.recurrenceType && !String(item.destination ?? '').toUpperCase().includes('HEMODI')) continue;
+      suggestions.push({
+        type: 'RECURRENCE_BATCH',
+        group: item.patient?.name ?? item.patientId,
+        reason: 'Operação recorrente detectada — sugerir rota fixa',
+        action: 'GROUP_RECURRING',
+        queueIds: [item.id],
+      });
+    }
+
+    return { tenantId, suggestions };
   }
 }
-
 

@@ -5,6 +5,7 @@ export const UI_TEXT = {
   menu: {
     operations: 'Operação do Dia',
     trips: 'Importar Operação',
+    operationalQueue: 'Fila Operacional',
     routes: 'Rotas',
     patients: 'Pacientes',
     vehicles: 'Frota',

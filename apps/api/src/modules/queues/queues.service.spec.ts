@@ -36,9 +36,31 @@ describe('QueuesService', () => {
     expect(result).toHaveProperty('id');
   });
 
-  it('returns ai suggestions', () => {
+  it('returns ai suggestions', async () => {
     const service = new QueuesService(mockPrisma, mockGateway);
-    const result = service.aiSuggest('tenant-1');
+    (mockPrisma.operationalQueue.findMany as jest.Mock).mockResolvedValueOnce([
+      {
+        id: 'q1',
+        patientId: 'p1',
+        appointmentDate: new Date('2026-05-20T08:10:00Z'),
+        healthcareLocationId: 'loc-1',
+        destination: 'Hospital X',
+        recurrenceType: null,
+        patient: { id: 'p1', name: 'Paciente A', mobility: 'NORMAL' },
+        healthcareLocation: { id: 'loc-1', name: 'Hospital X' },
+      },
+      {
+        id: 'q2',
+        patientId: 'p2',
+        appointmentDate: new Date('2026-05-20T08:40:00Z'),
+        healthcareLocationId: 'loc-1',
+        destination: 'Hospital X',
+        recurrenceType: null,
+        patient: { id: 'p2', name: 'Paciente B', mobility: 'WHEELCHAIR' },
+        healthcareLocation: { id: 'loc-1', name: 'Hospital X' },
+      },
+    ]);
+    const result = await service.aiSuggest('tenant-1');
     expect(result.suggestions.length).toBeGreaterThan(0);
     expect(result.tenantId).toBe('tenant-1');
   });

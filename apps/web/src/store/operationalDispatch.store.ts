@@ -13,6 +13,7 @@ export interface DispatchQueueItem {
   appointmentDate: string;
   confirmationStatus?: string | null;
   notes?: string | null;
+  recurrenceType?: string | null;
   patient: { id: string; name: string; mobility: string; clinicalRisk: string };
   healthcareLocation?: {
     id: string;
@@ -55,6 +56,17 @@ export interface OperationalFilters {
   returnOnly: boolean;
 }
 
+export interface QueueAssignment {
+  vehicleId?: string;
+  driverId?: string;
+  groupKey?: string;
+  routeId?: string;
+  recurringHint?: boolean;
+  recommendedVehicleType?: string;
+  recommendationReason?: string;
+  source?: 'manual' | 'assistant';
+}
+
 const DEFAULT_FILTERS: OperationalFilters = {
   search: '',
   priority: '',
@@ -75,6 +87,8 @@ interface OperationalDispatchState {
   currentRouteDraft: RouteDraft;
   /** Operational filters for the dispatch staging area */
   operationalFilters: OperationalFilters;
+  /** Row-level operational assignments in queue workflow */
+  queueAssignments: Record<string, QueueAssignment>;
 
   // ── Derived (not stored) ────────────────────────────────────────────────────
   /** All pendingDispatch IDs — derived, no separate state */
@@ -89,6 +103,12 @@ interface OperationalDispatchState {
   updateRouteDraft: (partial: Partial<RouteDraft>) => void;
   clearRouteDraft: () => void;
   updateFilters: (partial: Partial<OperationalFilters>) => void;
+  assignQueueVehicle: (queueId: string, vehicleId: string) => void;
+  assignQueueDriver: (queueId: string, driverId: string) => void;
+  setQueueGroup: (queueId: string, groupKey: string) => void;
+  setQueueRoute: (queueId: string, routeId: string) => void;
+  clearQueueAssignment: (queueId: string) => void;
+  applyQueueAssignments: (assignments: Record<string, Partial<QueueAssignment>>, source?: 'manual' | 'assistant') => void;
 
   // ── Legacy compat ────────────────────────────────────────────────────────────
   toggleSelectedPatient: (queueId: string) => void;
@@ -104,6 +124,7 @@ export const useOperationalDispatchStore = create<OperationalDispatchState>()(
       scheduledRouteIds: [],
       currentRouteDraft: DEFAULT_ROUTE_DRAFT,
       operationalFilters: DEFAULT_FILTERS,
+      queueAssignments: {},
 
       // Derived — always in sync with pendingDispatch
       get selectedPatients() {
@@ -138,6 +159,73 @@ export const useOperationalDispatchStore = create<OperationalDispatchState>()(
           operationalFilters: { ...s.operationalFilters, ...partial },
         })),
 
+      assignQueueVehicle: (queueId, vehicleId) =>
+        set((s) => ({
+          queueAssignments: {
+            ...s.queueAssignments,
+            [queueId]: {
+              ...s.queueAssignments[queueId],
+              vehicleId,
+              source: 'manual',
+            },
+          },
+        })),
+
+      assignQueueDriver: (queueId, driverId) =>
+        set((s) => ({
+          queueAssignments: {
+            ...s.queueAssignments,
+            [queueId]: {
+              ...s.queueAssignments[queueId],
+              driverId,
+              source: 'manual',
+            },
+          },
+        })),
+
+      setQueueGroup: (queueId, groupKey) =>
+        set((s) => ({
+          queueAssignments: {
+            ...s.queueAssignments,
+            [queueId]: {
+              ...s.queueAssignments[queueId],
+              groupKey,
+              source: 'manual',
+            },
+          },
+        })),
+
+      setQueueRoute: (queueId, routeId) =>
+        set((s) => ({
+          queueAssignments: {
+            ...s.queueAssignments,
+            [queueId]: {
+              ...s.queueAssignments[queueId],
+              routeId,
+              source: 'manual',
+            },
+          },
+        })),
+
+      clearQueueAssignment: (queueId) =>
+        set((s) => {
+          const { [queueId]: _removed, ...rest } = s.queueAssignments;
+          return { queueAssignments: rest };
+        }),
+
+      applyQueueAssignments: (assignments, source = 'assistant') =>
+        set((s) => {
+          const next = { ...s.queueAssignments };
+          for (const [queueId, patch] of Object.entries(assignments)) {
+            next[queueId] = {
+              ...next[queueId],
+              ...patch,
+              source,
+            };
+          }
+          return { queueAssignments: next };
+        }),
+
       // ── Legacy compat ──────────────────────────────────────────────────────
       /** Toggle is now a no-op alias for removeFromDispatch (item is already in pendingDispatch) */
       toggleSelectedPatient: (queueId) => {
@@ -162,6 +250,7 @@ export const useOperationalDispatchStore = create<OperationalDispatchState>()(
         pendingDispatch: state.pendingDispatch,
         currentRouteDraft: state.currentRouteDraft,
         operationalFilters: state.operationalFilters,
+        queueAssignments: state.queueAssignments,
       }),
     },
   ),

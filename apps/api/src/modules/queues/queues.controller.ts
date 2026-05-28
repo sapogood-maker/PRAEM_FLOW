@@ -29,10 +29,12 @@ export class QueuesController {
     @Query('slaStatus') slaStatus?: string,
     @Query('confirmationStatus') confirmationStatus?: string,
     @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     return this.queuesService.findAll(req.user.tenantId, {
       queueType, priority, status, slaStatus, confirmationStatus,
       page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 20,
     });
   }
 
@@ -61,7 +63,7 @@ export class QueuesController {
   updateStatus(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { status: string; [key: string]: unknown }) {
     const { status, ...extra } = body;
     const safeStatus = VALID_QUEUE_STATUSES.includes(status) ? status : 'WAITING';
-    const driverOnlyStatuses = ['BOARDING', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED', 'NO_SHOW'];
+    const driverOnlyStatuses = ['IN_TRANSIT', 'ARRIVED'];
     if (driverOnlyStatuses.includes(safeStatus) && req.user.role !== 'DRIVER') {
       throw new ForbiddenException('Dispatch can only assign/schedule passengers; boarding and trip progress are driver-only');
     }

@@ -713,7 +713,7 @@ model Operation {
   notes                String?
   createdAutomatically Boolean         @default(false)
   createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  updatedAt            DateTime?       @updatedAt
   tenant               Tenant          @relation(fields: [tenantId], references: [id])
   shifts               OperationShift[]
   queues               OperationalQueue[]
@@ -749,14 +749,14 @@ enum OperationStatus {
 model OperationShift {
   id               String         @id @default(uuid())
   tenantId         String
-  operationId      String
+  operationId      String?
   name             String
   startTime        String         // "06:00"
   endTime          String         // "12:00"
   status           ShiftStatus    @default(PENDING)
   createdAt        DateTime       @default(now())
   tenant           Tenant         @relation(fields: [tenantId], references: [id])
-  operation        Operation      @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operation        Operation?     @relation(fields: [operationId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([operationId])

@@ -715,7 +715,8 @@ model Operation {
   createdAt            DateTime        @default(now())
   updatedAt            DateTime?       @updatedAt
   tenant               Tenant          @relation(fields: [tenantId], references: [id])
-  shifts               OperationShift[]
+  shifts               OperationShift[] @relation("OperationShifts")
+  legacyShifts         OperationShift[] @relation("LegacyOperationShifts")
   queues               OperationalQueue[]
   routes               Route[]
   trips                Trip[]
@@ -749,6 +750,7 @@ enum OperationStatus {
 model OperationShift {
   id               String         @id @default(uuid())
   tenantId         String
+  dailyOperationId  String?
   operationId      String?
   name             String
   startTime        String         // "06:00"
@@ -756,9 +758,11 @@ model OperationShift {
   status           ShiftStatus    @default(PENDING)
   createdAt        DateTime       @default(now())
   tenant           Tenant         @relation(fields: [tenantId], references: [id])
-  operation        Operation?     @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  dailyOperation   Operation?     @relation("LegacyOperationShifts", fields: [dailyOperationId], references: [id], onDelete: SetNull)
+  operation        Operation?     @relation("OperationShifts", fields: [operationId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
+  @@index([dailyOperationId])
   @@index([operationId])
 }
 

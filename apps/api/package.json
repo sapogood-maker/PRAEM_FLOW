@@ -11,6 +11,8 @@
     "seed": "ts-node -r tsconfig-paths/register src/prisma/seed.ts",
     "seed:homolog": "ts-node -r tsconfig-paths/register src/prisma/seed.homolog.ts",
     "db:migrate": "prisma migrate deploy",
+    "db:migrate:deploy": "prisma migrate deploy --schema=src/prisma/schema.prisma",
+    "db:migrate:status": "prisma migrate status --schema=src/prisma/schema.prisma",
     "db:generate": "prisma generate"
   },
   "prisma": {

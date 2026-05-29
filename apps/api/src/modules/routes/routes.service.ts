@@ -27,6 +27,7 @@ export class RoutesService {
     const statuses = Array.isArray(status) ? status : (typeof status === 'string' ? status.split(',') : undefined);
     const where: any = {
       tenantId,
+      trips: { some: {} },
       ...(statuses && { status: { in: statuses as any[] } }),
       ...(driverId && { driverId }),
       ...(vehicleId && { vehicleId }),
@@ -442,8 +443,8 @@ export class RoutesService {
     if (payload.date && typeof payload.date === 'string') {
       payload.date = new Date(payload.date);
     }
-    if (!payload.driverId && !payload.vehicleId && queueIds.length === 0) {
-      throw new BadRequestException('Route requires a driver, a vehicle, or queue items.');
+    if (queueIds.length === 0) {
+      throw new BadRequestException('Rotas devem conter pelo menos um paciente. Selecione itens da fila operacional.');
     }
     const operationDate = new Date(payload.date ?? payload.scheduledAt ?? Date.now());
     operationDate.setHours(0, 0, 0, 0);

@@ -70,8 +70,8 @@ export class DashboardService {
       this.prisma.operationalQueue.count({
         where: { tenantId, priority: 'CRITICAL', status: { in: ['WAITING_DISPATCH', 'WAITING', 'ASSIGNED'] } },
       }),
-      // Rotas ativas
-      this.prisma.route.count({ where: { tenantId, status: 'ACTIVE' } }),
+      // Rotas ativas (apenas rotas com pacientes)
+      this.prisma.route.count({ where: { tenantId, status: 'ACTIVE', trips: { some: {} } } }),
       // Viagens concluídas
       this.prisma.trip.count({ where: { tenantId, status: 'COMPLETED' } }),
       // Veículos ativos
@@ -86,9 +86,9 @@ export class DashboardService {
       }),
       // Faltas (NO_SHOW)
       this.prisma.trip.count({ where: { tenantId, status: 'NO_SHOW' } }),
-      // Km estimado
+      // Km estimado (apenas rotas com pacientes)
       this.prisma.route.findMany({
-        where: { tenantId, date: { gte: today, lt: tomorrow }, estimatedKm: { not: null } },
+        where: { tenantId, date: { gte: today, lt: tomorrow }, estimatedKm: { not: null }, trips: { some: {} } },
         select: { estimatedKm: true },
       }),
     ]);

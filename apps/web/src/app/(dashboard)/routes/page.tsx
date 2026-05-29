@@ -52,7 +52,7 @@ export default function RoutesPage() {
     },
   });
 
-  const items = data?.items ?? [];
+  const items = (data?.items ?? []).filter((r: any) => (r.trips?.length ?? 0) > 0);
 
   return (
     <section className='space-y-4'>

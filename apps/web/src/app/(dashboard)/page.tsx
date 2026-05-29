@@ -233,7 +233,9 @@ export default function DashboardPage() {
 
   const kpis = data ?? EMPTY_KPIS;
   const queueItems = (queueData?.items ?? []) as DashboardQueueItem[];
-  const routes = (Array.isArray(routesData) ? routesData : routesData?.items ?? []) as DashboardRoute[];
+  const routes = (Array.isArray(routesData) ? routesData : routesData?.items ?? []).filter(
+    (r) => (r.trips?.length ?? 0) > 0,
+  ) as DashboardRoute[];
   const activeRouteCount = Object.keys(routeOperationalStates).length;
   const liveSignals = activityFeed.filter((event) => event.type === 'alert').length;
 

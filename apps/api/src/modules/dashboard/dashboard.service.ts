@@ -68,7 +68,7 @@ export class DashboardService {
       }),
       // Críticos
       this.prisma.operationalQueue.count({
-        where: { tenantId, priority: 'CRITICAL', status: { in: ['WAITING', 'ASSIGNED'] } },
+        where: { tenantId, priority: 'CRITICAL', status: { in: ['WAITING_DISPATCH', 'WAITING', 'ASSIGNED'] } },
       }),
       // Rotas ativas
       this.prisma.route.count({ where: { tenantId, status: 'ACTIVE' } }),

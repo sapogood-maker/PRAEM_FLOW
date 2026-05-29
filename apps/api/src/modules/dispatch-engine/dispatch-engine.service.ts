@@ -4,6 +4,8 @@ import {
   DispatchEngineVehicle,
   DispatchRouteGroup,
   DispatchVehicleType,
+  OperationalGroupingInput,
+  OperationalGroupingSuggestion,
   PATIENT_VEHICLE_COMPATIBILITY,
   PatientPriority,
   PatientRequirement,
@@ -100,6 +102,59 @@ export class DispatchEngineService {
 
   isCompatible(requirement: PatientRequirement, vehicleType: DispatchVehicleType) {
     return PATIENT_VEHICLE_COMPATIBILITY[requirement].includes(vehicleType);
+  }
+
+  suggestOperationalGrouping(input: {
+    demands: OperationalGroupingInput[];
+    vehicleCapacity?: number;
+  }): {
+    suggestions: OperationalGroupingSuggestion[];
+    ungroupedDemandIds: string[];
+  } {
+    const demands = input.demands ?? [];
+    const preferredCapacity = Math.max(1, Math.floor(input.vehicleCapacity ?? 4));
+    const buckets = new Map<string, OperationalGroupingInput[]>();
+
+    for (const demand of demands) {
+      const slot = this.resolveAppointmentWindow(demand.appointmentTime);
+      const mobility = demand.stretcher ? 'STRETCHER' : demand.wheelchair ? 'WHEELCHAIR' : 'STANDARD';
+      const key = `${this.normalizeKey(demand.destination)}|${slot}|${mobility}`;
+      const rows = buckets.get(key) ?? [];
+      rows.push(demand);
+      buckets.set(key, rows);
+    }
+
+    const suggestions: OperationalGroupingSuggestion[] = [];
+    const ungroupedDemandIds: string[] = [];
+
+    for (const [key, rows] of buckets.entries()) {
+      if (rows.length <= 1) {
+        rows.forEach((row) => ungroupedDemandIds.push(row.demandId));
+        continue;
+      }
+
+      const highestPriority = rows.reduce<PatientPriority>(
+        (acc, cur) => (this.priorityRank(cur.priority) > this.priorityRank(acc) ? cur.priority : acc),
+        'LOW',
+      );
+      const destination = rows[0].destination;
+      const appointmentWindow = this.resolveAppointmentWindow(rows[0].appointmentTime);
+
+      suggestions.push({
+        groupingKey: key,
+        destination,
+        appointmentWindow,
+        demandIds: rows.map((row) => row.demandId),
+        totalPatients: rows.length,
+        wheelchairCount: rows.filter((row) => row.wheelchair).length,
+        stretcherCount: rows.filter((row) => row.stretcher).length,
+        returnTripCount: rows.filter((row) => row.returnTrip).length,
+        highestPriority,
+        recommendedMinCapacity: Math.max(preferredCapacity, rows.length),
+      });
+    }
+
+    return { suggestions, ungroupedDemandIds };
   }
 
   private assignByRequirement(args: {
@@ -321,9 +376,24 @@ export class DispatchEngineService {
     return rank[priority];
   }
 
+  private resolveAppointmentWindow(value: string | Date): string {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return 'unknown';
+    const hour = String(date.getHours()).padStart(2, '0');
+    return `${date.toISOString().slice(0, 10)} ${hour}:00`;
+  }
+
+  private normalizeKey(value: string): string {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
   private nextRouteGroupId() {
     this.routeCounter += 1;
     return `RG-${String(this.routeCounter).padStart(4, '0')}`;
   }
 }
-

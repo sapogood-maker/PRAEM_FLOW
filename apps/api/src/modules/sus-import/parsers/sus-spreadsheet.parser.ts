@@ -4,7 +4,9 @@ import { Readable } from 'stream';
 
 export const SUS_IMPORT_COLUMNS = [
   'patient_name',
+  'sus_card',
   'cpf',
+  'birth_date',
   'phone',
   'origin_city',
   'destination_hospital',
@@ -22,7 +24,9 @@ type SusImportColumn = (typeof SUS_IMPORT_COLUMNS)[number];
 
 const COLUMN_ALIASES: Record<SusImportColumn, string[]> = {
   patient_name: ['patient_name', 'nome_paciente', 'nome', 'paciente', 'usuario', 'beneficiario'],
+  sus_card: ['sus_card', 'cartao_sus', 'cartao sus', 'cns', 'numero_cns', 'sus', 'cartao'],
   cpf: ['cpf', 'documento', 'patient_cpf'],
+  birth_date: ['birth_date', 'data_nascimento', 'nascimento', 'patient_birth_date'],
   phone: ['phone', 'telefone', 'celular', 'patient_phone'],
   origin_city: ['origin_city', 'cidade_origem', 'origem_cidade', 'cidade_origem_paciente'],
   destination_hospital: ['destination_hospital', 'hospital_destino', 'destino_hospital', 'hospital', 'clinica', 'destino', 'unidade'],

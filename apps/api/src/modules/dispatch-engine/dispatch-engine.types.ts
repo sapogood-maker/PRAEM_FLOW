@@ -41,6 +41,29 @@ export interface UnassignedPatient {
   reason: string;
 }
 
+export interface OperationalGroupingInput {
+  demandId: string;
+  destination: string;
+  appointmentTime: string | Date;
+  priority: PatientPriority;
+  wheelchair: boolean;
+  stretcher: boolean;
+  returnTrip: boolean;
+}
+
+export interface OperationalGroupingSuggestion {
+  groupingKey: string;
+  destination: string;
+  appointmentWindow: string;
+  demandIds: string[];
+  totalPatients: number;
+  wheelchairCount: number;
+  stretcherCount: number;
+  returnTripCount: number;
+  highestPriority: PatientPriority;
+  recommendedMinCapacity: number;
+}
+
 export const SUPPORTED_VEHICLE_TYPES: DispatchVehicleType[] = [
   'CAR',
   'VAN',
@@ -54,4 +77,3 @@ export const PATIENT_VEHICLE_COMPATIBILITY: Record<PatientRequirement, DispatchV
   WHEELCHAIR: ['ADAPTED_VAN', 'AMBULANCE', 'ADVANCED_AMBULANCE'],
   STANDARD: ['CAR', 'VAN', 'ADAPTED_VAN', 'AMBULANCE', 'ADVANCED_AMBULANCE'],
 };
-

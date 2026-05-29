@@ -42,6 +42,7 @@ const STATUS_TIMESTAMP: Record<string, string> = {
 };
 
 const OPERATION_STATUS_FROM_QUEUE: Record<string, string> = {
+  WAITING_DISPATCH: 'PENDING_DISPATCH',
   WAITING: 'PENDING_DISPATCH',
   ASSIGNED: 'PENDING_DISPATCH',
   SCHEDULED: 'PENDING_DISPATCH',
@@ -335,7 +336,7 @@ export class QueuesService {
       noShowToday,
       avgWait,
     ] = await Promise.all([
-      this.prisma.operationalQueue.count({ where: { tenantId, status: 'WAITING' } }),
+      this.prisma.operationalQueue.count({ where: { tenantId, status: { in: ['WAITING_DISPATCH', 'WAITING'] as any[] } } }),
       this.prisma.operationalQueue.count({ where: { tenantId, slaStatus: 'DELAYED' } }),
       this.prisma.operationalQueue.count({ where: { tenantId, slaStatus: 'CRITICAL' } }),
       this.prisma.operationalQueue.count({
@@ -373,7 +374,7 @@ export class QueuesService {
 
   async aiSuggest(tenantId: string) {
     const queue = await this.prisma.operationalQueue.findMany({
-      where: { tenantId, status: { in: ['WAITING', 'ASSIGNED', 'SCHEDULED'] as any[] } },
+      where: { tenantId, status: { in: ['WAITING_DISPATCH', 'WAITING', 'ASSIGNED', 'SCHEDULED'] as any[] } },
       include: {
         patient: { select: { id: true, name: true, mobility: true } },
         healthcareLocation: { select: { id: true, name: true } },

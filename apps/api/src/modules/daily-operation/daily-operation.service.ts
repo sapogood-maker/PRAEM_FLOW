@@ -109,7 +109,7 @@ export class DailyOperationService {
     const [activeVehicles, activeDrivers, waitingPatients, activeRoutes] = await Promise.all([
       this.prisma.vehicle.count({ where: { tenantId, active: true, status: { in: ['AVAILABLE', 'ON_ROUTE', 'BOARDING', 'WAITING'] } } }),
       this.prisma.driver.count({ where: { tenantId, active: true, status: { in: ['AVAILABLE', 'ON_ROUTE'] } } }),
-      this.prisma.operationalQueue.count({ where: { tenantId, status: { in: ['WAITING', 'CONFIRMED', 'ASSIGNED'] } } }),
+      this.prisma.operationalQueue.count({ where: { tenantId, status: { in: ['WAITING_DISPATCH', 'WAITING', 'CONFIRMED', 'ASSIGNED'] } } }),
       this.prisma.operation.count({ where: { tenantId, status: { in: ['DISPATCHED', 'CONFIRMED', 'BOARDING', 'IN_TRANSIT', 'ARRIVED'] as any[] } } }),
     ]);
 

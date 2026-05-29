@@ -3,7 +3,10 @@ import { createHash } from 'crypto';
 
 export interface NormalizedSusRow {
   patient_name: string;
+  sus_card?: string;
   cpf: string;
+  source_cpf_provided: boolean;
+  birth_date?: string;
   phone?: string;
   origin_city: string;
   destination_hospital: string;
@@ -37,6 +40,11 @@ function buildSyntheticCpf(seed: string): string {
   return `9${digits}`;
 }
 
+function normalizeSusCard(value: string): string | undefined {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.length > 0 ? digits : undefined;
+}
+
 @Injectable()
 export class SusImportRowMapper {
   map(raw: Record<string, string>): NormalizedSusRow {
@@ -53,12 +61,18 @@ export class SusImportRowMapper {
     const specialRequirements = pick(raw, 'special_requirements') || undefined;
     const patientName = pick(raw, 'patient_name');
     const destinationHospital = pick(raw, 'destination_hospital');
+    const susCard = normalizeSusCard(pick(raw, 'sus_card'));
+    const birthDate = this.normalizeDate(pick(raw, 'birth_date')) || undefined;
     const cpfRaw = pick(raw, 'cpf').replace(/\D/g, '');
-    const cpf = cpfRaw.length === 11 ? cpfRaw : buildSyntheticCpf(`${patientName}|${phone ?? ''}|${destinationHospital}`);
+    const sourceCpfProvided = cpfRaw.length === 11;
+    const cpf = sourceCpfProvided ? cpfRaw : buildSyntheticCpf(`${patientName}|${phone ?? ''}|${destinationHospital}|${birthDate ?? ''}`);
 
     return {
       patient_name: patientName,
+      sus_card: susCard,
       cpf,
+      source_cpf_provided: sourceCpfProvided,
+      birth_date: birthDate,
       phone,
       origin_city: pick(raw, 'origin_city') || 'Sem origem informada',
       destination_hospital: destinationHospital,

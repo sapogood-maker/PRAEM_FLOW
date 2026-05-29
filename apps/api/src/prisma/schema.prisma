@@ -32,6 +32,7 @@ model Tenant {
   operationalTimelines OperationalTimeline[]
   operationEvents      OperationEvent[]
   healthcareLocations  HealthcareLocation[]
+  operationalDemands   OperationalDemand[]
   devices              Device[]
   geoFenceEvents       GeoFenceEvent[]
   notificationTemplates NotificationTemplate[]
@@ -40,6 +41,7 @@ model Tenant {
   conflictLogs          ConflictLog[]
   susImports            SusImport[]
   susImportRows         SusImportRow[]
+  importHistory         ImportHistory[]
 }
 
 model User {
@@ -75,6 +77,7 @@ model Patient {
   tenantId          String
   name              String
   cpf               String
+  susCard           String?
   birthDate         DateTime
   phone             String?
   address           String
@@ -112,6 +115,7 @@ model Patient {
   createdAt         DateTime      @default(now())
   tenant            Tenant        @relation(fields: [tenantId], references: [id])
   queues            OperationalQueue[]
+  demands           OperationalDemand[]
   trips             Trip[]
   qrAccessLogs      PatientQrAccessLog[]
   tripTokens        TripToken[]
@@ -119,6 +123,7 @@ model Patient {
 
   @@index([tenantId])
   @@index([qrToken])
+  @@unique([tenantId, susCard])
 }
 
 enum MobilityType {
@@ -208,6 +213,7 @@ model OperationalQueue {
   id                     String              @id @default(uuid())
   tenantId               String
   operationId            String?
+  demandId               String?
   patientId              String
   appointmentDate        DateTime
   destination            String?
@@ -250,11 +256,13 @@ model OperationalQueue {
   createdAt              DateTime            @default(now())
   tenant                 Tenant              @relation(fields: [tenantId], references: [id])
   operation              Operation?          @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  demand                 OperationalDemand?  @relation(fields: [demandId], references: [id], onDelete: SetNull)
   patient                Patient             @relation(fields: [patientId], references: [id])
   healthcareLocation     HealthcareLocation? @relation(fields: [healthcareLocationId], references: [id])
 
   @@index([tenantId])
   @@index([patientId])
+  @@index([demandId])
   @@index([operationId])
   @@index([confirmationStatus])
   @@index([healthcareLocationId])
@@ -301,6 +309,7 @@ enum QueuePriority {
 }
 
 enum QueueStatus {
+  WAITING_DISPATCH
   WAITING
   CALLED
   CONFIRMED
@@ -313,6 +322,32 @@ enum QueueStatus {
   NO_SHOW
   ASSIGNED
   SCHEDULED
+}
+
+model OperationalDemand {
+  id                   String             @id @default(uuid())
+  tenantId             String
+  sourceImportId       String?
+  patientId            String
+  healthcareLocationId String
+  appointmentDate      DateTime
+  priority             QueuePriority      @default(NORMAL)
+  returnTrip           Boolean            @default(false)
+  wheelchair           Boolean            @default(false)
+  stretcher            Boolean            @default(false)
+  notes                String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  tenant               Tenant             @relation(fields: [tenantId], references: [id])
+  sourceImport         SusImport?         @relation(fields: [sourceImportId], references: [id], onDelete: SetNull)
+  patient              Patient            @relation(fields: [patientId], references: [id])
+  healthcareLocation   HealthcareLocation @relation(fields: [healthcareLocationId], references: [id])
+  queueItems           OperationalQueue[]
+
+  @@unique([tenantId, patientId, healthcareLocationId, appointmentDate])
+  @@index([tenantId, appointmentDate])
+  @@index([sourceImportId])
+  @@map("operational_demands")
 }
 
 enum QueueSlaStatus {
@@ -803,6 +838,7 @@ model HealthcareLocation {
   tenant                Tenant                       @relation(fields: [tenantId], references: [id])
   specialties           HealthcareLocationSpecialty[]
   queues                OperationalQueue[]
+  demands               OperationalDemand[]
   tripStops             TripStop[]
 
   @@index([tenantId])
@@ -973,6 +1009,7 @@ model SusImport {
   updatedAt              DateTime          @updatedAt
   tenant                 Tenant            @relation(fields: [tenantId], references: [id])
   rows                   SusImportRow[]
+  demands                OperationalDemand[]
   reprocessedFrom        SusImport?        @relation("SusImportReprocess", fields: [reprocessedFromImportId], references: [id])
   reprocessChildren      SusImport[]       @relation("SusImportReprocess")
 
@@ -1004,6 +1041,23 @@ model SusImportRow {
   @@index([tenantId, importId])
   @@index([status])
   @@map("sus_import_rows")
+}
+
+model ImportHistory {
+  id                String   @id @default(uuid())
+  tenantId          String
+  fileHash          String
+  importDate        DateTime @default(now())
+  recordsRead       Int      @default(0)
+  recordsCreated    Int      @default(0)
+  recordsUpdated    Int      @default(0)
+  duplicatesSkipped Int      @default(0)
+  errors            Int      @default(0)
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, importDate])
+  @@index([tenantId, fileHash])
+  @@map("import_history")
 }
 
 // ---------------------------------------------------------------------------

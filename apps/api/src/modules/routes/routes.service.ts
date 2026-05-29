@@ -431,11 +431,19 @@ export class RoutesService {
 
   async create(tenantId: string, data: any) {
     const payload: any = { ...data, tenantId };
+    const queueIds = Array.isArray(payload.queueIds)
+      ? [...new Set(payload.queueIds.filter(Boolean))]
+      : [];
+    delete payload.queueIds;
+
     if (payload.scheduledAt && typeof payload.scheduledAt === 'string') {
       payload.scheduledAt = new Date(payload.scheduledAt);
     }
     if (payload.date && typeof payload.date === 'string') {
       payload.date = new Date(payload.date);
+    }
+    if (!payload.driverId && !payload.vehicleId && queueIds.length === 0) {
+      throw new BadRequestException('Route requires a driver, a vehicle, or queue items.');
     }
     const operationDate = new Date(payload.date ?? payload.scheduledAt ?? Date.now());
     operationDate.setHours(0, 0, 0, 0);

@@ -87,13 +87,15 @@ export const schedulingImportService = {
     autoAssignVehicles?: boolean;
     defaultDispatchType?: 'SCHEDULED' | 'IMMEDIATE';
     defaultOrigin?: string;
+    confirmDuplicateFile?: boolean;
   }) => {
     const form = new FormData();
     form.append('file', file);
     if (options?.mode) form.append('mode', options.mode);
-    if (options?.autoAssignVehicles != null) form.append('autoAssignVehicles', String(options.autoAssignVehicles));
+    if (options?.autoAssignVehicles != null) form.append('autoAssignVehicles', String(options.autoAssignVehicles));     
     if (options?.defaultDispatchType) form.append('defaultDispatchType', options.defaultDispatchType);
     if (options?.defaultOrigin) form.append('defaultOrigin', options.defaultOrigin);
+    if (options?.confirmDuplicateFile != null) form.append('confirmDuplicateFile', String(options.confirmDuplicateFile));
     return api.post('/scheduling-import/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data);

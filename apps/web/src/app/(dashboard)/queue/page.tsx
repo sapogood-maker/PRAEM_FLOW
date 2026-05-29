@@ -305,6 +305,7 @@ export default function QueuePage() {
             date: first.appointmentDate ?? new Date().toISOString(),
             dispatchType: 'IMMEDIATE',
             status: 'PLANNED',
+            queueIds: groupItems.map((item) => item.id),
             ...(assignment.driverId ? { driverId: assignment.driverId } : {}),
             ...(assignment.vehicleId ? { vehicleId: assignment.vehicleId } : {}),
           }).then((r) => r.data);

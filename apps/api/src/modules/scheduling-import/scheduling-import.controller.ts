@@ -35,6 +35,7 @@ export class SchedulingImportController {
       autoAssignVehicles?: boolean | string;
       defaultDispatchType?: 'SCHEDULED' | 'IMMEDIATE';
       defaultOrigin?: string;
+      confirmDuplicateFile?: boolean | string;
     },
   ): Promise<any> {
     if (!file?.buffer?.length) {
@@ -47,11 +48,13 @@ export class SchedulingImportController {
       String(body?.defaultDispatchType ?? 'SCHEDULED').toUpperCase() === 'IMMEDIATE'
         ? 'IMMEDIATE'
         : 'SCHEDULED';
+    const confirmDuplicateFile = String(body?.confirmDuplicateFile ?? 'false').toLowerCase() === 'true';
     return this.schedulingImportService.importSpreadsheet(req.user.tenantId, safeFile, {
       mode,
       autoAssignVehicles,
       defaultDispatchType,
       defaultOrigin: body?.defaultOrigin,
+      confirmDuplicateFile,
     });
   }
 }

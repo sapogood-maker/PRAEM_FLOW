@@ -1,14 +1,9 @@
 import { Module } from '@nestjs/common';
 import { SchedulingImportController } from './scheduling-import.controller';
 import { SchedulingImportService } from './scheduling-import.service';
-import { PatientsModule } from '../patients/patients.module';
-import { QueuesModule } from '../queues/queues.module';
-import { RoutesModule } from '../routes/routes.module';
-import { TripsModule } from '../trips/trips.module';
-import { OperationEventsModule } from '../operation-events/operation-events.module';
-
+import { DispatchEngineModule } from '../dispatch-engine/dispatch-engine.module';
 @Module({
-  imports: [PatientsModule, QueuesModule, RoutesModule, TripsModule, OperationEventsModule],
+  imports: [DispatchEngineModule],
   controllers: [SchedulingImportController],
   providers: [SchedulingImportService],
 })

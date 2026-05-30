@@ -57,6 +57,13 @@ const OPERATION_STATUS_FROM_QUEUE: Record<string, string> = {
   NO_SHOW: 'CANCELLED',
 };
 
+const STATUS_FILTER_ALIAS: Record<string, string> = {
+  PENDING_DISPATCH: 'WAITING_DISPATCH',
+  SUGGESTED: 'ASSIGNED',
+  DISPATCHED: 'ASSIGNED',
+  IN_PROGRESS: 'IN_TRANSIT',
+};
+
 @Injectable()
 export class QueuesService {
   constructor(
@@ -81,6 +88,7 @@ export class QueuesService {
     const statusValues: string[] | null = status
       ? (Array.isArray(status) ? status : status.split(','))
           .map((s: string) => s.trim())
+          .map((s: string) => STATUS_FILTER_ALIAS[s.toUpperCase()] ?? s)
           .filter(Boolean)
       : null;
     const where: any = {

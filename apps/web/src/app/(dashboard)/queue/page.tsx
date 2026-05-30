@@ -31,6 +31,11 @@ const PRIORITY_BADGE: Record<string, string> = {
 };
 
 const STATUS_BADGE: Record<string, string> = {
+  WAITING_DISPATCH: 'bg-slate-800 text-slate-300',
+  PENDING_DISPATCH: 'bg-slate-800 text-slate-300',
+  SUGGESTED: 'bg-indigo-900 text-indigo-300',
+  DISPATCHED: 'bg-cyan-900 text-cyan-300',
+  IN_PROGRESS: 'bg-indigo-900 text-indigo-300',
   WAITING: 'bg-slate-800 text-slate-300',
   CALLED: 'bg-slate-800 text-slate-300',
   CONFIRMED: 'bg-cyan-900 text-cyan-300',
@@ -51,7 +56,7 @@ const SLA_BADGE: Record<string, string> = {
   CRITICAL: 'bg-red-900 text-red-300',
 };
 
-const LIVE_STATUS_FILTER = 'WAITING,CONFIRMED,BOARDING,IN_TRANSIT,CALLED,CHECKED_IN,ASSIGNED,SCHEDULED';
+const LIVE_STATUS_FILTER = 'WAITING_DISPATCH,WAITING,CONFIRMED,BOARDING,IN_TRANSIT,CALLED,CHECKED_IN,ASSIGNED,SCHEDULED';
 const TERMINAL_STATUS_FILTER = 'COMPLETED,CANCELLED,NO_SHOW,ARRIVED';
 const FINALIZED_TODAY_TERMINAL = new Set(['COMPLETED', 'CANCELLED', 'CLOSED']);
 
@@ -125,6 +130,7 @@ function isTerminalStatus(status: string) {
 function getLiveActionConfig(status: string) {
   switch (String(status).toUpperCase()) {
     case 'WAITING':
+    case 'WAITING_DISPATCH':
     case 'CALLED':
     case 'ASSIGNED':
     case 'SCHEDULED':

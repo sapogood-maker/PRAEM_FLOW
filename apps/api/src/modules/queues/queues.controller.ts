@@ -11,7 +11,16 @@ const VALID_CONFIRMATION_STATUSES: ConfirmationStatus[] = [
 const VALID_QUEUE_STATUSES = [
   'WAITING_DISPATCH', 'WAITING', 'CALLED', 'CONFIRMED', 'CHECKED_IN', 'BOARDING',
   'IN_TRANSIT', 'ARRIVED', 'COMPLETED', 'CANCELLED', 'NO_SHOW', 'ASSIGNED', 'SCHEDULED',
+  // aliases for dispatch-centric flow
+  'PENDING_DISPATCH', 'SUGGESTED', 'DISPATCHED', 'IN_PROGRESS',
 ];
+
+const STATUS_ALIAS: Record<string, string> = {
+  PENDING_DISPATCH: 'WAITING_DISPATCH',
+  SUGGESTED: 'ASSIGNED',
+  DISPATCHED: 'ASSIGNED',
+  IN_PROGRESS: 'IN_TRANSIT',
+};
 
 interface AuthRequest { user: { tenantId: string; role: string } }
 
@@ -62,7 +71,8 @@ export class QueuesController {
   @Put(':id/status')
   updateStatus(@Request() req: AuthRequest, @Param('id') id: string, @Body() body: { status: string; [key: string]: unknown }) {
     const { status, ...extra } = body;
-    const safeStatus = VALID_QUEUE_STATUSES.includes(status) ? status : 'WAITING_DISPATCH';
+    const normalizedStatus = STATUS_ALIAS[String(status).toUpperCase()] ?? status;
+    const safeStatus = VALID_QUEUE_STATUSES.includes(normalizedStatus) ? normalizedStatus : 'WAITING_DISPATCH';
     const driverOnlyStatuses = ['IN_TRANSIT', 'ARRIVED'];
     if (driverOnlyStatuses.includes(safeStatus) && req.user.role !== 'DRIVER') {
       throw new ForbiddenException('Dispatch can only assign/schedule passengers; boarding and trip progress are driver-only');

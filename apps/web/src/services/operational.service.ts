@@ -65,6 +65,11 @@ export const routeService = {
   completeRoute: (id: string) => api.post(`/routes/${id}/complete`, {}).then((r) => r.data),
 };
 
+export const dispatchService = {
+  suggestions: (data?: { limit?: number }) => api.post('/dispatch/suggestions', data ?? {}).then((r) => r.data),
+  approve: (suggestionId: string) => api.post('/dispatch/approve', { suggestionId }).then((r) => r.data),
+};
+
 export const trackingService = {
   replay: (routeId: string, maxPoints = 3000) =>
     api.get('/tracking/replay', { params: { routeId, maxPoints } }).then((r) => r.data),

@@ -9,6 +9,5 @@ export const queueService = {
   updateConfirmation: (id: string, status: string, channel?: string) =>
     api.put(`/queue/${id}/confirmation`, { status, channel }).then((r) => r.data),
   remove: (id: string) => api.delete(`/queue/${id}`).then((r) => r.data),
-  suggest: () => api.post('/queue/ai-suggest').then((r) => r.data),
+  suggest: () => api.post('/dispatch/suggestions').then((r) => r.data),
 };
-

@@ -74,6 +74,11 @@ export const CONNECTION_STATUS_LABEL: Record<string, string> = {
 // Fila hospitalar — separado do DispatchStatus e ConnectionStatus.
 
 export const QUEUE_STATUS_LABEL: Record<string, string> = {
+  WAITING_DISPATCH: 'Aguardando Despacho',
+  PENDING_DISPATCH: 'Aguardando Despacho',
+  SUGGESTED:  'Sugerido',
+  DISPATCHED: 'Despachado',
+  IN_PROGRESS: 'Em andamento',
   WAITING:    'Aguardando',
   CALLED:     'Chamado',
   CONFIRMED:  'Confirmado',

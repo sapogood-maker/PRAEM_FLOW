@@ -165,7 +165,7 @@ export class RoutesService {
   ) {
     const queueIds = [...new Set((input.queueIds ?? []).filter(Boolean))];
     if (queueIds.length === 0) {
-      throw new BadRequestException('Selecione pelo menos um paciente da fila operacional para despachar.');
+      throw new BadRequestException('Cannot create route without patients');
     }
 
     const queueRows = await this.prisma.operationalQueue.findMany({
@@ -444,7 +444,7 @@ export class RoutesService {
       payload.date = new Date(payload.date);
     }
     if (queueIds.length === 0) {
-      throw new BadRequestException('Rotas devem conter pelo menos um paciente. Selecione itens da fila operacional.');
+      throw new BadRequestException('Cannot create route without patients');
     }
     const operationDate = new Date(payload.date ?? payload.scheduledAt ?? Date.now());
     operationDate.setHours(0, 0, 0, 0);

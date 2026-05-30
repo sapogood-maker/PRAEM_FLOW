@@ -35,6 +35,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { SchedulingImportModule } from './modules/scheduling-import/scheduling-import.module';
 import { SusImportModule } from './modules/sus-import/sus-import.module';
 import { DispatchEngineModule } from './modules/dispatch-engine/dispatch-engine.module';
+import { DispatchModule } from './modules/dispatch/dispatch.module';
 import { QrEngineModule } from './modules/qr-engine/qr-engine.module';
 import { NotificationTemplatesModule } from './modules/notification-templates/notification-templates.module';
 import { OperationEventsModule } from './modules/operation-events/operation-events.module';
@@ -74,6 +75,7 @@ import { OperationEventsModule } from './modules/operation-events/operation-even
     SchedulingImportModule,
     SusImportModule,
     DispatchEngineModule,
+    DispatchModule,
     QrEngineModule,
     NotificationTemplatesModule,
     OperationEventsModule,

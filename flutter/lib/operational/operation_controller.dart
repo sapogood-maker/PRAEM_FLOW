@@ -807,10 +807,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
       final statuses = [
         'DISPATCHED',
         'ACTIVE',
-        'PLANNED',
-        'PREPARING',
-        'SCHEDULED',
-        'PENDING'
+        'RETURNING',
       ];
       Map<String, dynamic>? found;
       for (final st in statuses) {
@@ -838,7 +835,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
         final staleResp = await _dio.get(
           '${AppConfig.apiBaseUrl}/routes',
           queryParameters: {
-            'status': 'DISPATCHED,ACTIVE,RETURNING,PREPARING,PLANNED,SCHEDULED,PENDING',
+            'status': 'DISPATCHED,ACTIVE,RETURNING',
             'limit': 20,
             if (driverId != null) 'driverId': driverId,
             if (vehicleId != null && driverId == null) 'vehicleId': vehicleId,

@@ -1,0 +1,303 @@
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../gateways/realtime.gateway';
+import { buildTripQrPayload, issueQrToken } from '../../common/qr-payload';
+import { OperationEventsService } from '../operation-events/operation-events.service';
+
+export type TokenType = 'CONFIRMATION' | 'BOARDING' | 'RETURN' | 'REBOOK';
+
+const TOKEN_TTL_MINUTES: Record<TokenType, number> = {
+  CONFIRMATION: 48 * 60,   // 48h
+  BOARDING: 30 * 24 * 60,  // 30 days — operational tokens remain valid throughout trip lifecycle
+  RETURN: 8 * 60,          // 8h
+  REBOOK: 24 * 60,         // 24h
+};
+
+@Injectable()
+export class TripTokensService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: RealtimeGateway,
+    private readonly operationEvents: OperationEventsService,
+  ) {}
+
+  /** Gera um token operacional para uma viagem. */
+  async generate(tenantId: string, tripId: string, type: TokenType) {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id: tripId, tenantId },
+      include: { patient: { select: { id: true, name: true } } },
+    });
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
+
+    const ttl = TOKEN_TTL_MINUTES[type] ?? 60;
+    const expiresAt = new Date(Date.now() + ttl * 60_000);
+    const token = issueQrToken();
+
+    const created = await this.prisma.tripToken.create({
+      data: {
+        tenantId,
+        tripId,
+        patientId: trip.patientId,
+        token,
+        type,
+        expiresAt,
+      },
+    });
+
+    if (trip.operationId) {
+      await this.operationEvents.record({
+        tenantId,
+        operationId: trip.operationId,
+        routeId: trip.routeId,
+        tripId: trip.id,
+        patientId: trip.patientId,
+        eventType: 'QR_GENERATED',
+        actorType: 'SYSTEM',
+        metadata: { tokenType: type, expiresAt: expiresAt.toISOString(), tripTokenId: created.id },
+      });
+    }
+
+    return {
+      id: created.id,
+      token: created.token,
+      type: created.type,
+      expiresAt: created.expiresAt,
+      url: `/t/${created.token}`,
+      patientName: trip.patient?.name,
+      qrContent: JSON.stringify(buildTripQrPayload({
+        tripId: trip.id,
+        patientId: trip.patientId,
+        routeId: trip.routeId,
+        operationId: trip.routeId,
+        validationToken: created.token,
+        expiresAt,
+      })),
+    };
+  }
+
+  /** Lista tokens de uma viagem. */
+  async listByTrip(tenantId: string, tripId: string) {
+    return this.prisma.tripToken.findMany({
+      where: { tenantId, tripId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Retorna os dados públicos de um token (sem autenticação). */
+  async getPublic(token: string) {
+    const record = await this.prisma.tripToken.findUnique({
+      where: { token },
+      include: {
+        trip: {
+          select: {
+            id: true,
+            status: true,
+            route: {
+              select: {
+                id: true,
+                origin: true,
+                destination: true,
+                date: true,
+                scheduledAt: true,
+                driver: { select: { id: true, user: { select: { name: true } } } },
+              },
+            },
+          },
+        },
+        patient: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!record) throw new NotFoundException('Token não encontrado');
+    if (record.usedAt) throw new BadRequestException('Token já utilizado');
+
+    // [QR] Validate token based on trip status and token type
+    const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
+
+    if (record.type === 'BOARDING') {
+      // Boarding tokens valid while trip is active
+      if (terminalStatuses.includes(record.trip.status)) {
+        console.log(`[QR] Token ${token.substring(0, 8)}… rejected: trip in terminal status ${record.trip.status}`);
+        throw new BadRequestException('Viagem finalizada — QR inválido');
+      }
+      console.log(`[QR] Token ${token.substring(0, 8)}… validated: trip status=${record.trip.status}, type=BOARDING`);
+    } else {
+      // Other tokens use time-based expiration
+      if (record.expiresAt < new Date()) {
+        console.log(`[QR] Token ${token.substring(0, 8)}… expired: ${record.expiresAt.toISOString()}, type=${record.type}`);
+        throw new BadRequestException('Token expirado');
+      }
+      console.log(`[QR] Token ${token.substring(0, 8)}… validated: expires=${record.expiresAt.toISOString()}, type=${record.type}`);
+    }
+
+    // Fetch boarding QR token for patient confirmation pages
+    const boardingToken = record.type === 'CONFIRMATION'
+      ? await this.prisma.tripToken.findFirst({
+          where: { tripId: record.trip.id, type: 'BOARDING' },
+          select: { token: true },
+        })
+      : null;
+
+    return {
+      id: record.id,
+      type: record.type,
+      expiresAt: record.expiresAt,
+      patient: record.patient,
+      trip: record.trip,
+      boardingQrToken: boardingToken?.token ?? null,
+      qrContent: JSON.stringify(buildTripQrPayload({
+        tripId: record.trip.id,
+        patientId: record.patient.id,
+        routeId: record.trip.route.id,
+        operationId: record.trip.route.id,
+        validationToken: record.token,
+        expiresAt: record.expiresAt,
+      })),
+    };
+  }
+
+  /** Consome/usa um token (marca como utilizado e dispara ação operacional). */
+  async use(
+    token: string,
+    action: { ip?: string; gpsLat?: number; gpsLng?: number; deviceInfo?: string },
+  ) {
+    const record = await this.prisma.tripToken.findUnique({
+      where: { token },
+      include: {
+        trip: { select: { id: true, status: true, tenantId: true, routeId: true, patientId: true, operationId: true } },
+        patient: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!record) throw new NotFoundException('Token não encontrado');
+    if (record.usedAt) throw new BadRequestException('Token já utilizado');
+
+    // [QR] Validate token based on trip status and token type
+    const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
+
+    if (record.type === 'BOARDING') {
+      // Boarding tokens can be validated for identity, but cannot auto-board.
+      if (terminalStatuses.includes(record.trip.status)) {
+        console.log(`[QR] Use rejected: trip in terminal status ${record.trip.status}, token=${token.substring(0, 8)}…`);
+        throw new BadRequestException('Viagem finalizada — QR inválido');
+      }
+      throw new BadRequestException('Confirmação de embarque deve ser feita pelo motorista (QR do app do motorista ou confirmação manual)');
+    } else {
+      // Other tokens use time-based expiration
+      if (record.expiresAt < new Date()) {
+        console.log(`[QR] Use rejected: token expired (${record.expiresAt.toISOString()}), type=${record.type}, token=${token.substring(0, 8)}…`);
+        throw new BadRequestException('Token expirado');
+      }
+      console.log(`[QR] Use accepted: token valid (expires ${record.expiresAt.toISOString()}), type=${record.type}, token=${token.substring(0, 8)}…`);
+    }
+
+    const now = new Date();
+    const gpsStr = action.gpsLat != null && action.gpsLng != null
+      ? `${action.gpsLat},${action.gpsLng}`
+      : null;
+    const tenantId = record.trip.tenantId;
+    const tripId = record.trip.id;
+
+    // Mark as used
+    await this.prisma.tripToken.update({
+      where: { token },
+      data: {
+        usedAt: now,
+        usedByIp: action.ip ?? null,
+        usedByGps: gpsStr,
+        deviceInfo: action.deviceInfo ?? null,
+      },
+    });
+
+    // Apply operational action based on token type
+    switch (record.type) {
+      case 'CONFIRMATION':
+        await this.prisma.trip.update({
+          where: { id: tripId },
+          data: { status: 'CONFIRMED' },
+        });
+        {
+          const latestQueue = await this.prisma.operationalQueue.findFirst({
+            where: { tenantId, patientId: record.patientId },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (latestQueue) {
+            const currentStatus = String(latestQueue.status).toUpperCase();
+            const preserveProgress = ['BOARDING', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED'].includes(currentStatus);
+            await this.prisma.operationalQueue.update({
+              where: { id: latestQueue.id },
+              data: {
+                confirmationStatus: 'CONFIRMED',
+                confirmationChannel: 'WHATSAPP',
+                confirmedAt: now,
+                lastContactAt: now,
+                confirmationAttempts: { increment: 1 },
+                ...(preserveProgress ? {} : { status: 'CONFIRMED' }),
+              } as any,
+            });
+            this.gateway.emitToTenant(tenantId, 'queue.updated', {
+              id: latestQueue.id,
+              patientId: record.patientId,
+              action: 'PATIENT_CONFIRMED',
+              status: preserveProgress ? currentStatus : 'CONFIRMED',
+              confirmationStatus: 'CONFIRMED',
+              confirmedAt: now,
+            });
+          }
+        }
+        this.gateway.emitToTenant(tenantId, 'trip:confirmed', {
+          tripId,
+          patientId: record.patientId,
+          patientName: record.patient?.name,
+          confirmedAt: now,
+        });
+        if (record.trip.operationId) {
+          await this.operationEvents.record({
+            tenantId,
+            operationId: record.trip.operationId,
+            routeId: record.trip.routeId,
+            tripId,
+            patientId: record.patientId,
+            eventType: 'PATIENT_CONFIRMED',
+            actorType: 'PATIENT',
+            actorId: record.patientId,
+            metadata: { tokenType: record.type, confirmationChannel: 'WHATSAPP' },
+          });
+        }
+        break;
+
+      case 'RETURN':
+        this.gateway.emitToTenant(tenantId, 'trip:returning', {
+          tripId,
+          patientId: record.patientId,
+          returnAt: now,
+        });
+        break;
+
+      case 'REBOOK':
+        // Apenas notifica — reagendamento requer fluxo web
+        this.gateway.emitToTenant(tenantId, 'trip:rebook_requested', {
+          tripId,
+          patientId: record.patientId,
+          requestedAt: now,
+        });
+        break;
+    }
+
+    if (record.trip.operationId) {
+      await this.operationEvents.record({
+        tenantId,
+        operationId: record.trip.operationId,
+        routeId: record.trip.routeId,
+        tripId,
+        patientId: record.patientId,
+        eventType: 'QR_SCANNED',
+        actorType: 'PATIENT',
+        actorId: record.patientId,
+        metadata: { tokenType: record.type, usedByIp: action.ip ?? null, usedByGps: gpsStr },
+      });
+    }
+
+    return { success: true, type: record.type, usedAt: now };
+  }
+}

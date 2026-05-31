@@ -5,14 +5,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../auth/auth_service.dart';
-import '../driver/driver_state.dart';
 import '../core/constants.dart';
 import '../navigation/navigation_service.dart';
 import '../shared/widgets/operational_button.dart';
 import '../shared/widgets/status_badge.dart';
-import '../offline/offline_queue.dart';
-import '../operational/sync_manager.dart';
+import '../operational/operation_controller.dart';
 import '../core/l10n.dart';
 
 // ─── Stop type / status helpers ───────────────────────────────────────────────
@@ -87,31 +84,22 @@ class TripScreen extends StatefulWidget {
 
 class _TripScreenState extends State<TripScreen> {
   Future<void> _updateStopStatus(String stopId, String status) async {
-    final auth = context.read<AuthService>();
-    final driver = context.read<DriverState>();
-    final offline = context.read<OfflineQueue>();
-    final syncManager = context.read<SyncManager>();
-    final stop = driver.stops.firstWhere((s) => s['id'] == stopId,
-        orElse: () => <String, dynamic>{});
+    final ctrl = context.read<OperationController>();
+    final stop = ctrl.stops.firstWhere(
+      (s) => s['id'] == stopId,
+      orElse: () => <String, dynamic>{},
+    );
+    final routeId = ctrl.activeRoute?['id'] as String?;
+    final tripId = stop['tripId'] as String?;
+    final currentStatus = stop['status'] as String? ?? 'UNKNOWN';
+    debugPrint(
+      '[OPERATION][TRIP] request stopId=$stopId routeId=${routeId ?? 'null'} tripId=${tripId ?? 'null'} currentStatus=$currentStatus nextStatus=$status source=TripScreen',
+    );
     try {
-      await offline.enqueueOperationalAction(
-        type: 'TRIP_STOP_STATUS',
-        payload: {
-          'stopId': stopId,
-          'status': status,
-          'tripId': stop['tripId'],
-          'routeId': driver.activeRoute?['id'],
-          'vehicleId': driver.vehicle?['id'],
-          'operatorId': auth.driverId,
-          'timestamp': DateTime.now().toIso8601String(),
-        },
-        deviceId: driver.deviceId ?? 'unknown-device',
-        operationId: driver.activeRoute?['id'] as String?,
-        routeId: driver.activeRoute?['id'] as String?,
-        tripId: stop['tripId'] as String?,
+      await ctrl.updateTripStopStatus(stopId, status);
+      debugPrint(
+        '[SYNC][TRIP] completed stopId=$stopId routeStatus=${ctrl.activeRoute?['status'] ?? 'null'} tripStatus=${tripId != null ? ctrl.stops.firstWhere((s) => s['tripId'] == tripId, orElse: () => <String, dynamic>{})['status'] ?? 'null' : 'null'} source=api_snapshot',
       );
-      await syncManager.syncAll();
-      driver.updateStopStatus(stopId, status);
     } catch (e) {
       debugPrint('[TripScreen] updateStopStatus error: $e');
       if (mounted) {
@@ -124,14 +112,12 @@ class _TripScreenState extends State<TripScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final driver = context.watch<DriverState>();
-    final route = driver.activeRoute;
-    final patients = driver.patients;
-    // Use dedicated stops list from DriverState; fall back to stops embedded in route
-    final stops = driver.stops.isNotEmpty
-        ? driver.stops
-        : (driver.activeRoute?['stops'] as List?)
-                ?.cast<Map<String, dynamic>>() ??
+    final ctrl = context.watch<OperationController>();
+    final route = ctrl.activeRoute;
+    final patients = ctrl.patients;
+    final stops = ctrl.stops.isNotEmpty
+        ? ctrl.stops
+        : (ctrl.activeRoute?['stops'] as List?)?.cast<Map<String, dynamic>>() ??
             [];
 
     return Scaffold(

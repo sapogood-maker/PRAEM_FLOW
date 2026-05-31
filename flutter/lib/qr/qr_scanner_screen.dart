@@ -17,6 +17,7 @@ import '../driver/driver_state.dart';
 import '../core/constants.dart';
 import '../shared/widgets/operational_button.dart';
 import '../offline/offline_queue.dart';
+import '../operational/operation_controller.dart';
 import '../operational/sync_manager.dart';
 import '../offline_sync/connectivity_service.dart';
 import '../offline_sync/qr_offline_validator.dart';
@@ -71,6 +72,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   Future<void> _validateToken(String token) async {
     final auth = context.read<AuthService>();
     final driver = context.read<DriverState>();
+    final ctrl = context.read<OperationController>();
     final offline = context.read<OfflineQueue>();
     final syncManager = context.read<SyncManager>();
     final connectivity = context.read<ConnectivityService>();
@@ -80,12 +82,18 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     final deviceId = driver.deviceId ?? 'unknown-device';
     final checkpoint =
         (payload['checkpoint']?.toString() ?? 'BOARDING').toUpperCase();
-    final resolvedPatientId =
-        payload['patientId'] ?? payload['patientReference'] ?? payload['patient_id'];
-    final resolvedRouteId =
-        payload['routeId'] ?? payload['route_id'] ?? driver.activeRoute?['id'];
-    final resolvedValidationToken =
-        payload['validationToken'] ?? payload['validation_token'] ?? payload['qrToken'] ?? token;
+    final resolvedPatientId = payload['patientId'] ??
+        payload['patientReference'] ??
+        payload['patient_id'];
+    final resolvedRouteId = (payload['routeId'] ??
+            payload['route_id'] ??
+            ctrl.activeRoute?['id'] ??
+            driver.activeRoute?['id'])
+        ?.toString();
+    final resolvedValidationToken = payload['validationToken'] ??
+        payload['validation_token'] ??
+        payload['qrToken'] ??
+        token;
     final resolvedSignature =
         payload['signature'] ?? payload['secureHash'] ?? payload['secure_hash'];
     final resolvedExpiresAt =
@@ -134,14 +142,21 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       return;
     }
 
+    debugPrint(
+      '[OPERATION][TRIP] QR boarding request routeId=${resolvedRouteId ?? 'null'} tripId=${payload['tripId'] ?? payload['trip_id'] ?? 'null'} checkpoint=$checkpoint source=QrScannerScreen',
+    );
     await offline.enqueueQrScan(
       payload: eventPayload,
       deviceId: deviceId,
-      operationId: driver.activeRoute?['id'] as String?,
-      routeId: driver.activeRoute?['id'] as String?,
+      operationId: resolvedRouteId,
+      routeId: resolvedRouteId,
       tripId: payload['tripId']?.toString(),
     );
     await syncManager.syncAll();
+    await ctrl.loadRoute();
+    debugPrint(
+      '[SYNC][TRIP] QR boarding refreshed routeId=${resolvedRouteId ?? 'null'} routeStatus=${ctrl.activeRoute?['status'] ?? 'null'} source=api_snapshot',
+    );
 
     _clearTimer?.cancel();
     _clearTimer = Timer(const Duration(seconds: 6), () {

@@ -28,35 +28,37 @@ class OperationalButton extends StatelessWidget {
         ? OutlinedButton.styleFrom(
             foregroundColor: color,
             side: BorderSide(color: color, width: 2),
-            padding:
-                const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             textStyle: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1),
+                fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.6),
           )
         : ElevatedButton.styleFrom(
             backgroundColor: color,
             foregroundColor: AppColors.textPrimary,
-            padding:
-                const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             textStyle: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1),
+                fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.6),
             elevation: 0,
           );
 
-    final child = Row(
+    final child = Column(
       mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 20),
-        const SizedBox(width: 8),
-        Text(label),
+        const SizedBox(height: 6),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
+        ),
       ],
     );
 

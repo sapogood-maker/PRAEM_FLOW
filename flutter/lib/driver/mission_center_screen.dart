@@ -28,7 +28,8 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
     });
   }
 
-  Future<void> _openScanner(BuildContext context, OperationController ctrl) async {
+  Future<void> _openScanner(
+      BuildContext context, OperationController ctrl) async {
     if (!mounted) return;
     Navigator.pushNamed(context, AppRoutes.qrScanner);
   }
@@ -63,7 +64,8 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
 
   String _routeSubtitle(Map<String, dynamic>? route) {
     if (route == null) return 'Aguardando missão';
-    final destination = route['destination'] as String? ?? 'Destino operacional';
+    final destination =
+        route['destination'] as String? ?? 'Destino operacional';
     return destination;
   }
 
@@ -154,7 +156,8 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
         backgroundColor: AppColors.surface,
         title: const Text(
           'MINHA OPERAÇÃO',
-          style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: AppColors.textPrimary, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
@@ -193,17 +196,20 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                   const SizedBox(height: 4),
                   Text(
                     routeSubtitle,
-                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                    style: const TextStyle(
+                        color: AppColors.textSecondary, fontSize: 14),
                   ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      const Icon(Icons.person, size: 16, color: AppColors.textSecondary),
+                      const Icon(Icons.person,
+                          size: 16, color: AppColors.textSecondary),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           '$driverName · $vehicleName',
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                          style: const TextStyle(
+                              color: AppColors.textSecondary, fontSize: 12),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -212,50 +218,102 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                   const SizedBox(height: 14),
                   Row(
                     children: [
-                      StatusBadge(label: '${patients.length} PACIENTES', color: AppColors.warning),
+                      StatusBadge(
+                          label: '${patients.length} PACIENTES',
+                          color: AppColors.warning),
                       const SizedBox(width: 8),
-                      StatusBadge(label: '$boardedCount EMBARCADOS', color: AppColors.primary),
+                      StatusBadge(
+                          label: '$boardedCount EMBARCADOS',
+                          color: AppColors.primary),
                       const SizedBox(width: 8),
-                      StatusBadge(label: '$pendingCount PENDENTES', color: AppColors.textSecondary),
+                      StatusBadge(
+                          label: '$pendingCount PENDENTES',
+                          color: AppColors.textSecondary),
                     ],
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 14),
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              childAspectRatio: 2.9,
-              children: [
-                OperationalButton(
-                  label: 'Iniciar Operação',
-                  icon: Icons.play_arrow,
-                  color: AppColors.primary,
-                  onPressed: ctrl.hasActiveRoute && !ctrl.loading ? () => _startMission(ctrl) : null,
-                ),
-                OperationalButton(
-                  label: 'Navegar',
-                  icon: Icons.navigation,
-                  color: AppColors.info,
-                  onPressed: ctrl.hasActiveRoute ? () => _navigate(ctrl) : null,
-                ),
-                OperationalButton(
-                  label: 'Ler QR',
-                  icon: Icons.qr_code_scanner,
-                  color: AppColors.boarding,
-                  onPressed: ctrl.hasActiveRoute ? () => _openScanner(context, ctrl) : null,
-                ),
-                OperationalButton(
-                  label: 'Finalizar Operação',
-                  icon: Icons.flag,
-                  color: AppColors.warning,
-                  onPressed: ctrl.hasActiveRoute ? () => _finalizeMission(ctrl) : null,
-                ),
-              ],
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const spacing = 10.0;
+                final buttonWidth = (constraints.maxWidth - spacing) / 2;
+                final buttonHeight = buttonWidth * 0.78;
+
+                Widget actionTile({
+                  required String label,
+                  required IconData icon,
+                  required Color color,
+                  required VoidCallback? onPressed,
+                }) {
+                  return SizedBox(
+                    height: buttonHeight,
+                    child: OperationalButton(
+                      label: label,
+                      icon: icon,
+                      color: color,
+                      onPressed: onPressed,
+                    ),
+                  );
+                }
+
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: actionTile(
+                            label: 'Iniciar',
+                            icon: Icons.play_arrow,
+                            color: AppColors.primary,
+                            onPressed: ctrl.hasActiveRoute && !ctrl.loading
+                                ? () => _startMission(ctrl)
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: spacing),
+                        Expanded(
+                          child: actionTile(
+                            label: 'Navegar',
+                            icon: Icons.navigation,
+                            color: AppColors.info,
+                            onPressed: ctrl.hasActiveRoute
+                                ? () => _navigate(ctrl)
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: spacing),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: actionTile(
+                            label: 'Ler QR',
+                            icon: Icons.qr_code_scanner,
+                            color: AppColors.boarding,
+                            onPressed: ctrl.hasActiveRoute
+                                ? () => _openScanner(context, ctrl)
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: spacing),
+                        Expanded(
+                          child: actionTile(
+                            label: 'Finalizar',
+                            icon: Icons.flag,
+                            color: AppColors.warning,
+                            onPressed: ctrl.hasActiveRoute
+                                ? () => _finalizeMission(ctrl)
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 20),
             Text(
@@ -296,10 +354,13 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
             else
               ...patients.map((trip) {
                 final patient = (trip['patient'] as Map?) ?? trip;
-                final status = (trip['status'] as String? ?? 'PENDING').toUpperCase();
-                final name = (patient['name'] as String?) ?? (trip['id'] as String? ?? 'Paciente');
+                final status =
+                    (trip['status'] as String? ?? 'PENDING').toUpperCase();
+                final name = (patient['name'] as String?) ??
+                    (trip['id'] as String? ?? 'Paciente');
                 final tripId = trip['id'] as String;
-                final canAct = !['COMPLETED', 'CANCELLED', 'NO_SHOW'].contains(status);
+                final canAct =
+                    !['COMPLETED', 'CANCELLED', 'NO_SHOW'].contains(status);
                 return Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   padding: const EdgeInsets.all(14),
@@ -307,7 +368,9 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                     color: AppColors.surface,
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
-                      color: status == 'BOARDING' ? AppColors.boarding : AppColors.border,
+                      color: status == 'BOARDING'
+                          ? AppColors.boarding
+                          : AppColors.border,
                     ),
                   ),
                   child: Column(
@@ -317,8 +380,10 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                         children: [
                           CircleAvatar(
                             radius: 16,
-                            backgroundColor: _patientStatusColor(status).withOpacity(0.18),
-                            child: Icon(_patientIcon(status), size: 16, color: _patientStatusColor(status)),
+                            backgroundColor:
+                                _patientStatusColor(status).withOpacity(0.18),
+                            child: Icon(_patientIcon(status),
+                                size: 16, color: _patientStatusColor(status)),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
@@ -347,7 +412,9 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                             ),
                           ),
                           if (status == 'BOARDING' || status == 'CONFIRMED')
-                            const Text('●', style: TextStyle(color: AppColors.primary, fontSize: 12)),
+                            const Text('●',
+                                style: TextStyle(
+                                    color: AppColors.primary, fontSize: 12)),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -356,22 +423,30 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                         runSpacing: 8,
                         children: [
                           OutlinedButton.icon(
-                            onPressed: canAct ? () => _openScanner(context, ctrl) : null,
+                            onPressed: canAct
+                                ? () => _openScanner(context, ctrl)
+                                : null,
                             icon: const Icon(Icons.qr_code_scanner, size: 16),
                             label: const Text('QR'),
                           ),
                           OutlinedButton.icon(
-                            onPressed: canAct ? () => ctrl.confirmPassengerBoarded(tripId) : null,
+                            onPressed: canAct
+                                ? () => ctrl.confirmPassengerBoarded(tripId)
+                                : null,
                             icon: const Icon(Icons.how_to_reg, size: 16),
                             label: const Text('Confirmar'),
                           ),
                           OutlinedButton.icon(
-                            onPressed: canAct ? () => ctrl.markPassengerNoShow(tripId) : null,
+                            onPressed: canAct
+                                ? () => ctrl.markPassengerNoShow(tripId)
+                                : null,
                             icon: const Icon(Icons.person_off, size: 16),
                             label: const Text('Ausente'),
                           ),
                           OutlinedButton.icon(
-                            onPressed: canAct ? () => ctrl.reportPassengerIssue(tripId) : null,
+                            onPressed: canAct
+                                ? () => ctrl.reportPassengerIssue(tripId)
+                                : null,
                             icon: const Icon(Icons.report_problem, size: 16),
                             label: const Text('Problema'),
                           ),

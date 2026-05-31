@@ -35,13 +35,14 @@ export class QueuesController {
     @Query('type') queueType?: string,
     @Query('priority') priority?: string,
     @Query('status') status?: string,
+    @Query('date') date?: string,
     @Query('slaStatus') slaStatus?: string,
     @Query('confirmationStatus') confirmationStatus?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
     return this.queuesService.findAll(req.user.tenantId, {
-      queueType, priority, status, slaStatus, confirmationStatus,
+      queueType, priority, status, date, slaStatus, confirmationStatus,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 20,
     });

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { OperationEventsService } from '../operation-events/operation-events.service';
@@ -59,13 +59,44 @@ const OPERATION_STATUS_FROM_QUEUE: Record<string, string> = {
 
 const STATUS_FILTER_ALIAS: Record<string, string> = {
   PENDING_DISPATCH: 'WAITING_DISPATCH',
+  PENDING: 'WAITING_DISPATCH',
   SUGGESTED: 'ASSIGNED',
   DISPATCHED: 'ASSIGNED',
   IN_PROGRESS: 'IN_TRANSIT',
+  ACTIVE: 'IN_TRANSIT',
 };
+
+function parseOperationalDateRange(date?: string): { gte: Date; lt: Date } | null {
+  if (!date) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date).trim());
+  if (!match) {
+    throw new BadRequestException('Invalid date filter. Expected format: YYYY-MM-DD');
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new BadRequestException('Invalid date filter. Expected format: YYYY-MM-DD');
+  }
+  const gte = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+  const lt = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0, 0));
+  if (Number.isNaN(gte.getTime()) || Number.isNaN(lt.getTime())) {
+    throw new BadRequestException('Invalid date filter. Expected format: YYYY-MM-DD');
+  }
+  if (
+    gte.getUTCFullYear() !== year ||
+    gte.getUTCMonth() + 1 !== month ||
+    gte.getUTCDate() !== day
+  ) {
+    throw new BadRequestException('Invalid date filter. Expected format: YYYY-MM-DD');
+  }
+  return { gte, lt };
+}
 
 @Injectable()
 export class QueuesService {
+  private readonly logger = new Logger(QueuesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly opsGateway: OperationsGateway,
@@ -76,25 +107,31 @@ export class QueuesService {
     queueType?: string;
     priority?: string;
     status?: string;
+    date?: string;
     slaStatus?: string;
     confirmationStatus?: string;
     page?: number;
     limit?: number;
   }) {
-    const { queueType, priority, status, slaStatus, confirmationStatus, page = 1, limit = 20 } = query;
+    const { queueType, priority, status, date, slaStatus, confirmationStatus, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
+    const appointmentDateRange = parseOperationalDateRange(date);
     // Normalise status: HTTP params can arrive as string or string[]; support
     // comma-separated values like "WAITING,CONFIRMED" too.
     const statusValues: string[] | null = status
       ? (Array.isArray(status) ? status : status.split(','))
           .map((s: string) => s.trim())
-          .map((s: string) => STATUS_FILTER_ALIAS[s.toUpperCase()] ?? s)
+          .map((s: string) => {
+            const normalized = s.toUpperCase();
+            return STATUS_FILTER_ALIAS[normalized] ?? normalized;
+          })
           .filter(Boolean)
       : null;
     const where: any = {
       tenantId,
       ...(queueType && { queueType: queueType as any }),
       ...(priority && { priority: priority as any }),
+      ...(appointmentDateRange && { appointmentDate: appointmentDateRange }),
       ...(statusValues && {
         status: statusValues.length === 1
           ? (statusValues[0] as any)
@@ -116,6 +153,28 @@ export class QueuesService {
       }),
       this.prisma.operationalQueue.count({ where }),
     ]);
+    const statusesReturned = items.reduce<Record<string, number>>((acc, item) => {
+      const key = String(item.status ?? 'UNKNOWN').toUpperCase();
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {});
+    this.logger.log(
+      `[queue.findAll] tenant=${tenantId} returned=${items.length}/${total} filters=${JSON.stringify({
+        queueType: queueType ?? null,
+        priority: priority ?? null,
+        status: statusValues ?? null,
+        date: appointmentDateRange
+          ? {
+              gte: appointmentDateRange.gte.toISOString(),
+              lt: appointmentDateRange.lt.toISOString(),
+            }
+          : null,
+        slaStatus: slaStatus ?? null,
+        confirmationStatus: confirmationStatus ?? null,
+        page,
+        limit,
+      })} statuses=${JSON.stringify(statusesReturned)}`,
+    );
     return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
@@ -344,7 +403,9 @@ export class QueuesService {
       noShowToday,
       avgWait,
     ] = await Promise.all([
-      this.prisma.operationalQueue.count({ where: { tenantId, status: { in: ['WAITING_DISPATCH', 'WAITING'] as any[] } } }),
+      this.prisma.operationalQueue.count({
+        where: { tenantId, status: { in: ['WAITING_DISPATCH', 'WAITING', 'ASSIGNED', 'SCHEDULED', 'CONFIRMED', 'CHECKED_IN', 'BOARDING'] as any[] } },
+      }),
       this.prisma.operationalQueue.count({ where: { tenantId, slaStatus: 'DELAYED' } }),
       this.prisma.operationalQueue.count({ where: { tenantId, slaStatus: 'CRITICAL' } }),
       this.prisma.operationalQueue.count({

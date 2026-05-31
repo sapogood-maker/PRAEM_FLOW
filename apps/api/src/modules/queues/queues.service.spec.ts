@@ -30,6 +30,10 @@ const mockOperationEvents = {
 } as any;
 
 describe('QueuesService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('creates a queue item and returns id', async () => {
     const service = new QueuesService(mockPrisma, mockGateway, mockOperationEvents);
     const result = await service.create('t1', {
@@ -71,5 +75,36 @@ describe('QueuesService', () => {
     const result = await service.aiSuggest('tenant-1');
     expect(result.suggestions.length).toBeGreaterThan(0);
     expect(result.tenantId).toBe('tenant-1');
+  });
+
+  it('applies status aliases and operational date filter in findAll', async () => {
+    const service = new QueuesService(mockPrisma, mockGateway, mockOperationEvents);
+    (mockPrisma.operationalQueue.findMany as jest.Mock).mockResolvedValueOnce([]);
+    (mockPrisma.operationalQueue.count as jest.Mock).mockResolvedValueOnce(0);
+
+    await service.findAll('tenant-1', {
+      status: 'DISPATCHED',
+      date: '2026-05-31',
+      page: 1,
+      limit: 50,
+    });
+
+    expect(mockPrisma.operationalQueue.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 'tenant-1',
+          status: 'ASSIGNED',
+          appointmentDate: {
+            gte: new Date('2026-05-31T00:00:00.000Z'),
+            lt: new Date('2026-06-01T00:00:00.000Z'),
+          },
+        }),
+      }),
+    );
+  });
+
+  it('rejects invalid operational date format', async () => {
+    const service = new QueuesService(mockPrisma, mockGateway, mockOperationEvents);
+    await expect(service.findAll('tenant-1', { date: '31-05-2026' })).rejects.toThrow('Invalid date filter');
   });
 });

@@ -3,6 +3,12 @@ export * from '@praem/shared/src';
 // ----- Queue ----------------------------------------------------------------
 export type QueuePriority = 'EMERGENCY' | 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW' | 'PENDING';
 export type QueueStatus =
+  | 'WAITING_DISPATCH'
+  | 'PENDING_DISPATCH'
+  | 'SUGGESTED'
+  | 'DISPATCHED'
+  | 'IN_PROGRESS'
+  | 'ACTIVE'
   | 'WAITING'
   | 'CALLED'
   | 'CONFIRMED'

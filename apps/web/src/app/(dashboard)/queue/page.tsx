@@ -56,9 +56,17 @@ const SLA_BADGE: Record<string, string> = {
   CRITICAL: 'bg-red-900 text-red-300',
 };
 
-const LIVE_STATUS_FILTER = 'WAITING_DISPATCH,WAITING,CONFIRMED,BOARDING,IN_TRANSIT,CALLED,CHECKED_IN,ASSIGNED,SCHEDULED';
+const LIVE_STATUS_FILTER = 'WAITING_DISPATCH,WAITING,PENDING,PENDING_DISPATCH,CONFIRMED,BOARDING,IN_TRANSIT,IN_PROGRESS,ACTIVE,CALLED,CHECKED_IN,ASSIGNED,SCHEDULED,DISPATCHED,SUGGESTED';
 const TERMINAL_STATUS_FILTER = 'COMPLETED,CANCELLED,NO_SHOW,ARRIVED';
 const FINALIZED_TODAY_TERMINAL = new Set(['COMPLETED', 'CANCELLED', 'CLOSED']);
+const STATUS_ALIAS: Record<string, string> = {
+  PENDING: 'WAITING_DISPATCH',
+  PENDING_DISPATCH: 'WAITING_DISPATCH',
+  SUGGESTED: 'ASSIGNED',
+  DISPATCHED: 'ASSIGNED',
+  IN_PROGRESS: 'IN_TRANSIT',
+  ACTIVE: 'IN_TRANSIT',
+};
 
 type LifecycleTab = 'active' | 'transit' | 'finalizedToday' | 'history';
 type QueueTypeFilter = 'ALL' | QueueType;
@@ -124,11 +132,11 @@ function isSameDay(value: string | null, reference = new Date()) {
 }
 
 function isTerminalStatus(status: string) {
-  return ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'ARRIVED', 'CLOSED'].includes(String(status).toUpperCase());
+  return ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'ARRIVED', 'CLOSED'].includes(normalizeQueueStatus(status));
 }
 
 function getLiveActionConfig(status: string) {
-  switch (String(status).toUpperCase()) {
+  switch (normalizeQueueStatus(status)) {
     case 'WAITING':
     case 'WAITING_DISPATCH':
     case 'CALLED':
@@ -164,6 +172,38 @@ function getLiveActionConfig(status: string) {
   }
 }
 
+function normalizeQueueStatus(status?: string) {
+  const normalized = String(status ?? '').toUpperCase();
+  return STATUS_ALIAS[normalized] ?? normalized;
+}
+
+function isInTransitStatus(status?: string) {
+  return normalizeQueueStatus(status) === 'IN_TRANSIT';
+}
+
+function toDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isSameOperationalDate(value?: string | null, operationalDate?: string) {
+  if (!operationalDate) return true;
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return toDateInputValue(date) === operationalDate;
+}
+
+function summarizeStatuses(items: DispatchQueueItem[]) {
+  return items.reduce<Record<string, number>>((acc, item) => {
+    const status = String(item.status ?? 'UNKNOWN').toUpperCase();
+    acc[status] = (acc[status] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
 function actionButtonClass(tone: string) {
   switch (tone) {
     case 'cyan':
@@ -189,6 +229,7 @@ export default function QueuePage() {
   const activityFeed = useRealtimeStore((s) => s.activityFeed);
 
   const [activeTab, setActiveTab] = useState<LifecycleTab>('active');
+  const [operationalDate, setOperationalDate] = useState(() => toDateInputValue(new Date()));
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
@@ -208,10 +249,10 @@ export default function QueuePage() {
 
   const queueTypeParam = filters.queueType === 'ALL' ? undefined : filters.queueType;
   const queueQueryParams = useMemo(() => {
-    const base: Record<string, string | number> = { limit: 400 };
+    const base: Record<string, string | number> = { limit: 400, date: operationalDate };
     if (queueTypeParam) base.type = queueTypeParam;
     return base;
-  }, [queueTypeParam]);
+  }, [operationalDate, queueTypeParam]);
 
   const liveQueueParams = useMemo(() => ({ ...queueQueryParams, status: LIVE_STATUS_FILTER }), [queueQueryParams]);
   const terminalQueueParams = useMemo(() => ({ ...queueQueryParams, status: TERMINAL_STATUS_FILTER }), [queueQueryParams]);
@@ -343,6 +384,33 @@ export default function QueuePage() {
   const liveItems = (liveQuery.data?.items ?? []) as DispatchQueueItem[];
   const terminalItems = (terminalQuery.data?.items ?? []) as DispatchQueueItem[];
 
+  useEffect(() => {
+    console.info('[QueuePage][debug]', {
+      recordsReturned: {
+        live: liveItems.length,
+        terminal: terminalItems.length,
+      },
+      statusesReturned: {
+        live: summarizeStatuses(liveItems),
+        terminal: summarizeStatuses(terminalItems),
+      },
+      activeFilters: {
+        operationalDate,
+        activeTab,
+        queueType: queueTypeParam ?? 'ALL',
+        city: filters.city || null,
+        hospital: filters.hospital || null,
+        time: filters.time,
+        priority: filters.priority || null,
+        recurring: filters.recurring,
+        vehicle: filters.vehicle || null,
+        search: filters.search || null,
+        liveStatusFilter: LIVE_STATUS_FILTER,
+        terminalStatusFilter: TERMINAL_STATUS_FILTER,
+      },
+    });
+  }, [activeTab, filters, liveItems, operationalDate, queueTypeParam, terminalItems]);
+
   const cityOptions = useMemo(
     () => Array.from(new Set(liveItems.map((i) => i.healthcareLocation?.city).filter(Boolean) as string[])).sort(),
     [liveItems],
@@ -363,22 +431,23 @@ export default function QueuePage() {
       const matchesCity = !filters.city || item.healthcareLocation?.city === filters.city;
       const matchesHospital = !filters.hospital || destinationLabel === filters.hospital;
       const matchesTime = filters.time === 'ALL' || getTimeWindow(item.appointmentDate) === filters.time;
+      const matchesOperationalDate = isSameOperationalDate(item.appointmentDate, operationalDate);
       const matchesPriority = !filters.priority || item.priority === filters.priority;
       const recurring = isRecurring(item) || !!assignment?.recurringHint;
       const matchesRecurring =
         filters.recurring === 'ALL' ||
         (filters.recurring === 'ONLY' ? recurring : !recurring);
       const matchesVehicle = !filters.vehicle || assignment?.vehicleId === filters.vehicle;
-      return matchesSearch && matchesCity && matchesHospital && matchesTime && matchesPriority && matchesRecurring && matchesVehicle;
+      return matchesSearch && matchesCity && matchesHospital && matchesTime && matchesOperationalDate && matchesPriority && matchesRecurring && matchesVehicle;
     });
-  }, [liveItems, queueAssignments, filters]);
+  }, [liveItems, queueAssignments, filters, operationalDate]);
 
   const activeRows = useMemo(
-    () => filteredLive.filter((item) => item.status !== 'IN_TRANSIT'),
+    () => filteredLive.filter((item) => !isInTransitStatus(item.status)),
     [filteredLive],
   );
   const transitRows = useMemo(
-    () => filteredLive.filter((item) => item.status === 'IN_TRANSIT'),
+    () => filteredLive.filter((item) => isInTransitStatus(item.status)),
     [filteredLive],
   );
   const todayFinalizedRows = useMemo(() => {
@@ -414,8 +483,8 @@ export default function QueuePage() {
   const { suggestions, assignments } = useMemo(() => buildOperationalSuggestions(liveItems, vehicles), [liveItems, vehicles]);
 
   const realtimeOverview = useMemo(() => {
-    const activeQueue = liveItems.filter((q) => q.status !== 'IN_TRANSIT').length;
-    const inTransit = liveItems.filter((q) => q.status === 'IN_TRANSIT').length;
+    const activeQueue = liveItems.filter((q) => !isInTransitStatus(q.status)).length;
+    const inTransit = liveItems.filter((q) => isInTransitStatus(q.status)).length;
     const completedToday = todayFinalizedRows.length;
     const delayed = liveItems.filter((q) => String(q.slaStatus ?? '').toUpperCase() === 'DELAYED').length;
     const critical = liveItems.filter((q) =>
@@ -526,7 +595,14 @@ export default function QueuePage() {
         </div>
       </div>
 
-      <div className='grid gap-2 rounded-xl border border-border bg-panel p-3 md:grid-cols-8'>
+      <div className='grid gap-2 rounded-xl border border-border bg-panel p-3 md:grid-cols-9'>
+        <input
+          type='date'
+          value={operationalDate}
+          onChange={(e) => setOperationalDate(e.target.value)}
+          className='rounded bg-slate-900 px-3 py-2 text-sm'
+          aria-label='Data operacional'
+        />
         <select value={filters.queueType} onChange={(e) => setFilters((f) => ({ ...f, queueType: e.target.value as QueueTypeFilter }))} className='rounded bg-slate-900 px-3 py-2 text-sm'>
           <option value='ALL'>Todas as filas</option>
           <option value='LOGISTICS'>Fila Logística</option>

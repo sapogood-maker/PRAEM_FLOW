@@ -80,22 +80,44 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     final deviceId = driver.deviceId ?? 'unknown-device';
     final checkpoint =
         (payload['checkpoint']?.toString() ?? 'BOARDING').toUpperCase();
+    final resolvedPatientId =
+        payload['patientId'] ?? payload['patientReference'] ?? payload['patient_id'];
+    final resolvedRouteId =
+        payload['routeId'] ?? payload['route_id'] ?? driver.activeRoute?['id'];
+    final resolvedValidationToken =
+        payload['validationToken'] ?? payload['validation_token'] ?? payload['qrToken'] ?? token;
+    final resolvedSignature =
+        payload['signature'] ?? payload['secureHash'] ?? payload['secure_hash'];
+    final resolvedExpiresAt =
+        payload['expiresAt'] ?? payload['expires_at'] ?? payload['expiration'];
     final eventPayload = {
       'qrToken': token,
-      'tripId': payload['tripId'],
-      'patientId': payload['patientReference'] ?? payload['patientId'],
-      'patientReference': payload['patientReference'] ?? payload['patientId'],
+      'validationToken': resolvedValidationToken,
+      'validation_token': resolvedValidationToken,
+      'tripId': payload['tripId'] ?? payload['trip_id'],
+      'trip_id': payload['tripId'] ?? payload['trip_id'],
+      'patientId': resolvedPatientId,
+      'patient_id': resolvedPatientId,
+      'patientReference': payload['patientReference'] ?? resolvedPatientId,
       'operationReference':
           payload['operationReference'] ?? payload['boardingCode'],
       'boardingCode': payload['operationReference'] ?? payload['boardingCode'],
-      'expiration': payload['expiration'] ?? payload['expiresAt'],
-      'expiresAt': payload['expiration'] ?? payload['expiresAt'],
+      'expiration': payload['expiration'] ?? resolvedExpiresAt,
+      'expiresAt': resolvedExpiresAt,
       'uniqueId': payload['uniqueId'],
-      'secureHash': payload['signature'],
-      'signature': payload['signature'],
+      'secureHash': resolvedSignature,
+      'secure_hash': resolvedSignature,
+      'signature': resolvedSignature,
+      'praemId': payload['praemId'] ?? payload['praem_id'],
+      'praem_id': payload['praemId'] ?? payload['praem_id'],
+      'operationId': payload['operationId'] ?? payload['operation_id'],
+      'operation_id': payload['operationId'] ?? payload['operation_id'],
+      'kind': payload['type'] ?? payload['kind'],
+      'type': payload['type'] ?? payload['kind'],
       'checkpoint': checkpoint,
       'vehicleId': driver.vehicle?['id'],
-      'routeId': driver.activeRoute?['id'],
+      'routeId': resolvedRouteId,
+      'route_id': resolvedRouteId,
       'deviceId': deviceId,
       'operatorId': auth.driverId,
       'source': 'TABLET_SMART_SCANNER',
@@ -105,7 +127,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     if (!validation.valid) {
       if (!mounted) return;
       setState(() {
-        _error = validation.reason;
+        _error = validation.reason == 'ok' ? 'QR inválido' : validation.reason;
         _result = null;
       });
       HapticFeedback.lightImpact();
@@ -132,16 +154,19 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     if (!mounted) return;
     setState(() {
       _result = {
-        'name': payload['patientReference']?.toString() ??
+        'name': payload['patientName']?.toString() ??
+            payload['praemId']?.toString() ??
+            payload['patientReference']?.toString() ??
             payload['patientId']?.toString() ??
+            payload['patient_id']?.toString() ??
             '—',
         'destination': payload['operationReference']?.toString() ??
             payload['boardingCode']?.toString() ??
             '—',
         'status': connectivity.websocketConnected ? 'SYNCED' : 'PENDING_SYNC',
         'checkpoint': checkpoint,
-        'tripId': payload['tripId'],
-        'routeId': driver.activeRoute?['id'],
+        'tripId': payload['tripId'] ?? payload['trip_id'],
+        'routeId': resolvedRouteId,
       };
       _error = null;
     });
@@ -232,7 +257,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 const SizedBox(width: 8),
                 Text(
                   context.l10n.boardingConfirmed,
-                  style: TextStyle(
+                  style: const TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.bold,
                       fontSize: 16),
@@ -278,7 +303,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 const SizedBox(width: 8),
                 Text(
                   context.l10n.validationFailed,
-                  style: TextStyle(
+                  style: const TextStyle(
                       color: AppColors.warning, fontWeight: FontWeight.bold),
                 ),
               ],

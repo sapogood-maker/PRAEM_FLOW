@@ -5,6 +5,7 @@ import { TripsService } from '../trips/trips.service';
 import { TripStopsService } from '../trip-stops/trip-stops.service';
 import { TrackingService } from '../tracking/tracking.service';
 import { OperationalFlowService } from '../operational-flow/operational-flow.service';
+import { stableHash } from '../../common/qr-payload';
 
 type OfflineSyncEvent = {
   eventId: string;
@@ -224,7 +225,12 @@ export class SyncService {
           const checkpoint = String(payload.checkpoint ?? 'BOARDING').toUpperCase();
           let effectiveTripId = tripId ?? payload.trip_id ?? payload.tripId ?? null;
           const validationToken = payload.validation_token ?? payload.validationToken ?? payload.qrToken ?? null;
-          const patientId = payload.patientId ?? payload.patient_id ?? payload.patientReference ?? payload.patient_reference ?? null;
+          const patientHint =
+            payload.patientId
+            ?? payload.patient_id
+            ?? payload.patientReference
+            ?? payload.patient_reference
+            ?? null;
           const routeRef = routeId ?? payload.route_id ?? payload.routeId ?? null;
 
           if (!effectiveTripId && validationToken) {
@@ -235,20 +241,17 @@ export class SyncService {
             effectiveTripId = tripToken?.tripId ?? null;
           }
 
+          let resolvedPatientId = patientHint;
+          if (!resolvedPatientId) {
+            resolvedPatientId = await this.resolvePatientFromQr(tenantId, payload, validationToken);
+          }
+
           if (!effectiveTripId) {
-            if (patientId) {
-              const resolvedTrip = await this.prisma.trip.findFirst({
-                where: {
-                  tenantId,
-                  patientId,
-                  ...(routeRef ? { routeId: routeRef } : {}),
-                  status: { notIn: ['COMPLETED', 'CANCELLED', 'NO_SHOW'] as any },
-                },
-                select: { id: true },
-                orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
-              });
-              effectiveTripId = resolvedTrip?.id ?? null;
-            }
+            effectiveTripId = await this.resolveTodayTripByPatient(
+              tenantId,
+              resolvedPatientId,
+              routeRef,
+            );
           }
           if (!effectiveTripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: effectiveTripId, tenantId }, select: { id: true, status: true, routeId: true, patientId: true } });
@@ -274,7 +277,7 @@ export class SyncService {
               {
                 routeId: routeRef ?? trip.routeId,
                 tripId: effectiveTripId,
-                patientId: patientId ?? trip.patientId,
+                patientId: resolvedPatientId ?? trip.patientId,
               },
               {
                 driverId: actor.driverId ?? payload.driverId ?? null,
@@ -374,6 +377,73 @@ export class SyncService {
         error?.message ?? 'Unexpected sync error',
       );
     }
+  }
+
+  private async resolvePatientFromQr(
+    tenantId: string,
+    payload: Record<string, any>,
+    validationToken?: string | null,
+  ): Promise<string | null> {
+    const patientId =
+      payload.patientId
+      ?? payload.patient_id
+      ?? payload.patientReference
+      ?? payload.patient_reference
+      ?? null;
+    const praemId = payload.praemId ?? payload.praem_id ?? null;
+    const operationalId = payload.operationalId ?? payload.operational_id ?? null;
+
+    const token = validationToken ? String(validationToken).trim() : null;
+    const tokenHash = token ? stableHash(token) : null;
+    const criteria = [
+      ...(patientId ? [{ id: String(patientId) }] : []),
+      ...(praemId ? [{ praemId: String(praemId) }] : []),
+      ...(operationalId ? [{ operationalId: String(operationalId) }] : []),
+      ...(token ? [{ qrToken: token }] : []),
+      ...(tokenHash ? [{ qrTokenHash: tokenHash }] : []),
+    ];
+    if (criteria.length === 0) return null;
+
+    const patient = await this.prisma.patient.findFirst({
+      where: {
+        tenantId,
+        OR: criteria,
+      },
+      select: { id: true },
+    });
+
+    return patient?.id ?? null;
+  }
+
+  private async resolveTodayTripByPatient(
+    tenantId: string,
+    patientId?: string | null,
+    routeId?: string | null,
+  ): Promise<string | null> {
+    if (!patientId) return null;
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    const todayTrip = await this.prisma.trip.findFirst({
+      where: {
+        tenantId,
+        patientId,
+        ...(routeId ? { routeId } : {}),
+        status: { notIn: ['COMPLETED', 'CANCELLED', 'NO_SHOW'] as any },
+        route: {
+          is: {
+            date: { gte: start, lt: end },
+          },
+        },
+      },
+      select: { id: true },
+      orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+    });
+
+    return todayTrip?.id ?? null;
   }
 
   private conflict(

@@ -138,7 +138,69 @@ export class OperationalFlowService {
   }
 
   async completeRoute(tenantId: string, routeId: string, context: FlowContext = {}) {
-    return this.transitionState(tenantId, { routeId }, 'COMPLETED', context, true);
+    const route = await this.findRoute(tenantId, routeId);
+    const completedTrips = await this.completeInTransitTrips(tenantId, route, context);
+    const now = new Date();
+    const updatedRoute = await this.updateRouteWithVersion(routeId, route.operationalVersion ?? 1, {
+      status: 'COMPLETED',
+      operationalState: 'COMPLETED',
+    });
+    const routeWithRelations = await this.findRoute(tenantId, routeId);
+    const routePayload = {
+      routeId,
+      routeStatus: 'COMPLETED',
+      operationalState: 'COMPLETED',
+      driverId: context.driverId ?? route.driverId,
+      vehicleId: route.vehicleId,
+      completedTripIds: completedTrips.map((trip) => trip.id),
+      timestamp: now.toISOString(),
+      source: context.source ?? 'routes.complete',
+    };
+
+    this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'route:completed', routePayload);
+    this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'operational:state_changed', routePayload);
+    this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'route.status_changed', {
+      routeId,
+      status: 'COMPLETED',
+      operationalState: 'COMPLETED',
+      timestamp: now.toISOString(),
+    });
+
+    const operationId = route.operation?.id ?? null;
+    if (operationId) {
+      await this.prisma.operation.updateMany({
+        where: { id: operationId, tenantId },
+        data: { status: 'COMPLETED' as any },
+      });
+    }
+
+    await this.audit.log({
+      tenantId,
+      userId: context.actorUserId ?? context.driverId ?? 'system',
+      action: 'OPERATIONAL_STATE_TRANSITION',
+      entity: 'route',
+      entityId: routeId,
+      after: {
+        fromState: route.status,
+        toState: 'COMPLETED',
+        source: context.source ?? 'routes.complete',
+        completedTripIds: completedTrips.map((trip) => trip.id),
+      },
+    });
+    await this.persistTimeline({
+      tenantId,
+      operationId,
+      routeId,
+      driverId: context.driverId ?? route.driverId ?? null,
+      vehicleId: context.vehicleId ?? route.vehicleId ?? null,
+      eventType: 'ROUTE_COMPLETED',
+      fromState: route.status,
+      toState: 'COMPLETED',
+      source: context.source ?? 'routes.complete',
+      metadata: { completedTripIds: completedTrips.map((trip) => trip.id) },
+    });
+
+    return { route: routeWithRelations, completedTripIds: completedTrips.map((trip) => trip.id), routeStatus: updatedRoute.status };
   }
 
   async confirmBoarding(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
@@ -612,6 +674,13 @@ export class OperationalFlowService {
     let routeVersion = route.operationalVersion ?? 1;
     let tripVersion = trip?.version ?? 1;
     const queueUpdate: Record<string, unknown> = {};
+    let promotedBoardingTrips: Array<{
+      id: string;
+      patientId: string;
+      boardedAt: Date | null;
+      completedAt: Date | null;
+      patient: { name: string; operationalId: string | null } | null;
+    }> = [];
 
     if (targetState === 'DISPATCHED') {
       route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'DISPATCHED', operationalState: 'DISPATCHED' });
@@ -621,11 +690,13 @@ export class OperationalFlowService {
     if (targetState === 'DRIVER_ACCEPTED') {
       route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'DRIVER_ACCEPTED' });
       routeVersion = route.operationalVersion ?? routeVersion + 1;
+      promotedBoardingTrips = await this.promoteBoardingTripsToInTransit(tenantId, route, context, now, operationId);
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
     if (targetState === 'WAITING_PATIENT') {
       route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'WAITING_PATIENT' });
       routeVersion = route.operationalVersion ?? routeVersion + 1;
+      promotedBoardingTrips = await this.promoteBoardingTripsToInTransit(tenantId, route, context, now, operationId);
       queueUpdate.status = 'WAITING';
       this.logger.log(`[ROUTE] updated routeId=${route.id} status=${route.status}`);
     }
@@ -766,6 +837,30 @@ export class OperationalFlowService {
     this.logger.log(`[OPS] broadcasting transition state=${targetState} routeState=${routeOperationalState} routeId=${payload.routeId} tripId=${payload.tripId} tenantId=${routeWithRelations.tenantId} driverId=${routeWithRelations.driverId ?? '-'}`);
 
     this.emitTransitionEvents(targetState, routeWithRelations.tenantId, routeWithRelations.driverId, payload);
+    if (promotedBoardingTrips.length > 0) {
+      for (const boardingTrip of promotedBoardingTrips) {
+        const tripPayload = this.buildPayload({
+          trip: {
+            id: boardingTrip.id,
+            routeId: routeWithRelations.id,
+            patientId: boardingTrip.patientId,
+            status: 'IN_TRANSIT',
+            boardedAt: boardingTrip.boardedAt,
+            completedAt: boardingTrip.completedAt,
+          },
+          route: routeWithRelations,
+          operationId,
+          queueStatus: 'IN_TRANSIT',
+          patientName: boardingTrip.patient?.name ?? null,
+          operationalId: boardingTrip.patient?.operationalId ?? null,
+          operationalState: 'IN_TRANSIT',
+          timestamp: now,
+          context,
+        });
+        this.emitToRoute(routeWithRelations.tenantId, routeWithRelations.driverId ?? null, 'trip:started', tripPayload);
+        this.emitToRoute(routeWithRelations.tenantId, routeWithRelations.driverId ?? null, 'trip:in_transit', tripPayload);
+      }
+    }
     await this.logTransitionAudit(tenantId, scope, currentState, targetState, payload, context);
     await this.persistTimeline({
       tenantId,
@@ -1119,6 +1214,234 @@ export class OperationalFlowService {
     });
     if (!updated) throw new NotFoundException('Trip not found');
     return updated as any;
+  }
+
+  private async promoteBoardingTripsToInTransit(
+    tenantId: string,
+    route: {
+      id: string;
+      tenantId: string;
+      driverId: string | null;
+      vehicleId: string | null;
+      status: string;
+      operationalState?: string | null;
+      operation?: { id: string; status: string; date: Date } | null;
+    },
+    context: FlowContext,
+    timestamp: Date,
+    operationId: string | null,
+  ) {
+    const boardingTrips = await this.prisma.trip.findMany({
+      where: {
+        tenantId,
+        routeId: route.id,
+        status: 'BOARDING' as any,
+      },
+      select: {
+        id: true,
+        patientId: true,
+        boardedAt: true,
+        completedAt: true,
+        patient: { select: { name: true, operationalId: true } },
+      },
+      orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+    });
+
+    if (boardingTrips.length === 0) return [];
+
+    await this.prisma.trip.updateMany({
+      where: {
+        tenantId,
+        routeId: route.id,
+        status: 'BOARDING' as any,
+      },
+      data: { status: 'IN_TRANSIT' as any },
+    });
+
+    for (const trip of boardingTrips) {
+      const queue = await this.findLatestQueue(tenantId, trip.patientId);
+      const tripPayload = this.buildPayload({
+        trip: {
+          id: trip.id,
+          routeId: route.id,
+          patientId: trip.patientId,
+          status: 'IN_TRANSIT',
+          boardedAt: trip.boardedAt,
+          completedAt: trip.completedAt,
+        },
+        route,
+        operationId,
+        queueStatus: 'IN_TRANSIT',
+        patientName: trip.patient?.name ?? null,
+        operationalId: trip.patient?.operationalId ?? null,
+        operationalState: 'IN_TRANSIT',
+        timestamp,
+        context,
+      });
+
+      if (queue) {
+        await this.prisma.operationalQueue.update({
+          where: { id: queue.id },
+          data: {
+            status: 'IN_TRANSIT' as any,
+            departedAt: timestamp,
+          },
+        });
+        this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'queue.updated', {
+          queueId: queue.id,
+          routeId: route.id,
+          tripId: trip.id,
+          status: 'IN_TRANSIT',
+          timestamp: timestamp.toISOString(),
+          source: context.source ?? 'routes.start',
+        });
+      }
+
+      await this.audit.log({
+        tenantId,
+        userId: context.actorUserId ?? context.driverId ?? 'system',
+        action: 'OPERATIONAL_STATE_TRANSITION',
+        entity: 'trip',
+        entityId: trip.id,
+        after: {
+          fromState: 'BOARDING',
+          toState: 'IN_TRANSIT',
+          source: context.source ?? 'api',
+          routeId: route.id,
+        },
+      });
+      await this.persistTimeline({
+        tenantId,
+        operationId,
+        routeId: route.id,
+        tripId: trip.id,
+        patientId: trip.patientId,
+        driverId: context.driverId ?? route.driverId ?? null,
+        vehicleId: context.vehicleId ?? route.vehicleId ?? null,
+        eventType: 'STATE_TRANSITION',
+        fromState: 'BOARDING',
+        toState: 'IN_TRANSIT',
+        source: context.source ?? 'api',
+        metadata: tripPayload,
+      });
+    }
+
+    return boardingTrips;
+  }
+
+  private async completeInTransitTrips(
+    tenantId: string,
+    route: {
+      id: string;
+      tenantId: string;
+      driverId: string | null;
+      vehicleId: string | null;
+      status: string;
+      operation?: { id: string; status: string; date: Date } | null;
+    },
+    context: FlowContext,
+  ) {
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        tenantId,
+        routeId: route.id,
+        status: 'IN_TRANSIT' as any,
+      },
+      select: {
+        id: true,
+        patientId: true,
+        boardedAt: true,
+        completedAt: true,
+        patient: { select: { name: true, operationalId: true } },
+      },
+      orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
+    });
+
+    if (trips.length === 0) return [];
+
+    const now = new Date();
+    await this.prisma.trip.updateMany({
+      where: {
+        tenantId,
+        routeId: route.id,
+        status: 'IN_TRANSIT' as any,
+      },
+      data: { status: 'COMPLETED' as any, completedAt: now },
+    });
+
+    for (const trip of trips) {
+      const queue = await this.findLatestQueue(tenantId, trip.patientId);
+      const patientName = trip.patient?.name ?? null;
+      const operationalId = trip.patient?.operationalId ?? null;
+      const tripPayload = this.buildPayload({
+        trip: {
+          id: trip.id,
+          routeId: route.id,
+          patientId: trip.patientId,
+          status: 'COMPLETED',
+          boardedAt: trip.boardedAt,
+          completedAt: now,
+        },
+        route,
+        queueStatus: 'COMPLETED',
+        patientName,
+        operationalId,
+        operationalState: 'COMPLETED',
+        timestamp: now,
+        context,
+      });
+
+      if (queue) {
+        await this.prisma.operationalQueue.update({
+          where: { id: queue.id },
+          data: {
+            status: 'COMPLETED' as any,
+            arrivedAt: now,
+          },
+        });
+        this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'queue.updated', {
+          queueId: queue.id,
+          routeId: route.id,
+          tripId: trip.id,
+          status: 'COMPLETED',
+          timestamp: now.toISOString(),
+          source: context.source ?? 'routes.complete',
+        });
+      }
+
+      this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'trip:completed', tripPayload);
+      this.emitToRoute(tenantId, context.driverId ?? route.driverId ?? null, 'patient.completed', tripPayload);
+
+      await this.audit.log({
+        tenantId,
+        userId: context.actorUserId ?? context.driverId ?? 'system',
+        action: 'OPERATIONAL_STATE_TRANSITION',
+        entity: 'trip',
+        entityId: trip.id,
+        after: {
+          fromState: 'IN_TRANSIT',
+          toState: 'COMPLETED',
+          source: context.source ?? 'routes.complete',
+          routeId: route.id,
+        },
+      });
+      await this.persistTimeline({
+        tenantId,
+        operationId: route.operation?.id ?? null,
+        routeId: route.id,
+        tripId: trip.id,
+        patientId: trip.patientId,
+        driverId: context.driverId ?? route.driverId ?? null,
+        vehicleId: context.vehicleId ?? route.vehicleId ?? null,
+        eventType: 'STATE_TRANSITION',
+        fromState: 'IN_TRANSIT',
+        toState: 'COMPLETED',
+        source: context.source ?? 'routes.complete',
+        metadata: tripPayload,
+      });
+    }
+
+    return trips;
   }
 
   private async persistTimeline(params: {

@@ -588,17 +588,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     await _postTripAction(
       '/trips/$tripId/boarded',
       tripId: tripId,
-      onSuccess: () {
-        _updateTripStatus(tripId, 'BOARDED');
-        if (_patients.every((p) {
-          final s = (p['status'] as String? ?? '').toUpperCase();
-          return s == 'COMPLETED' || s == 'CANCELLED' || s == 'NO_SHOW';
-        })) {
-          _transition(OperationalState.boarded, force: true);
-        } else {
-          _transition(OperationalState.boarding, force: true);
-        }
-      },
+      onSuccess: () {},
     );
   }
 
@@ -606,10 +596,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     await _postTripAction(
       '/trips/$tripId/no-show',
       tripId: tripId,
-      onSuccess: () {
-        _updateTripStatus(tripId, 'NO_SHOW');
-        _transition(OperationalState.noShow, force: true);
-      },
+      onSuccess: () {},
     );
   }
 
@@ -641,7 +628,6 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     await _apiPost('/routes/$routeId/start', onSuccess: () {
-      _transition(OperationalState.driverAccepted);
       _ws.emitDriverStatus(
         'DRIVER_ACCEPTED',
         vehicleId: _driverState.vehicle?['id'] as String?,
@@ -657,8 +643,6 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     final tripId = trip['id'] as String?;
     if (tripId == null) return;
     await _apiPost('/trips/$tripId/in-transit', onSuccess: () {
-      _updateTripStatus(tripId, 'IN_TRANSIT');
-      _transition(OperationalState.inTransit);
       _ws.emitDriverStatus(
         'IN_TRANSIT',
         vehicleId: _driverState.vehicle?['id'] as String?,
@@ -673,8 +657,6 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     final tripId = trip['id'] as String?;
     if (tripId == null) return;
     await _apiPost('/trips/$tripId/arrived', onSuccess: () {
-      _updateTripStatus(tripId, 'ARRIVED');
-      _transition(OperationalState.arrived);
     });
   }
 
@@ -684,8 +666,6 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     final tripId = trip['id'] as String?;
     if (tripId == null) return;
     await _apiPost('/trips/$tripId/complete', onSuccess: () {
-      _updateTripStatus(tripId, 'COMPLETED');
-      _transition(OperationalState.completed);
       _gps.stop();
     });
   }
@@ -705,7 +685,6 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     await _apiPost('/routes/$routeId/force-complete', onSuccess: () {
       debugPrint('[RECOVERY] [FINALIZE] force-complete success routeId=$routeId staleLevel=$staleLevel elapsedHours=$staleElapsedHours');
       _staleRecoveryAcknowledgedRouteId = routeId;
-      _transition(OperationalState.completed, force: true);
       _gps.stop();
       _clearRoute();
     });
@@ -740,6 +719,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
         tripId: tripId,
       );
       await _syncManager.syncAll();
+      await loadRoute();
       onSuccess();
     } catch (e) {
       _lastError = e.toString();
@@ -781,6 +761,7 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
         tripId: tripId,
       );
       await _syncManager.syncAll();
+      await loadRoute();
       onSuccess();
     } catch (e) {
       _lastError = e.toString();
@@ -856,7 +837,10 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
         }
         await _loadPatients(found['id'] as String);
         await _loadStops(found['id'] as String);
-        final derived = _deriveState(_activeRoute, _patients);
+        final serverDerived = found['operationalStateDerived'] as String?;
+        final derived = serverDerived != null
+            ? operationalStateFromString(serverDerived)
+            : _deriveState(_activeRoute, _patients);
         _transition(derived, force: true);
         debugPrint(
             '[OPS] route loaded id=${found['id']} status=${found['status']} derivedState=${operationalStateToString(derived)}');

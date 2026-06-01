@@ -17,6 +17,7 @@ type OfflineSyncEvent = {
   tripId?: string;
   createdAt?: string;
   retryCount?: number;
+  queueOrder?: number;
 };
 
 type SyncConflict = {
@@ -60,11 +61,20 @@ export class SyncService {
     const conflicts: SyncConflict[] = [];
     let snapshot: Record<string, any> | null = null;
 
-    for (const event of body.events) {
+    for (let index = 0; index < body.events.length; index += 1) {
+      const event = body.events[index];
+      const queueOrder = event.queueOrder ?? (index + 1);
+      const processedAt = new Date();
+      this.logger.log(
+        `[SYNC][QUEUE_REPLAY] eventId=${event.eventId} type=${event.type} tripId=${event.tripId ?? event.payload?.tripId ?? '-'} createdAt=${event.createdAt ?? event.payload?.timestamp ?? '-'} processedAt=${processedAt.toISOString()} queueOrder=${queueOrder}`,
+      );
       const existing = await this.prisma.processedEvent.findUnique({
         where: { tenantId_eventId: { tenantId, eventId: event.eventId } },
       });
       if (existing) {
+        this.logger.log(
+          `[SYNC][QUEUE_REPLAY] skipped reason=already_processed eventId=${event.eventId} type=${event.type} queueOrder=${queueOrder}`,
+        );
         syncedEventIds.push(event.eventId);
         continue;
       }
@@ -99,6 +109,7 @@ export class SyncService {
           type: event.type,
           payload: payload as any,
           status: 'PROCESSED',
+          processedAt,
           syncedAt: new Date(),
           retryCount: event.retryCount ?? 0,
         } as any,
@@ -172,8 +183,7 @@ export class SyncService {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
           await this.trips.inTransit(tripId, tenantId, {
-            driverId: actor.driverId ?? payload.driverId ?? null,
-            actorUserId: actor.userId,
+            ...this.buildFlowContext(event, payload, actor, type),
           });
           return { snapshot: await this.buildSnapshot(tenantId, trip.routeId) };
         }
@@ -186,8 +196,7 @@ export class SyncService {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
           await this.trips.arrived(tripId, tenantId, {
-            driverId: actor.driverId ?? payload.driverId ?? null,
-            actorUserId: actor.userId,
+            ...this.buildFlowContext(event, payload, actor, type),
           });
           return { snapshot: await this.buildSnapshot(tenantId, trip.routeId) };
         }
@@ -200,8 +209,7 @@ export class SyncService {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
           await this.trips.complete(tripId, tenantId, {
-            driverId: actor.driverId ?? payload.driverId ?? null,
-            actorUserId: actor.userId,
+            ...this.buildFlowContext(event, payload, actor, type),
           });
           return { snapshot: await this.buildSnapshot(tenantId, trip.routeId) };
         }
@@ -213,9 +221,57 @@ export class SyncService {
           if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
+          const protectedStatuses = ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED'];
+          if (protectedStatuses.includes(trip.status)) {
+            this.logger.warn(
+              `[SYNC][TRIP_NO_SHOW_GUARD] blocked reason=status_guard tripId=${trip.id} currentStatus=${trip.status} eventCreatedAt=${event.createdAt ?? payload.timestamp ?? '-'} eventId=${event.eventId}`,
+            );
+            return this.conflict(
+              event,
+              'trip',
+              trip.id,
+              payload,
+              { status: trip.status },
+              'server_authoritative',
+              'Trip already advanced to boarding or beyond; stale no-show ignored',
+            );
+          }
+          const eventCreatedAt = this.parseEventTimestamp(event.createdAt ?? payload.timestamp ?? null);
+          const latestBoardingTransition = await this.prisma.operationalTimeline.findFirst({
+            where: {
+              tenantId,
+              tripId: trip.id,
+              toState: { in: ['BOARDING', 'BOARDED', 'IN_TRANSIT', 'ARRIVED', 'COMPLETED'] as any[] },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { toState: true, createdAt: true, source: true },
+          });
+          const hasNewerBoardingTransition =
+            latestBoardingTransition != null
+            && (eventCreatedAt == null || latestBoardingTransition.createdAt > eventCreatedAt);
+          if (hasNewerBoardingTransition && latestBoardingTransition) {
+            this.logger.warn(
+              `[SYNC][TRIP_NO_SHOW_GUARD] blocked reason=newer_boarding_state tripId=${trip.id} newerState=${latestBoardingTransition.toState} newerAt=${latestBoardingTransition.createdAt.toISOString()} eventCreatedAt=${eventCreatedAt?.toISOString() ?? '-'} eventId=${event.eventId}`,
+            );
+            return this.conflict(
+              event,
+              'trip',
+              trip.id,
+              payload,
+              {
+                status: trip.status,
+                newerState: latestBoardingTransition.toState,
+                newerStateAt: latestBoardingTransition.createdAt.toISOString(),
+                newerStateSource: latestBoardingTransition.source ?? null,
+              },
+              'server_authoritative',
+              eventCreatedAt == null
+                ? 'Trip has boarding-related transition and no-show timestamp is missing; stale no-show ignored'
+                : 'Trip has newer boarding-related transition; stale no-show ignored',
+            );
+          }
           await this.trips.noShow(tripId, tenantId, {
-            driverId: actor.driverId ?? payload.driverId ?? null,
-            actorUserId: actor.userId,
+            ...this.buildFlowContext(event, payload, actor, type),
           });
           return { snapshot: await this.buildSnapshot(tenantId, trip.routeId) };
         }
@@ -261,8 +317,7 @@ export class SyncService {
           }
           if (checkpoint === 'ARRIVAL') {
             await this.trips.arrived(effectiveTripId, tenantId, {
-              driverId: actor.driverId ?? payload.driverId ?? null,
-              actorUserId: actor.userId,
+              ...this.buildFlowContext(event, payload, actor, type),
             });
           } else if (checkpoint === 'CHECK_IN') {
             if (['SCHEDULED', 'PENDING', 'CONFIRMED'].includes(trip.status)) {
@@ -280,8 +335,7 @@ export class SyncService {
                 patientId: resolvedPatientId ?? trip.patientId,
               },
               {
-                driverId: actor.driverId ?? payload.driverId ?? null,
-                actorUserId: actor.userId,
+                ...this.buildFlowContext(event, payload, actor, type),
                 source: type,
                 checkpoint,
               },
@@ -471,6 +525,29 @@ export class SyncService {
         type: event.type,
       },
     };
+  }
+
+  private buildFlowContext(
+    event: OfflineSyncEvent,
+    payload: Record<string, any>,
+    actor: { userId: string; driverId?: string; role: string },
+    type: string,
+  ) {
+    const endpointFromPayload = payload.path ?? payload.endpoint ?? null;
+    return {
+      driverId: actor.driverId ?? payload.driverId ?? null,
+      actorUserId: actor.userId,
+      sourceScreen: payload.sourceScreen ?? payload.screen ?? null,
+      sourceAction: payload.sourceAction ?? payload.action ?? type,
+      endpoint: endpointFromPayload ?? '/sync/offline-events',
+      source: type,
+    };
+  }
+
+  private parseEventTimestamp(raw?: string | null): Date | null {
+    if (!raw) return null;
+    const parsed = new Date(String(raw));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
   private async buildSnapshot(tenantId: string, routeId?: string | null) {

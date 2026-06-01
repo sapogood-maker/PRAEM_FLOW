@@ -45,14 +45,29 @@ class SyncEngine extends ChangeNotifier {
     notifyListeners();
     try {
       final pending = await _queue.pendingEvents();
+      final rawPending = await _queue.rawPendingQueue();
+      if (rawPending.isEmpty) {
+        _retryIndex = 0;
+        return;
+      }
+      final replayOrderByEventId = <String, int>{};
+      for (var index = 0; index < pending.length; index++) {
+        final eventId = pending[index]['eventId']?.toString();
+        if (eventId == null || eventId.isEmpty) continue;
+        replayOrderByEventId[eventId] = index + 1;
+      }
+      _logPendingQueueAudit(rawPending,
+          replayOrderByEventId: replayOrderByEventId);
       if (pending.isEmpty) {
         _retryIndex = 0;
+        debugPrint(
+            '[SYNC][QUEUE_AUDIT] no replayable pending events after stale filtering');
         return;
       }
 
       for (var index = 0; index < pending.length; index += 25) {
         final batch = pending.skip(index).take(25).toList();
-        await _postBatch(batch);
+        await _postBatch(batch, queueOffset: index);
       }
 
       _retryIndex = 0;
@@ -79,13 +94,25 @@ class SyncEngine extends ChangeNotifier {
     }
   }
 
-  Future<void> _postBatch(List<Map<String, dynamic>> batch) async {
+  Future<void> _postBatch(List<Map<String, dynamic>> batch,
+      {required int queueOffset}) async {
     final deviceId = (batch.first['deviceId'] as String?) ?? 'unknown';
+    final processedAt = DateTime.now().toUtc().toIso8601String();
+    final eventsWithOrder = batch.asMap().entries.map((entry) {
+      final queueOrder = queueOffset + entry.key + 1;
+      final event = Map<String, dynamic>.from(entry.value);
+      event['queueOrder'] = queueOrder;
+      return event;
+    }).toList();
+    for (final event in eventsWithOrder) {
+      debugPrint(
+          '[SYNC][REPLAY] type=${event['type']} tripId=${event['tripId'] ?? (event['payload'] as Map?)?['tripId'] ?? 'null'} createdAt=${event['createdAt'] ?? 'null'} processedAt=$processedAt queueOrder=${event['queueOrder']} eventId=${event['eventId']}');
+    }
     final response = await _dio.post(
       '${AppConfig.apiBaseUrl}/sync/offline-events',
       data: {
         'deviceId': deviceId,
-        'events': batch,
+        'events': eventsWithOrder,
       },
       options: Options(
         headers: {
@@ -105,7 +132,7 @@ class SyncEngine extends ChangeNotifier {
         ? Map<String, dynamic>.from(body['snapshot'] as Map)
         : null;
 
-    for (final item in batch) {
+    for (final item in eventsWithOrder) {
       if (syncedIds.contains(item['eventId'].toString())) {
         await _queue.markSynced(
             item['tableName'] as String? ?? 'offline_sync_queue',
@@ -168,6 +195,21 @@ class SyncEngine extends ChangeNotifier {
     _retryTimer = Timer(Duration(seconds: seconds), () {
       syncNow();
     });
+  }
+
+  void _logPendingQueueAudit(
+    List<Map<String, dynamic>> pending, {
+    required Map<String, int> replayOrderByEventId,
+  }) {
+    for (final event in pending) {
+      final eventId = event['eventId']?.toString();
+      final queueOrder = eventId == null ? null : replayOrderByEventId[eventId];
+      final tripId = event['tripId']?.toString() ??
+          (event['payload'] as Map?)?['tripId']?.toString() ??
+          'null';
+      debugPrint(
+          '[SYNC][QUEUE_AUDIT] type=${event['type']} tripId=$tripId createdAt=${event['createdAt'] ?? 'null'} processedAt=- queueOrder=${queueOrder ?? 'filtered'} eventId=${event['eventId']} replay=${queueOrder == null ? 'no' : 'yes'}');
+    }
   }
 
   void _onConnectivityChanged() {

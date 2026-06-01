@@ -6,6 +6,21 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 @Injectable()
 export class TripsService {
   private readonly logger = new Logger(TripsService.name);
+  private toFlowContext(context?: {
+    driverId?: string;
+    actorUserId?: string;
+    sourceScreen?: string;
+    sourceAction?: string;
+    endpoint?: string;
+  }) {
+    return {
+      driverId: context?.driverId ?? null,
+      actorUserId: context?.actorUserId ?? null,
+      sourceScreen: context?.sourceScreen ?? null,
+      sourceAction: context?.sourceAction ?? null,
+      endpoint: context?.endpoint ?? null,
+    };
+  }
   constructor(
     private readonly prisma: PrismaService,
     private readonly flow: OperationalFlowService,
@@ -42,21 +57,19 @@ export class TripsService {
     });
   }
 
-  async board(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+  async board(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     this.logger.log(`[TRIP] board tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.confirmBoarding(tenantId, { tripId: id }, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_MANUAL_BOARD',
     });
     return result.trip;
   }
 
-  async boarded(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+  async boarded(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     this.logger.log(`[TRIP] boarded tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.markBoarded(tenantId, { tripId: id }, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_BOARDED',
     });
 
@@ -73,31 +86,28 @@ export class TripsService {
     return result.trip;
   }
 
-  async inTransit(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+  async inTransit(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     this.logger.log(`[TRIP] inTransit tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.startInTransit(tenantId, { tripId: id }, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_IN_TRANSIT',
     });
     return result.trip;
   }
 
-  async arrived(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+  async arrived(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     this.logger.log(`[TRIP] arrived tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.markArrived(tenantId, { tripId: id }, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_ARRIVED',
     });
     return result.trip;
   }
 
-  async complete(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+  async complete(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     this.logger.log(`[TRIP] complete tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.completeTrip(tenantId, { tripId: id }, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_COMPLETED',
     });
 
@@ -121,12 +131,11 @@ export class TripsService {
     return result.trip;
   }
 
-  async noShow(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+  async noShow(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     const trip = await this.prisma.trip.findFirst({ where: { id, tenantId } });
     if (!trip) throw new NotFoundException('Trip not found');
     const result = await this.flow.markNoShow(tenantId, { tripId: id }, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_NO_SHOW',
     });
 
@@ -140,20 +149,18 @@ export class TripsService {
     return result.trip;
   }
 
-  async reinstate(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string }) {
+  async reinstate(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     this.logger.log(`[TRIP] reinstate tenantId=${tenantId} tripId=${id}`);
     const result = await this.flow.reinstateTrip(tenantId, id, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_REINSTATE',
     });
     return result.trip;
   }
 
-  async recoverStale(tenantId: string, cutoffHours?: number, context?: { driverId?: string; actorUserId?: string }) {
+  async recoverStale(tenantId: string, cutoffHours?: number, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     return this.flow.recoverStaleTrips(tenantId, cutoffHours ?? 12, {
-      driverId: context?.driverId ?? null,
-      actorUserId: context?.actorUserId ?? null,
+      ...this.toFlowContext(context),
       source: 'TRIP_RECOVERY_STALE',
     });
   }

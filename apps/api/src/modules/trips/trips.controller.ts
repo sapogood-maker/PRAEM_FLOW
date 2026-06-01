@@ -36,6 +36,9 @@ export class TripsController {
     return this.tripsService.board(id, req.user.tenantId, {
       driverId: req.user.driverId,
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_BOARD',
+      endpoint: `/trips/${id}/board`,
     });
   }
 
@@ -46,6 +49,9 @@ export class TripsController {
     return this.tripsService.boarded(id, req.user.tenantId, {
       driverId: req.user.driverId,
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_BOARDED',
+      endpoint: `/trips/${id}/boarded`,
     });
   }
 
@@ -56,6 +62,9 @@ export class TripsController {
     return this.tripsService.inTransit(id, req.user.tenantId, {
       driverId: req.user.driverId,
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_IN_TRANSIT',
+      endpoint: `/trips/${id}/in-transit`,
     });
   }
 
@@ -66,6 +75,9 @@ export class TripsController {
     return this.tripsService.arrived(id, req.user.tenantId, {
       driverId: req.user.driverId,
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_ARRIVED',
+      endpoint: `/trips/${id}/arrived`,
     });
   }
 
@@ -76,6 +88,9 @@ export class TripsController {
     return this.tripsService.complete(id, req.user.tenantId, {
       driverId: req.user.driverId,
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_COMPLETE',
+      endpoint: `/trips/${id}/complete`,
     });
   }
 
@@ -85,6 +100,9 @@ export class TripsController {
     return this.tripsService.noShow(id, req.user.tenantId, {
       driverId: req.user.driverId,
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_NO_SHOW',
+      endpoint: `/trips/${id}/no-show`,
     });
   }
 
@@ -93,6 +111,9 @@ export class TripsController {
   reinstate(@Request() req: AuthRequest, @Param('id') id: string) {
     return this.tripsService.reinstate(id, req.user.tenantId, {
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_REINSTATE',
+      endpoint: `/trips/${id}/reinstate`,
     });
   }
 
@@ -101,6 +122,9 @@ export class TripsController {
   recoverStale(@Request() req: AuthRequest, @Body() body: { cutoffHours?: number }) {
     return this.tripsService.recoverStale(req.user.tenantId, body?.cutoffHours, {
       actorUserId: req.user.userId,
+      sourceScreen: 'TripsController',
+      sourceAction: 'REST_RECOVER_STALE',
+      endpoint: '/trips/recovery/stale',
     });
   }
 

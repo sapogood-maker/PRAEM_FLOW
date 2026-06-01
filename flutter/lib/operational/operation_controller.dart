@@ -523,6 +523,8 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
     _ws.on('trip:no_show', (data) {
       final event = data as Map? ?? {};
       final tripId = event['tripId'] as String?;
+      debugPrint(
+          '[WS][TRIP] trip:no_show tripId=${tripId ?? 'null'} source=${event['source'] ?? 'null'} sourceScreen=${event['sourceScreen'] ?? 'null'} sourceAction=${event['sourceAction'] ?? 'null'} endpoint=${event['endpoint'] ?? 'null'}');
       if (tripId != null) _updateTripStatus(tripId, 'NO_SHOW');
       _transition(OperationalState.noShow);
     });
@@ -653,6 +655,9 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
         'vehicleId': _driverState.vehicle?['id'] as String? ??
             _auth.vehicle?['id'] as String?,
         'reason': reason ?? 'Issue reported by driver',
+        'sourceScreen': 'MissionCenterScreen',
+        'sourceAction': 'TRIP_ISSUE',
+        'endpoint': '/driver/mission/issue',
         'timestamp': DateTime.now().toIso8601String(),
       },
       deviceId: deviceId,
@@ -807,6 +812,9 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
             _auth.vehicle?['id'] as String?,
         'deviceId': _driverState.deviceId,
         'tenantId': _auth.tenantId,
+        'sourceScreen': 'OperationController',
+        'sourceAction': type,
+        'endpoint': path,
         'timestamp': DateTime.now().toIso8601String(),
       };
       await _offlineQueue.enqueueOperationalAction(
@@ -858,6 +866,9 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
             _auth.vehicle?['id'] as String?,
         'deviceId': _driverState.deviceId,
         'tenantId': _auth.tenantId,
+        'sourceScreen': 'MissionCenterScreen',
+        'sourceAction': type,
+        'endpoint': path,
         'timestamp': DateTime.now().toIso8601String(),
       };
       await _offlineQueue.enqueueOperationalAction(

@@ -19,6 +19,9 @@ type FlowContext = {
   gpsLat?: number | null;
   gpsLng?: number | null;
   source?: string | null;
+  sourceScreen?: string | null;
+  sourceAction?: string | null;
+  endpoint?: string | null;
 };
 
 type OperationalState =
@@ -107,6 +110,18 @@ export class OperationalFlowService {
       'DISPATCHED',
       { ...context, source: context.source ?? 'dispatch' },
       true,
+    );
+  }
+
+  private logTripStatusChange(params: {
+    tripId: string;
+    previousStatus?: string | null;
+    newStatus?: string | null;
+    context: FlowContext;
+    note?: string;
+  }) {
+    this.logger.log(
+      `[TRIP_STATUS_CHANGE] tripId=${params.tripId} previous=${params.previousStatus ?? '-'} next=${params.newStatus ?? '-'} source=${params.context.source ?? 'api'} sourceScreen=${params.context.sourceScreen ?? '-'} sourceAction=${params.context.sourceAction ?? '-'} endpoint=${params.context.endpoint ?? '-'} checkpoint=${params.context.checkpoint ?? '-'} note=${params.note ?? '-'}`,
     );
   }
 
@@ -297,6 +312,13 @@ export class OperationalFlowService {
 
     const now = new Date();
     const updated = await this.updateTripWithVersion(trip.id, trip.version ?? 1, { status: 'CONFIRMED', boardedAt: null });
+    this.logTripStatusChange({
+      tripId: trip.id,
+      previousStatus: trip.status,
+      newStatus: updated.status,
+      context,
+      note: 'reinstateTrip',
+    });
 
     // sync queue if present
     const queue = await this.findLatestQueue(tenantId, trip.patientId);
@@ -447,7 +469,15 @@ export class OperationalFlowService {
     for (const trip of pendingTrips) {
       const isBoarded = !!trip.boardedAt;
       if (isBoarded) {
+        const previousStatus = trip.status;
         await this.updateTripWithVersion(trip.id, trip.version ?? 1, { status: 'COMPLETED', completedAt: now });
+        this.logTripStatusChange({
+          tripId: trip.id,
+          previousStatus,
+          newStatus: 'COMPLETED',
+          context,
+          note: 'forceCompleteRoute',
+        });
         completedTripIds.push(trip.id);
         this.logger.log(`[FINALIZE] trip forced COMPLETED tripId=${trip.id} boardedAt=${trip.boardedAt}`);
 
@@ -464,7 +494,15 @@ export class OperationalFlowService {
         this.emitToRoute(tenantId, context.driverId ?? null, 'trip:completed', payload);
         this.emitToRoute(tenantId, context.driverId ?? null, 'patient.completed', payload);
       } else {
+        const previousStatus = trip.status;
         await this.updateTripWithVersion(trip.id, trip.version ?? 1, { status: 'NO_SHOW' });
+        this.logTripStatusChange({
+          tripId: trip.id,
+          previousStatus,
+          newStatus: 'NO_SHOW',
+          context,
+          note: 'forceCompleteRoute',
+        });
         noShowTripIds.push(trip.id);
         this.logger.log(`[FINALIZE] trip forced NO_SHOW tripId=${trip.id}`);
 
@@ -623,7 +661,9 @@ export class OperationalFlowService {
     context: FlowContext = {},
     allowNoop = false,
   ) {
-    this.logger.log(`[OPS] transition request tenantId=${tenantId} target=${targetState} routeId=${scope.routeId ?? '-'} tripId=${scope.tripId ?? '-'} patientId=${scope.patientId ?? '-'} source=${context.source ?? 'api'}`);
+    this.logger.log(
+      `[OPS] transition request tenantId=${tenantId} target=${targetState} routeId=${scope.routeId ?? '-'} tripId=${scope.tripId ?? '-'} patientId=${scope.patientId ?? '-'} source=${context.source ?? 'api'} sourceScreen=${context.sourceScreen ?? '-'} sourceAction=${context.sourceAction ?? '-'} endpoint=${context.endpoint ?? '-'}`,
+    );
     const entity = await this.loadEntity(tenantId, scope);
     const currentState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
     const operationId = entity.route.operationId ?? entity.route.operation?.id ?? entity.trip?.operationId ?? entity.trip?.route?.operation?.id ?? null;
@@ -702,8 +742,16 @@ export class OperationalFlowService {
     }
     if (targetState === 'BOARDING' && trip) {
       // Mark passenger as in the process of boarding. Actual boardedAt is set when BOARDED state is applied.
+      const previousStatus = trip.status;
       trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'BOARDING', qrScanned: false });
       tripVersion = trip?.version ?? (tripVersion + 1);
+      this.logTripStatusChange({
+        tripId: trip!.id,
+        previousStatus,
+        newStatus: trip!.status,
+        context,
+        note: 'transitionState',
+      });
       route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'BOARDING' });
       routeVersion = route.operationalVersion ?? routeVersion + 1;
       this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
@@ -714,8 +762,16 @@ export class OperationalFlowService {
     }
     if (targetState === 'BOARDED' && trip) {
       // Passenger confirmed aboard the vehicle
+      const previousStatus = trip.status;
       trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'BOARDED', qrScanned: true, boardedAt: now });
       tripVersion = trip?.version ?? (tripVersion + 1);
+      this.logTripStatusChange({
+        tripId: trip!.id,
+        previousStatus,
+        newStatus: trip!.status,
+        context,
+        note: 'transitionState',
+      });
       route = await this.updateRouteWithVersion(route.id, routeVersion, { status: 'ACTIVE', operationalState: 'PASSENGERS_ONBOARD' });
       routeVersion = route.operationalVersion ?? routeVersion + 1;
       this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
@@ -732,8 +788,16 @@ export class OperationalFlowService {
         this.logger.warn(`[OPS] transition rejected reason=not_boarded tenantId=${tenantId} routeId=${route.id} tripId=${trip.id}`);
         throw new BadRequestException('Only boarded passengers can enter in-transit');
       }
+      const previousStatus = trip.status;
       trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'IN_TRANSIT' });
       tripVersion = trip?.version ?? (tripVersion + 1);
+      this.logTripStatusChange({
+        tripId: trip!.id,
+        previousStatus,
+        newStatus: trip!.status,
+        context,
+        note: 'transitionState',
+      });
       route = await this.updateRouteWithVersion(route.id, routeVersion, { operationalState: 'IN_TRANSIT' });
       routeVersion = route.operationalVersion ?? routeVersion + 1;
       queueUpdate.status = 'IN_TRANSIT';
@@ -741,8 +805,16 @@ export class OperationalFlowService {
       this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
     }
     if (targetState === 'ARRIVED' && trip) {
+      const previousStatus = trip.status;
       trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'ARRIVED' });
       tripVersion = trip?.version ?? (tripVersion + 1);
+      this.logTripStatusChange({
+        tripId: trip!.id,
+        previousStatus,
+        newStatus: trip!.status,
+        context,
+        note: 'transitionState',
+      });
       route = await this.updateRouteWithVersion(route.id, routeVersion, { operationalState: 'ARRIVED' });
       routeVersion = route.operationalVersion ?? routeVersion + 1;
       queueUpdate.status = 'ARRIVED';
@@ -751,8 +823,16 @@ export class OperationalFlowService {
     }
     if (targetState === 'COMPLETED') {
       if (trip) {
+        const previousStatus = trip.status;
         trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'COMPLETED', completedAt: now });
         tripVersion = trip?.version ?? (tripVersion + 1);
+        this.logTripStatusChange({
+          tripId: trip!.id,
+          previousStatus,
+          newStatus: trip!.status,
+          context,
+          note: 'transitionState',
+        });
         queueUpdate.status = 'COMPLETED';
         this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       }
@@ -770,8 +850,16 @@ export class OperationalFlowService {
       }
     }
     if (targetState === 'NO_SHOW' && trip) {
+      const previousStatus = trip.status;
       trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'NO_SHOW' });
       tripVersion = trip?.version ?? (tripVersion + 1);
+      this.logTripStatusChange({
+        tripId: trip!.id,
+        previousStatus,
+        newStatus: trip!.status,
+        context,
+        note: 'transitionState',
+      });
       queueUpdate.status = 'NO_SHOW';
       queueUpdate.noShowAt = now;
       queueUpdate.noShowReason = 'NOT_FOUND';
@@ -791,8 +879,16 @@ export class OperationalFlowService {
     }
     if (targetState === 'CANCELLED') {
       if (trip) {
+        const previousStatus = trip.status;
         trip = await this.updateTripWithVersion(trip.id, tripVersion, { status: 'CANCELLED' });
         tripVersion = trip?.version ?? (tripVersion + 1);
+        this.logTripStatusChange({
+          tripId: trip!.id,
+          previousStatus,
+          newStatus: trip!.status,
+          context,
+          note: 'transitionState',
+        });
         queueUpdate.status = 'CANCELLED';
         this.logger.log(`[TRIP] updated tripId=${trip?.id ?? '-'} status=${trip?.status ?? '-'}`);
       } else {
@@ -1570,6 +1666,9 @@ export class OperationalFlowService {
       gpsLng: params.context.gpsLng ?? null,
       deviceId: params.context.deviceId ?? null,
       source: params.context.source ?? 'api',
+      sourceScreen: params.context.sourceScreen ?? null,
+      sourceAction: params.context.sourceAction ?? null,
+      endpoint: params.context.endpoint ?? null,
       timestamp: params.timestamp.toISOString(),
     };
   }

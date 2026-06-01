@@ -146,18 +146,30 @@ class OfflineStorageService {
     if (table == 'offline_sync_queue') {
       final rows = await db.rawQuery(
         '''
-        SELECT *
-        FROM offline_sync_queue
-        WHERE syncStatus = ?
+        SELECT q.*
+        FROM offline_sync_queue q
+        WHERE q.syncStatus = ?
+          AND NOT (
+            q.type = 'TRIP_NO_SHOW'
+            AND q.tripId IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM offline_sync_queue newer
+              WHERE newer.syncStatus = q.syncStatus
+                AND newer.tripId = q.tripId
+                AND newer.createdAt > q.createdAt
+                AND newer.type IN ('QR_SCAN', 'BOARDING', 'TRIP_BOARDED', 'TRIP_STARTED', 'TRIP_ARRIVED', 'TRIP_COMPLETED')
+            )
+          )
         ORDER BY
           CASE
-            WHEN type = 'GPS_UPDATE' THEN 1
-            WHEN type IN ('CHECK_IN', 'PATIENT_CHECKIN', 'TRIP_CHECK_IN') THEN 2
-            WHEN type IN ('ROUTE_START', 'ROUTE_COMPLETE', 'ROUTE_FORCE_COMPLETE', 'TRIP_STOP_STATUS') THEN 3
-            WHEN type IN ('QR_SCAN', 'BOARDING') THEN 4
+            WHEN q.type = 'GPS_UPDATE' THEN 1
+            WHEN q.type IN ('CHECK_IN', 'PATIENT_CHECKIN', 'TRIP_CHECK_IN') THEN 2
+            WHEN q.type IN ('ROUTE_START', 'ROUTE_COMPLETE', 'ROUTE_FORCE_COMPLETE', 'TRIP_STOP_STATUS') THEN 3
+            WHEN q.type IN ('QR_SCAN', 'BOARDING') THEN 4
             ELSE 5
           END,
-          createdAt ASC
+          q.createdAt ASC
         ${limit != null ? 'LIMIT ?' : ''}
         ''',
         limit != null ? [syncStatus, limit] : [syncStatus],
@@ -168,6 +180,18 @@ class OfflineStorageService {
       table,
       where: 'syncStatus = ?',
       whereArgs: [syncStatus],
+      orderBy: 'createdAt ASC',
+      limit: limit,
+    );
+    return rows.map(_mapEventRow).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> loadRawPendingQueue({int? limit}) async {
+    final db = await _database;
+    final rows = await db.query(
+      'offline_sync_queue',
+      where: 'syncStatus = ?',
+      whereArgs: const ['pending'],
       orderBy: 'createdAt ASC',
       limit: limit,
     );

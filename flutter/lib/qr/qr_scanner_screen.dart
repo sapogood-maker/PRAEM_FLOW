@@ -129,6 +129,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       'deviceId': deviceId,
       'operatorId': auth.driverId,
       'source': 'TABLET_SMART_SCANNER',
+      'sourceScreen': 'QrScannerScreen',
+      'sourceAction': 'QR_SCAN',
+      'endpoint': '/sync/offline-events',
       'timestamp': DateTime.now().toIso8601String(),
     };
 

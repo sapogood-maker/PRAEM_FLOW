@@ -11,7 +11,8 @@ class OfflineQueueService extends ChangeNotifier {
   int _pendingCount = 0;
   DateTime? _lastSyncedAt;
 
-  OfflineQueueService(this._storage, {Uuid? uuid}) : _uuid = uuid ?? const Uuid();
+  OfflineQueueService(this._storage, {Uuid? uuid})
+      : _uuid = uuid ?? const Uuid();
 
   int get pendingCount => _pendingCount;
   DateTime? get lastSyncedAt => _lastSyncedAt;
@@ -135,19 +136,27 @@ class OfflineQueueService extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> pendingEvents({int? limit}) async {
-    return _storage.loadEvents('offline_sync_queue', syncStatus: 'pending', limit: limit);
+    return _storage.loadEvents('offline_sync_queue',
+        syncStatus: 'pending', limit: limit);
+  }
+
+  Future<List<Map<String, dynamic>>> rawPendingQueue({int? limit}) async {
+    return _storage.loadRawPendingQueue(limit: limit);
   }
 
   Future<List<Map<String, dynamic>>> pendingBoardings({int? limit}) async {
-    return _storage.loadEvents('offline_boardings', syncStatus: 'pending', limit: limit);
+    return _storage.loadEvents('offline_boardings',
+        syncStatus: 'pending', limit: limit);
   }
 
   Future<List<Map<String, dynamic>>> pendingGps({int? limit}) async {
-    return _storage.loadEvents('offline_gps', syncStatus: 'pending', limit: limit);
+    return _storage.loadEvents('offline_gps',
+        syncStatus: 'pending', limit: limit);
   }
 
   Future<List<Map<String, dynamic>>> pendingQrScans({int? limit}) async {
-    return _storage.loadEvents('offline_qr_scans', syncStatus: 'pending', limit: limit);
+    return _storage.loadEvents('offline_qr_scans',
+        syncStatus: 'pending', limit: limit);
   }
 
   Future<void> markSynced(String table, String eventId) async {
@@ -157,7 +166,8 @@ class OfflineQueueService extends ChangeNotifier {
     await refreshMetrics();
   }
 
-  Future<void> markConflict(String table, String eventId, {required String reason}) async {
+  Future<void> markConflict(String table, String eventId,
+      {required String reason}) async {
     await _storage.markConflict(table, eventId, reason: reason);
     await _storage.markConflict('offline_events', eventId, reason: reason);
     await _storage.markConflict('offline_sync_queue', eventId, reason: reason);

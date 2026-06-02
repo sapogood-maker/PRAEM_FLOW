@@ -385,8 +385,19 @@ export class OperationalFlowService {
     });
     const processed: string[] = [];
     for (const t of staleTrips) {
-      await this.transitionState(tenantId, { tripId: t.id }, 'NO_SHOW', { ...context, source: 'RECOVERY_STALE_TRIPS' });
-      processed.push(t.id);
+      try {
+        // Protect trips that are still WAITING_DISPATCH or PENDING_DISPATCH in the queue
+        const latestQueue = await this.findLatestQueue(tenantId, t.patientId);
+        if (latestQueue && ['WAITING_DISPATCH', 'PENDING_DISPATCH'].includes(String(latestQueue.status).toUpperCase())) {
+          this.logger.log(`[RECOVERY] [OPS] skipping auto-NO_SHOW for tripId=${t.id} because queue status=${latestQueue.status}`);
+          continue;
+        }
+
+        await this.transitionState(tenantId, { tripId: t.id }, 'NO_SHOW', { ...context, source: 'RECOVERY_STALE_TRIPS' });
+        processed.push(t.id);
+      } catch (err) {
+        this.logger.warn(`[RECOVERY] [OPS] failed marking trip NO_SHOW tripId=${t.id} error=${String(err)}`);
+      }
     }
     this.logger.log(`[RECOVERY] [OPS] marked ${processed.length} stale trips as NO_SHOW`);
     return { processed };
@@ -464,6 +475,13 @@ export class OperationalFlowService {
     const noShowTripIds: string[] = [];
 
     for (const trip of pendingTrips) {
+      // Skip trips that are still WAITING_DISPATCH / PENDING_DISPATCH in the queue
+      const latestQueue = await this.findLatestQueue(tenantId, trip.patientId);
+      if (latestQueue && ['WAITING_DISPATCH', 'PENDING_DISPATCH'].includes(String(latestQueue.status).toUpperCase())) {
+        this.logger.log(`[FINALIZE] skipping tripId=${trip.id} because queue status=${latestQueue.status}`);
+        continue;
+      }
+
       const isBoarded = !!trip.boardedAt;
       if (isBoarded) {
         const previousStatus = trip.status;

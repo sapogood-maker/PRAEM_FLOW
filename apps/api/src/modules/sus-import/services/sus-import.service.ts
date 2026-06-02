@@ -626,9 +626,38 @@ export class SusImportService {
         },
         select: { id: true },
       });
+      this.logger.log(`[CREATE_NEW_DEMAND_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} demandId=${created.id}`);
       return { id: created.id, created: true, updated: false };
     }
 
+    // If existing demand found, check if it is effectively terminal (all its queues are terminal)
+    const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
+    const activeQueueCount = await this.prisma.operationalQueue.count({
+      where: { tenantId, demandId: existing.id, status: { notIn: terminalStatuses as any[] } },
+    });
+
+    if (activeQueueCount === 0) {
+      // Treat existing demand as eligible to be considered a new demand for this import.
+      // We'll update its sourceImportId and other missing metadata, and log the action.
+      const dataFromTerminal: Prisma.OperationalDemandUpdateInput = {};
+      if (!existing.sourceImportId) dataFromTerminal.sourceImport = { connect: { id: importId } };
+      if (!existing.notes && row.notes) dataFromTerminal.notes = row.notes;
+      if (!existing.returnTrip && row.return_trip) dataFromTerminal.returnTrip = true;
+      if (!existing.wheelchair && this.isWheelchair(row)) dataFromTerminal.wheelchair = true;
+      if (!existing.stretcher && this.isStretcher(row)) dataFromTerminal.stretcher = true;
+
+      if (Object.keys(dataFromTerminal).length > 0) {
+        await this.prisma.operationalDemand.update({ where: { id: existing.id }, data: dataFromTerminal });
+        this.logger.log(`[CREATE_NEW_DEMAND_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} demandId=${existing.id} reason=updated_from_terminal`);
+        return { id: existing.id, created: false, updated: true };
+      }
+
+      // No data to update but treating as new demand: just log and return existing so queue creation proceeds.
+      this.logger.log(`[CREATE_NEW_DEMAND_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} demandId=${existing.id} reason=terminal_only_no_updates`);
+      return { id: existing.id, created: false, updated: false };
+    }
+
+    // Otherwise there are active queues attached to this demand; update as usual.
     const data: Prisma.OperationalDemandUpdateInput = {};
     if (!existing.sourceImportId) data.sourceImport = { connect: { id: importId } };
     if (!existing.notes && row.notes) data.notes = row.notes;
@@ -676,6 +705,29 @@ export class SusImportService {
         },
         select: { id: true },
       });
+      return { id: created.id, created: true, updated: false };
+    }
+
+    // If existing queue is terminal, create a new queue record instead of updating the terminal one
+    const terminalStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
+    if (terminalStatuses.includes(String(existing.status).toUpperCase())) {
+      const created = await this.prisma.operationalQueue.create({
+        data: {
+          tenantId,
+          demandId,
+          patientId,
+          healthcareLocationId: destinationId,
+          destination: row.destination_hospital,
+          appointmentDate,
+          priority: row.priority as QueuePriority,
+          queueType: 'LOGISTICS',
+          status: QueueStatus.WAITING_DISPATCH,
+          confirmationStatus: 'PENDING',
+          notes: row.notes,
+        },
+        select: { id: true },
+      });
+      this.logger.log(`[CREATE_NEW_QUEUE_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${destinationId} newQueueId=${created.id} previousStatus=${existing.status}`);
       return { id: created.id, created: true, updated: false };
     }
 

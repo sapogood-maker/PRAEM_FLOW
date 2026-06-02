@@ -19,7 +19,6 @@ import '../shared/widgets/operational_button.dart';
 import '../offline/offline_queue.dart';
 import '../operational/operation_controller.dart';
 import '../operational/sync_manager.dart';
-import '../offline_sync/connectivity_service.dart';
 import '../offline_sync/qr_offline_validator.dart';
 import '../config/app_config.dart';
 import '../core/l10n.dart';
@@ -75,7 +74,6 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     final ctrl = context.read<OperationController>();
     final offline = context.read<OfflineQueue>();
     final syncManager = context.read<SyncManager>();
-    final connectivity = context.read<ConnectivityService>();
     final validator = QrOfflineValidator(secret: AppConfig.offlineQrSecret);
     final validation = validator.validate(token);
     final payload = validation.payload ?? <String, dynamic>{'raw': token};
@@ -157,8 +155,35 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     );
     await syncManager.syncAll();
     await ctrl.loadRoute();
+
+    final syncError = syncManager.lastError;
+    final scannedTripId =
+        payload['tripId']?.toString() ?? payload['trip_id']?.toString();
+
+    // Validate the actual trip state from the server snapshot
+    bool confirmed = false;
+    if (syncError == null) {
+      if (scannedTripId != null) {
+        final tripEntry = ctrl.patients.firstWhere(
+          (p) => p['id']?.toString() == scannedTripId,
+          orElse: () => <String, dynamic>{},
+        );
+        final newStatus =
+            (tripEntry['status'] as String? ?? '').toUpperCase();
+        confirmed = newStatus == 'BOARDING' ||
+            newStatus == 'BOARDED' ||
+            newStatus == 'IN_TRANSIT';
+      } else {
+        confirmed = true;
+      }
+    }
+
     debugPrint(
-      '[SYNC][TRIP] QR boarding refreshed routeId=${resolvedRouteId ?? 'null'} routeStatus=${ctrl.activeRoute?['status'] ?? 'null'} source=api_snapshot',
+      '[QR_SCAN_RESULT] tripId=${scannedTripId ?? 'null'} '
+      'patientId=${resolvedPatientId ?? 'null'} '
+      'routeId=${resolvedRouteId ?? 'null'} '
+      'apiSuccess=${syncError == null} confirmed=$confirmed '
+      'message=${syncError ?? 'ok'}',
     );
 
     _clearTimer?.cancel();
@@ -169,6 +194,22 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         _error = null;
       });
     });
+
+    if (!confirmed) {
+      if (!mounted) return;
+      setState(() {
+        _error = _mapSyncError(syncError);
+        _result = null;
+      });
+      HapticFeedback.lightImpact();
+      return;
+    }
+
+    debugPrint(
+      '[SYNC][TRIP] QR boarding refreshed routeId=${resolvedRouteId ?? 'null'} '
+      'routeStatus=${ctrl.activeRoute?['status'] ?? 'null'} source=api_snapshot',
+    );
+
     if (!mounted) return;
     setState(() {
       _result = {
@@ -181,15 +222,40 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         'destination': payload['operationReference']?.toString() ??
             payload['boardingCode']?.toString() ??
             '—',
-        'status': connectivity.websocketConnected ? 'SYNCED' : 'PENDING_SYNC',
+        'status': 'SYNCED',
         'checkpoint': checkpoint,
-        'tripId': payload['tripId'] ?? payload['trip_id'],
+        'tripId': scannedTripId,
         'routeId': resolvedRouteId,
       };
       _error = null;
     });
     HapticFeedback.mediumImpact();
     SystemSound.play(SystemSoundType.click);
+  }
+
+  String _mapSyncError(String? error) {
+    if (error == null) return 'Embarque não confirmado pelo servidor';
+    final e = error.toLowerCase();
+    if (e.contains('trip not found') || e.contains('patient not found')) {
+      return 'Paciente não encontrado';
+    }
+    if (e.contains('route not found')) return 'Rota não encontrada';
+    if (e.contains('waiting_patient') || e.contains('not in') || e.contains('boarding')) {
+      return 'Rota não está em embarque';
+    }
+    if (e.contains('already closed') ||
+        e.contains('already completed') ||
+        e.contains('already closed on server')) {
+      return 'Viagem já encerrada';
+    }
+    if (e.contains('conflito') || e.contains('conflict')) {
+      return 'Conflito operacional detectado';
+    }
+    if (e.contains('invalid') || e.contains('inválido')) return 'QR inválido';
+    if (e.contains('falha') || e.contains('fail') || e.contains('error')) {
+      return 'Falha ao sincronizar';
+    }
+    return 'Falha ao sincronizar';
   }
 
   @override

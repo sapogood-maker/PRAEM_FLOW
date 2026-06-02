@@ -525,6 +525,23 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
       _transition(OperationalState.boarding);
     });
 
+    _ws.on('trip:boarded', (data) {
+      final event = data as Map? ?? {};
+      final tripId = event['tripId'] as String?;
+      final routeId = event['routeId'] as String?;
+      debugPrint(
+        '[WS][TRIP] trip:boarded tripId=${tripId ?? 'null'} routeId=${routeId ?? 'null'} '
+        'operationId=${event['operationId'] ?? 'null'} boardedAt=${event['boardedAt'] ?? 'null'} '
+        'source=${event['source'] ?? 'null'} sourceScreen=${event['sourceScreen'] ?? 'null'}',
+      );
+      if (tripId != null) _updateTripStatus(tripId, 'BOARDED');
+      if (routeId != null) {
+        final routeStatus = event['routeStatus'] as String?;
+        if (routeStatus != null) _updateRouteStatus(routeId, routeStatus);
+      }
+      _transition(OperationalState.boarded);
+    });
+
     _ws.on('trip:started', (data) {
       final event = data as Map? ?? {};
       final tripId = event['tripId'] as String?;
@@ -602,6 +619,27 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
       final routeId = event['routeId'] as String?;
       final tripId = event['tripId'] as String?;
       final status = event['status'] as String?;
+      if (routeId != null && event['routeStatus'] is String) {
+        _updateRouteStatus(routeId, event['routeStatus'] as String);
+      }
+      if (tripId != null && status != null) _updateTripStatus(tripId, status);
+      if (opState != null) {
+        _transition(operationalStateFromString(opState), force: true);
+      }
+    });
+
+    // API also emits 'operation:state_changed' (singular) — keep both listeners.
+    _ws.on('operation:state_changed', (data) {
+      final event = data as Map? ?? {};
+      final opState = event['operationalState'] as String?;
+      final routeId = event['routeId'] as String?;
+      final tripId = event['tripId'] as String?;
+      final status = event['status'] as String?;
+      debugPrint(
+        '[WS_STATE_CHANGE] operation:state_changed routeId=${routeId ?? 'null'} '
+        'operationId=${event['operationId'] ?? 'null'} operationalState=${opState ?? 'null'} '
+        'status=${status ?? 'null'} source=${event['source'] ?? 'null'}',
+      );
       if (routeId != null && event['routeStatus'] is String) {
         _updateRouteStatus(routeId, event['routeStatus'] as String);
       }

@@ -214,6 +214,26 @@ export class SyncService {
           return { snapshot: await this.buildSnapshot(tenantId, trip.routeId) };
         }
 
+        case 'TRIP_BOARDED': {
+          if (!tripId) throw new BadRequestException('tripId is required');
+          const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, select: { id: true, status: true, routeId: true } });
+          if (!trip) throw new NotFoundException('Trip not found');
+          if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(trip.status)) {
+            return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
+          }
+          this.logger.log(
+            `[BOARDING_FLOW] TRIP_BOARDED tripId=${trip.id} routeId=${trip.routeId} oldStatus=${trip.status} newStatus=BOARDED source=${payload.source ?? 'offline-sync'}`,
+          );
+          await this.trips.boarded(tripId, tenantId, {
+            ...this.buildFlowContext(event, payload, actor, type),
+          });
+          const boardedSnapshot = await this.buildSnapshot(tenantId, trip.routeId);
+          this.logger.log(
+            `[BOARDING_FLOW] TRIP_BOARDED completed tripId=${trip.id} routeId=${trip.routeId} operationId=${boardedSnapshot?.currentRoute?.operationId ?? 'null'}`,
+          );
+          return { snapshot: boardedSnapshot };
+        }
+
         case 'TRIP_NO_SHOW': {
           if (!tripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, select: { id: true, status: true, routeId: true } });

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { Prisma, QueuePriority, QueueStatus, SusImportRowStatus, SusImportStatus } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -28,6 +28,8 @@ export interface SyncCounters {
 
 @Injectable()
 export class SusImportService {
+  private readonly logger = new Logger(SusImportService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly parser: SusSpreadsheetParser,
@@ -633,7 +635,10 @@ export class SusImportService {
     if (!existing.returnTrip && row.return_trip) data.returnTrip = true;
     if (!existing.wheelchair && this.isWheelchair(row)) data.wheelchair = true;
     if (!existing.stretcher && this.isStretcher(row)) data.stretcher = true;
-    if (Object.keys(data).length === 0) return { id: existing.id, created: false, updated: false };
+    if (Object.keys(data).length === 0) {
+      this.logger.log(`[SKIP_DEMAND] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} reason=no_update_existing`);
+      return { id: existing.id, created: false, updated: false };
+    }
 
     await this.prisma.operationalDemand.update({ where: { id: existing.id }, data });
     return { id: existing.id, created: false, updated: true };
@@ -686,7 +691,10 @@ export class SusImportService {
     ) {
       data.status = QueueStatus.WAITING_DISPATCH;
     }
-    if (Object.keys(data).length === 0) return { id: existing.id, created: false, updated: false };
+    if (Object.keys(data).length === 0) {
+      this.logger.log(`[SKIP_QUEUE] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${destinationId} existingStatus=${existing.status} reason=no_update_existing`);
+      return { id: existing.id, created: false, updated: false };
+    }
 
     await this.prisma.operationalQueue.update({ where: { id: existing.id }, data });
     return { id: existing.id, created: false, updated: true };

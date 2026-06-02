@@ -4,38 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { routeService } from '@/services/operational.service';
 import { useRealtimeStore } from '@/store/realtime.store';
-
-// ─── PT-BR event labels ───────────────────────────────────────────────────────
-
-const EVENT_LABELS: Record<string, string> = {
-  OPERATION_IMPORTED: 'Operação importada',
-  SPREADSHEET_IMPORTED: 'Planilha importada',
-  SUS_IMPORT_UPLOADED: 'Arquivo SUS importado',
-  OPERATION_CREATED: 'Operação criada',
-  OPERATION_DISPATCHED: 'Operação despachada',
-  DRIVER_ASSIGNED: 'Motorista atribuído',
-  VEHICLE_ASSIGNED: 'Veículo atribuído',
-  PATIENT_CONFIRMED: 'Paciente confirmado',
-  PATIENT_CONFIRMATION_UPDATED: 'Confirmação atualizada',
-  QR_GENERATED: 'QR gerado',
-  QR_SCANNED: 'QR escaneado',
-  QUEUE_CREATED: 'Paciente na fila',
-  QUEUE_NO_SHOW: 'No-show na fila',
-  QUEUE_STATUS_CONFIRMED: 'Fila confirmada',
-  OPERATION_DELAYED: 'Operação atrasada',
-  OPERATION_CRITICAL_DELAY: 'Atraso crítico',
-  VEHICLE_OFFLINE: 'Veículo offline',
-  GPS_CHECKPOINT: 'Ponto GPS',
-  ARRIVED: 'Chegada ao destino',
-  COMPLETED: 'Operação concluída',
-  CANCELLED: 'Operação cancelada',
-  BOARDING: 'Embarque',
-  IN_TRANSIT: 'Em trânsito',
-  CONFIRMED: 'Confirmado',
-};
+import { formatStateTransition, translateEventType } from '@/lib/event-translations';
 
 function getEventLabel(eventType: string): string {
-  return EVENT_LABELS[eventType] ?? eventType.replace(/_/g, ' ').toLowerCase();
+  return translateEventType(eventType);
 }
 
 const EVENT_ICONS: Record<string, string> = {
@@ -148,7 +120,7 @@ export function OperationTimeline({ routeId, compact = false }: Props) {
                   )}
                   {event.fromState && event.toState && (
                     <span className='rounded bg-slate-800 px-1.5 py-0.5 font-mono'>
-                      {event.fromState} → {event.toState}
+                      {formatStateTransition(event.fromState, event.toState)}
                     </span>
                   )}
                   {event.source && (

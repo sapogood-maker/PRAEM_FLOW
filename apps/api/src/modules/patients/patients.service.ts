@@ -345,7 +345,7 @@ export class PatientsService {
 
   async findOne(id: string, tenantId: string) {
     const patient = await this.prisma.patient.findFirst({ where: { id, tenantId } });
-    if (!patient) throw new NotFoundException('Patient not found');
+    if (!patient) throw new NotFoundException('Paciente não encontrado');
     return patient;
   }
 
@@ -493,12 +493,12 @@ export class PatientsService {
     if (parsed.type === 'TRIP' || tripToken) {
       const trip: any = tripToken?.trip;
       if (!trip) {
-        throw new NotFoundException('Trip not found');
+        throw new NotFoundException('Viagem não encontrada');
       }
       if (parsed.secureHash) {
         const tripExpiresAt = tripToken?.expiresAt ?? (parsed.expiresAt ? new Date(parsed.expiresAt) : null);
         if (!tripExpiresAt || Number.isNaN(tripExpiresAt.getTime())) {
-          throw new BadRequestException('QR payload is incomplete');
+          throw new BadRequestException('Payload de QR incompleto');
         }
         const expectedTripPayload = buildTripQrPayload({
           tripId: trip.id,
@@ -510,7 +510,7 @@ export class PatientsService {
           expiresAt: tripExpiresAt,
         });
         if (parsed.secureHash !== expectedTripPayload.secure_hash) {
-          throw new ForbiddenException('QR signature mismatch');
+          throw new ForbiddenException('Assinatura de QR inválida');
         }
       }
     } else {
@@ -522,7 +522,7 @@ export class PatientsService {
         expiresAt: patient.qrExpiresAt ?? null,
       });
       if (parsed.secureHash && parsed.secureHash !== expectedPatientPayload.secure_hash) {
-        throw new ForbiddenException('QR signature mismatch');
+        throw new ForbiddenException('Assinatura de QR inválida');
       }
     }
 
@@ -788,7 +788,7 @@ export class PatientsService {
         ...(payload.cpf ? { cpf: normalizeCpf(payload.cpf) } : {}),
       },
     });
-    if (!patient) throw new NotFoundException('Patient not found');
+    if (!patient) throw new NotFoundException('Paciente não encontrado');
     return { valid: true, patient: stripSensitive(patient as unknown as Record<string, unknown>) };
   }
 }

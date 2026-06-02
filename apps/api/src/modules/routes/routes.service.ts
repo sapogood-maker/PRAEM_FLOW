@@ -88,7 +88,7 @@ export class RoutesService {
         trips: { include: { patient: true, stops: { orderBy: { sequence: 'asc' } } } },
       },
     });
-    if (!route) throw new NotFoundException('Route not found');
+    if (!route) throw new NotFoundException('Rota não encontrada');
     const stalePolicy = this.deriveStalePolicy(route, route.trips ?? []);
     if (stalePolicy.isStale && stalePolicy.hasUnresolvedTrips) {
       this.logger.warn(
@@ -128,7 +128,7 @@ export class RoutesService {
         },
       },
     });
-    if (!route) throw new NotFoundException('Route not found');
+    if (!route) throw new NotFoundException('Rota não encontrada');
     const stalePolicy = this.deriveStalePolicy(route, route.trips ?? []);
     return {
       routeId: route.id,

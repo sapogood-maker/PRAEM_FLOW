@@ -8,6 +8,7 @@ import '../driver/driver_state.dart';
 import '../operational/operation_controller.dart';
 import '../core/constants.dart';
 import '../core/l10n.dart';
+import '../core/status_translations.dart';
 import '../shared/widgets/connection_status_bar.dart';
 import '../shared/widgets/destination_info_card.dart';
 import '../shared/widgets/operational_state_header.dart';
@@ -229,7 +230,7 @@ class _MissionCard extends StatelessWidget {
                     border: Border.all(color: statusColor.withOpacity(0.5)),
                   ),
                   child: Text(
-                    status,
+                    translateStatusPtBr(status),
                     style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold),
                   ),
                 ),

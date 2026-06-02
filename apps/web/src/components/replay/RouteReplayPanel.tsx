@@ -4,6 +4,8 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { translateEventType } from '@/lib/event-translations';
+import { translateStatus } from '@/lib/status-translations';
 
 type ReplayPoint = {
   id: string;
@@ -72,9 +74,9 @@ function mapEventLabel(evt: ReplayEvent) {
       case 'COMPLETED':
         return 'Concluído';
       case 'NO_SHOW':
-        return 'No-show';
+        return 'Não Compareceu';
       default:
-        return 'Transição operacional';
+        return 'Transição de Estado';
     }
   }
   switch (eventType) {
@@ -101,11 +103,11 @@ function mapEventLabel(evt: ReplayEvent) {
     case 'TRIP_COMPLETED':
       return 'Concluído';
     case 'TRIP_NO_SHOW':
-      return 'No-show';
+      return 'Não Compareceu';
     case 'SUPERVISOR_OVERRIDE':
-      return 'Override supervisor';
+      return 'Intervenção do supervisor';
     case 'GPS_CHECKPOINT':
-      return 'Checkpoint GPS';
+      return 'Ponto de controle GPS';
     case 'VEHICLE_OFFLINE':
       return 'Veículo offline';
     case 'OPERATION_DELAYED':
@@ -114,9 +116,9 @@ function mapEventLabel(evt: ReplayEvent) {
       return 'Atraso crítico';
     case 'RECOVERY':
     case 'RECOVERY_STALE_ROUTE':
-      return 'Recuperação operacional';
+      return 'Ação de Recuperação';
     default:
-      return evt.eventType ?? 'Evento operacional';
+      return translateEventType(evt.eventType);
   }
 }
 
@@ -296,7 +298,7 @@ export default function RouteReplayPanel({ data }: { data: ReplayPayload }) {
             onClick={() => setIsPlaying((v) => !v)}
             className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-600'
           >
-            {isPlaying ? 'Pausar' : 'Play'}
+            {isPlaying ? 'Pausar' : 'Iniciar'}
           </button>
           <button
             type='button'
@@ -345,7 +347,7 @@ export default function RouteReplayPanel({ data }: { data: ReplayPayload }) {
               <Marker position={[currentPosition.lat, currentPosition.lng]} icon={markerIcon}>
                 <Popup>
                   <div className='text-xs'>
-                    <p className='font-semibold'>Rota em replay</p>
+                    <p className='font-semibold'>Rota em reprodução</p>
                     <p>Velocidade: {Math.max(0, currentPosition.speed ?? 0).toFixed(0)} km/h</p>
                     <p>Horário: {new Date(currentPosition.timestamp).toLocaleString('pt-BR')}</p>
                   </div>
@@ -368,7 +370,10 @@ export default function RouteReplayPanel({ data }: { data: ReplayPayload }) {
                 <p className='font-semibold'>{mapEventLabel(evt)}</p>
                 <p className='text-slate-400'>{new Date(evt.createdAt).toLocaleString('pt-BR')}</p>
                 {(evt.tripId || evt.patientId) && (
-                  <p className='text-slate-500'>Trip: {evt.tripId ?? '—'} · Paciente: {evt.patientId ?? '—'}</p>
+                  <p className='text-slate-500'>Viagem: {evt.tripId ?? '—'} · Paciente: {evt.patientId ?? '—'}</p>
+                )}
+                {evt.fromState && evt.toState && (
+                  <p className='text-slate-500'>{translateStatus(evt.fromState)} → {translateStatus(evt.toState)}</p>
                 )}
               </li>
             ))}

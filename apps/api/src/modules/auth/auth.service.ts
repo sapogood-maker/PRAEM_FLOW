@@ -36,13 +36,13 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
-    if (!email || !password) throw new UnauthorizedException('Invalid credentials');
+    if (!email || !password) throw new UnauthorizedException('Credenciais inválidas');
 
     const user = await this.prisma.user.findFirst({ where: { email, active: true } });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('Credenciais inválidas');
 
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
+    if (!valid) throw new UnauthorizedException('Credenciais inválidas');
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: user.tenantId },
@@ -77,15 +77,15 @@ export class AuthService {
     platform?: string,
     appVersion?: string,
   ) {
-    if (!email || !password) throw new UnauthorizedException('Invalid credentials');
+    if (!email || !password) throw new UnauthorizedException('Credenciais inválidas');
 
     const user = await this.prisma.user.findFirst({
       where: { email, active: true, role: 'DRIVER' },
     });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('Credenciais inválidas');
 
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
+    if (!valid) throw new UnauthorizedException('Credenciais inválidas');
 
     const driver = await this.prisma.driver.findFirst({
       where: { userId: user.id, tenantId: user.tenantId, active: true },

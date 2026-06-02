@@ -30,7 +30,7 @@ class ConflictResolver {
       return const ConflictResolution(
         conflict: true,
         resolution: 'server_authoritative',
-        reason: 'Server state is terminal and overrides offline mutation.',
+        reason: 'Estado do servidor é terminal e prevalece sobre a mutação offline.',
       );
     }
 
@@ -38,14 +38,14 @@ class ConflictResolver {
       return const ConflictResolution(
         conflict: true,
         resolution: 'server_authoritative',
-        reason: 'Route already completed online.',
+        reason: 'Rota já concluída online.',
       );
     }
 
     return const ConflictResolution(
       conflict: false,
       resolution: 'merge',
-      reason: 'No operational conflict detected.',
+      reason: 'Nenhum conflito operacional detectado.',
     );
   }
 }

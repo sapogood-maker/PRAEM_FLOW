@@ -89,7 +89,7 @@ export class WhatsappService {
       },
     });
 
-    if (!trip) throw new Error(`Trip not found: ${tripId}`);
+    if (!trip) throw new Error(`Viagem não encontrada: ${tripId}`);
 
     const { patient } = trip;
     if (!patient?.phone) {

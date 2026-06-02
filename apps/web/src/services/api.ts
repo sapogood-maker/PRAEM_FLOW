@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { translateErrorMessage } from '@/lib/error-translations';
 
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3010',
@@ -22,7 +23,9 @@ api.interceptors.response.use(
       localStorage.removeItem('praem_refresh_token');
       window.location.href = '/login';
     }
+    if (typeof error?.response?.data?.message === 'string') {
+      error.response.data.message = translateErrorMessage(error.response.data.message);
+    }
     return Promise.reject(error);
   },
 );
-

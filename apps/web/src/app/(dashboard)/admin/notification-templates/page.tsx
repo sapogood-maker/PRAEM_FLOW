@@ -61,7 +61,7 @@ export default function NotificationTemplatesPage() {
     mutationFn: () => notificationTemplateService.seedDefaults(),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['notification-templates'] });
-      setMessage('Templates padrão criados com sucesso.');
+      setMessage('Modelos padrão criados com sucesso.');
     },
   });
 
@@ -86,7 +86,7 @@ export default function NotificationTemplatesPage() {
       await queryClient.invalidateQueries({ queryKey: ['notification-templates'] });
       setCreating(false);
       setEditor(DEFAULT_EDITOR);
-      setMessage('Template salvo com sucesso.');
+      setMessage('Modelo salvo com sucesso.');
     },
   });
 
@@ -94,7 +94,7 @@ export default function NotificationTemplatesPage() {
     mutationFn: (id: string) => notificationTemplateService.duplicate(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['notification-templates'] });
-      setMessage('Template duplicado.');
+      setMessage('Modelo duplicado.');
     },
   });
 
@@ -125,9 +125,9 @@ export default function NotificationTemplatesPage() {
   return (
     <section className='space-y-6'>
       <div>
-        <h1 className='text-3xl font-bold tracking-tight text-slate-100'>Templates de Mensagens</h1>
+        <h1 className='text-3xl font-bold tracking-tight text-slate-100'>Modelos de Mensagens</h1>
         <p className='mt-2 text-sm text-slate-400'>
-          Configure mensagens operacionais para WhatsApp/SMS com preview em tempo real.
+          Configure mensagens operacionais para WhatsApp/SMS com prévia em tempo real.
         </p>
       </div>
 
@@ -142,7 +142,7 @@ export default function NotificationTemplatesPage() {
           <div className='space-y-4'>
             <div className='flex items-center justify-between border-b border-slate-800 pb-3'>
               <h2 className='text-base font-semibold text-slate-100'>
-                {creating || editor.id ? 'Editar template' : 'Novo template'}
+                {creating || editor.id ? 'Editar modelo' : 'Novo modelo'}
               </h2>
               <button
                 type='button'
@@ -152,7 +152,7 @@ export default function NotificationTemplatesPage() {
                 }}
                 className='rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800'
               >
-                + Criar template
+                + Criar modelo
               </button>
             </div>
 
@@ -213,7 +213,7 @@ export default function NotificationTemplatesPage() {
                 disabled={!editor.title || !editor.message || saveMutation.isPending}
                 className='rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50'
               >
-                Salvar template
+                Salvar modelo
               </button>
               <button
                 type='button'
@@ -241,13 +241,13 @@ export default function NotificationTemplatesPage() {
         <Card>
           <div className='space-y-4'>
             <div className='border-b border-slate-800 pb-3'>
-              <h2 className='text-base font-semibold text-slate-100'>Preview em tempo real</h2>
+              <h2 className='text-base font-semibold text-slate-100'>Prévia em tempo real</h2>
               <p className='mt-1 text-xs text-slate-500'>
                 Dados de amostra de paciente/operador + QR para validação visual.
               </p>
             </div>
             <div className='rounded-xl border border-slate-800 bg-slate-900 p-3 text-sm whitespace-pre-wrap text-slate-200'>
-              {previewQuery.data?.renderedMessage ?? 'Digite uma mensagem com variáveis para visualizar o preview.'}
+              {previewQuery.data?.renderedMessage ?? 'Digite uma mensagem com variáveis para visualizar a prévia.'}
             </div>
             {previewQuery.data?.sampleData && (
               <div className='grid gap-2 text-xs text-slate-400'>
@@ -261,9 +261,9 @@ export default function NotificationTemplatesPage() {
             )}
             {previewQuery.data?.qrCodeDataUrl && (
               <div className='rounded-xl border border-slate-800 bg-slate-900 p-3'>
-                <p className='mb-2 text-xs uppercase tracking-wider text-slate-500'>QR Preview</p>
+                <p className='mb-2 text-xs uppercase tracking-wider text-slate-500'>Prévia do QR</p>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={previewQuery.data.qrCodeDataUrl} alt='QR preview' className='mx-auto h-36 w-36 rounded bg-white p-2' />
+                <img src={previewQuery.data.qrCodeDataUrl} alt='Prévia do QR' className='mx-auto h-36 w-36 rounded bg-white p-2' />
               </div>
             )}
           </div>
@@ -272,9 +272,9 @@ export default function NotificationTemplatesPage() {
 
       <Card>
         <div className='space-y-4'>
-          <h2 className='text-base font-semibold text-slate-100'>Templates cadastrados</h2>
+          <h2 className='text-base font-semibold text-slate-100'>Modelos cadastrados</h2>
           {templatesQuery.isLoading ? (
-            <p className='text-sm text-slate-500'>Carregando templates...</p>
+            <p className='text-sm text-slate-500'>Carregando modelos...</p>
           ) : (
             <div className='space-y-5'>
               {Object.entries(CATEGORY_LABEL).map(([categoryKey, categoryLabel]) => {
@@ -284,7 +284,7 @@ export default function NotificationTemplatesPage() {
                     <h3 className='text-sm font-semibold uppercase tracking-wider text-slate-400'>{categoryLabel}</h3>
                     {items.length === 0 ? (
                       <div className='rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-500'>
-                        Sem template nesta categoria.
+                        Sem modelo nesta categoria.
                       </div>
                     ) : (
                       items.map((template) => (
@@ -370,4 +370,3 @@ export default function NotificationTemplatesPage() {
     </section>
   );
 }
-

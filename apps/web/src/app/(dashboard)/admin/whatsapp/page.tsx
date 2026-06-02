@@ -113,12 +113,12 @@ export default function WhatsappAdminPage() {
       if (response.ok) {
         await loadTemplates();
         setEditingTemplate(null);
-        setTestMessage('Template atualizado com sucesso');
+        setTestMessage('Modelo atualizado com sucesso');
         setTimeout(() => setTestMessage(''), 3000);
       }
     } catch (error) {
       console.error('Failed to update template:', error);
-      setTestMessage('Erro ao atualizar template');
+      setTestMessage('Erro ao atualizar modelo');
     } finally {
       setLoading(false);
     }
@@ -210,7 +210,7 @@ export default function WhatsappAdminPage() {
                 : 'text-slate-400 hover:text-slate-300'
             }`}
           >
-            📧 Templates
+            📧 Modelos
           </button>
           <button
             onClick={() => setTab('logs')}
@@ -225,7 +225,7 @@ export default function WhatsappAdminPage() {
         </div>
       </div>
 
-      {/* Templates Tab */}
+      {/* Modelos */}
       {tab === 'templates' && (
         <div className='space-y-4'>
           <div className='grid gap-4'>
@@ -362,7 +362,7 @@ export default function WhatsappAdminPage() {
 
           {templates.length === 0 && !loading && (
             <Card>
-              <div className='text-center text-slate-400'>Nenhum template encontrado</div>
+              <div className='text-center text-slate-400'>Nenhum modelo encontrado</div>
             </Card>
           )}
 
@@ -382,7 +382,7 @@ export default function WhatsappAdminPage() {
                 />
               </div>
               <p className='text-xs text-slate-500'>
-                Digite um número e clique em "Teste" em qualquer template acima para enviar.
+                Digite um número e clique em "Teste" em qualquer modelo acima para enviar.
               </p>
             </div>
           </Card>

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../auth/auth_service.dart';
 import '../config/app_config.dart';
 import '../core/constants.dart';
+import '../core/status_translations.dart';
 
 class RouteHistoryScreen extends StatefulWidget {
   const RouteHistoryScreen({super.key});
@@ -238,16 +239,7 @@ class _RouteHistoryDetailScreenState extends State<RouteHistoryDetailScreen> {
   }
 
   String _statusLabel(String status) {
-    switch (status.toUpperCase()) {
-      case 'COMPLETED':
-        return 'Concluído';
-      case 'NO_SHOW':
-        return 'Não compareceu';
-      case 'CANCELLED':
-        return 'Cancelado';
-      default:
-        return status;
-    }
+    return translateStatusPtBr(status);
   }
 
   Color _statusColor(String status) {

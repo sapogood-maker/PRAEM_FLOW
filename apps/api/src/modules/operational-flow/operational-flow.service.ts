@@ -301,7 +301,7 @@ export class OperationalFlowService {
    */
   async reinstateTrip(tenantId: string, tripId: string, context: FlowContext = {}) {
     const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, include: { route: true } });
-    if (!trip) throw new NotFoundException('Trip not found');
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
     if (trip.status !== 'NO_SHOW') {
       throw new BadRequestException('Only NO_SHOW trips can be reinstated');
     }
@@ -687,22 +687,22 @@ export class OperationalFlowService {
         );
       if (!context.driverId && !supervisorOverride) {
         this.logger.warn(`[OPS] transition rejected reason=driver_required tenantId=${tenantId} routeId=${entity.route.id} target=${targetState}`);
-        throw new BadRequestException('Only driver actions can perform this transition');
+        throw new BadRequestException('Somente ações do motorista podem executar esta transição');
       }
       if (entity.route.driverId && entity.route.driverId !== context.driverId) {
         this.logger.warn(
           `[OPS] transition rejected reason=driver_mismatch tenantId=${tenantId} routeId=${entity.route.id} routeDriverId=${entity.route.driverId} contextDriverId=${context.driverId} target=${targetState}`,
         );
-        throw new BadRequestException('Driver is not assigned to this route');
+        throw new BadRequestException('Motorista não está atribuído a esta rota');
       }
     }
     if (!allowNoop && currentState === targetState) {
       this.logger.warn(`[OPS] transition rejected reason=self_transition tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} state=${currentState}`);
-      throw new BadRequestException(`Transition ${currentState} -> ${targetState} is already applied`);
+      throw new BadRequestException(`Transição ${currentState} -> ${targetState} já foi aplicada`);
     }
     if (!allowNoop && !TRANSITION_GRAPH[currentState].includes(targetState)) {
       this.logger.warn(`[OPS] transition rejected reason=invalid_path tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} current=${currentState} target=${targetState}`);
-      throw new BadRequestException(`Invalid transition: ${currentState} -> ${targetState}`);
+      throw new BadRequestException(`Transição inválida: ${currentState} -> ${targetState}`);
     }
 
     const now = new Date();
@@ -992,7 +992,7 @@ export class OperationalFlowService {
       return { route: trip.route, trip };
     }
     if (!scope.routeId) {
-      throw new BadRequestException('routeId or tripId is required');
+      throw new BadRequestException('routeId ou tripId é obrigatório');
     }
     const route = await this.findRoute(tenantId, scope.routeId);
     return { route, trip: null };
@@ -1108,7 +1108,7 @@ export class OperationalFlowService {
         vehicle: { select: { id: true, plate: true, model: true, capacity: true } },
       },
     });
-    if (!route) throw new NotFoundException('Route not found');
+    if (!route) throw new NotFoundException('Rota não encontrada');
     return route;
   }
 
@@ -1134,7 +1134,7 @@ export class OperationalFlowService {
       orderBy: [{ boardedAt: 'asc' }, { id: 'asc' }],
     });
 
-    if (!trip) throw new NotFoundException('Trip not found');
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
     return trip;
   }
 
@@ -1290,7 +1290,7 @@ export class OperationalFlowService {
       throw new ConflictException('Route was updated by another operator. Refresh and retry.');
     }
     const updated = await this.prisma.route.findUnique({ where: { id: routeId } });
-    if (!updated) throw new NotFoundException('Route not found');
+    if (!updated) throw new NotFoundException('Rota não encontrada');
     return updated;
   }
 
@@ -1307,7 +1307,7 @@ export class OperationalFlowService {
       where: { id: tripId },
       include: { route: { include: { operation: true } } },
     });
-    if (!updated) throw new NotFoundException('Trip not found');
+    if (!updated) throw new NotFoundException('Viagem não encontrada');
     return updated as any;
   }
 

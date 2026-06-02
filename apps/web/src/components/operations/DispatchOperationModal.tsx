@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { routeService } from '@/services/operational.service';
 import type { DispatchQueueItem } from '@/store/operationalDispatch.store';
-import { getPriorityLabel } from '@/lib/i18n';
+import { getDriverStatusLabel, getPriorityLabel, getVehicleStatusLabel } from '@/lib/i18n';
+import { translateErrorMessage } from '@/lib/error-translations';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -237,13 +238,13 @@ export function DispatchOperationModal({ open, onClose, patients, onDispatched }
               ))}
               {drivers.filter((d) => d.status !== 'AVAILABLE').map((d) => (
                 <option key={d.id} value={d.id} className='text-slate-500'>
-                  {d.user?.name} — {d.status}
+                  {d.user?.name} — {getDriverStatusLabel(d.status)}
                 </option>
               ))}
             </select>
             {driverId && (
               <p className={`mt-1 text-xs ${DRIVER_STATUS_BADGE[drivers.find((d) => d.id === driverId)?.status ?? ''] ?? 'text-slate-400'}`}>
-                Status: {drivers.find((d) => d.id === driverId)?.status ?? '—'}
+                Status: {getDriverStatusLabel(drivers.find((d) => d.id === driverId)?.status ?? '—')}
               </p>
             )}
           </div>
@@ -265,7 +266,7 @@ export function DispatchOperationModal({ open, onClose, patients, onDispatched }
               ))}
               {vehicles.filter((v) => v.status !== 'AVAILABLE').map((v) => (
                 <option key={v.id} value={v.id} className='text-slate-500'>
-                  {v.plate} · {v.model} — {v.status}
+                  {v.plate} · {v.model} — {getVehicleStatusLabel(v.status)}
                 </option>
               ))}
             </select>
@@ -325,7 +326,7 @@ export function DispatchOperationModal({ open, onClose, patients, onDispatched }
           {/* Error */}
           {dispatch.isError && (
             <div className='rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-300'>
-              {(dispatch.error as any)?.response?.data?.message ?? 'Erro ao despachar operação.'}
+              {translateErrorMessage((dispatch.error as any)?.response?.data?.message ?? 'Erro ao despachar operação.')}
             </div>
           )}
         </div>

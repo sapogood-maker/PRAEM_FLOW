@@ -42,7 +42,7 @@ export class QrEngineService {
           patient: { select: { id: true, name: true, praemId: true, operationalId: true } },
         },
       });
-      if (!trip) throw new NotFoundException('Trip not found');
+      if (!trip) throw new NotFoundException('Viagem não encontrada');
 
       const validationToken = body.validationToken ?? issueQrToken();
       const payload = buildTripQrPayload({
@@ -68,7 +68,7 @@ export class QrEngineService {
       where: { id: body.patientId, tenantId },
       select: { id: true, name: true, praemId: true, operationalId: true, qrToken: true, qrIssuedAt: true, qrExpiresAt: true },
     });
-    if (!patient) throw new NotFoundException('Patient not found');
+    if (!patient) throw new NotFoundException('Paciente não encontrado');
 
     const validationToken = body.validationToken ?? patient.qrToken ?? issueQrToken();
     const payload = buildPatientQrPayload({
@@ -95,20 +95,20 @@ export class QrEngineService {
     if (normalized.kind === 'PATIENT' || normalized.kind === 'TRIP') {
       const isTrip = normalized.kind === 'TRIP';
       if (!normalized.validationToken || !normalized.secureHash) {
-        throw new BadRequestException('QR payload is incomplete');
+        throw new BadRequestException('Payload de QR incompleto');
       }
       if (isTrip && !normalized.tripId) {
-        throw new BadRequestException('QR payload is incomplete');
+        throw new BadRequestException('Payload de QR incompleto');
       }
       if (isTrip && !normalized.expiresAt) {
-        throw new BadRequestException('QR payload is incomplete');
+        throw new BadRequestException('Payload de QR incompleto');
       }
       if (!isTrip && !normalized.patientId && !normalized.praemId) {
-        throw new BadRequestException('QR payload is incomplete');
+        throw new BadRequestException('Payload de QR incompleto');
       }
       const expectedCheckpoint = body.expectedCheckpoint ? this.normalizeCheckpoint(body.expectedCheckpoint) : null;
       if (expectedCheckpoint && normalized.checkpoint && normalized.checkpoint !== expectedCheckpoint) {
-        throw new BadRequestException(`QR checkpoint mismatch: expected ${expectedCheckpoint}, got ${normalized.checkpoint}`);
+        throw new BadRequestException(`Checkpoint de QR divergente: esperado ${expectedCheckpoint}, recebido ${normalized.checkpoint}`);
       }
 
       if (isTrip) {
@@ -116,7 +116,7 @@ export class QrEngineService {
           where: { tenantId, id: normalized.tripId },
           include: { patient: { select: { id: true, name: true, praemId: true, operationalId: true } }, route: { select: { id: true, destination: true } } },
         });
-        if (!trip) throw new NotFoundException('Trip not found');
+        if (!trip) throw new NotFoundException('Viagem não encontrada');
 
         const expected = buildTripQrPayload({
           tripId: trip.id,
@@ -128,7 +128,7 @@ export class QrEngineService {
           expiresAt: new Date(normalized.expiresAt),
         });
         if (!this.constantTimeEquals(expected.secure_hash, normalized.secureHash)) {
-          throw new BadRequestException('QR signature mismatch');
+          throw new BadRequestException('Assinatura de QR inválida');
         }
 
         return {
@@ -149,7 +149,7 @@ export class QrEngineService {
         },
         select: { id: true, name: true, praemId: true, operationalId: true, qrToken: true, qrIssuedAt: true, qrExpiresAt: true },
       });
-      if (!patient) throw new NotFoundException('Patient not found');
+      if (!patient) throw new NotFoundException('Paciente não encontrado');
 
       const expected = buildPatientQrPayload({
         patientId: patient.id,
@@ -159,7 +159,7 @@ export class QrEngineService {
         expiresAt: patient.qrExpiresAt ?? null,
       });
       if (!this.constantTimeEquals(expected.secure_hash, normalized.secureHash)) {
-        throw new BadRequestException('QR signature mismatch');
+        throw new BadRequestException('Assinatura de QR inválida');
       }
 
       return {
@@ -170,20 +170,20 @@ export class QrEngineService {
     }
 
     if (!normalized.uniqueId || !normalized.patientReference || !normalized.operationReference || !normalized.expiration || !normalized.signature) {
-      throw new BadRequestException('QR payload is incomplete');
+      throw new BadRequestException('Payload de QR incompleto');
     }
 
     const expiration = new Date(normalized.expiration);
     if (Number.isNaN(expiration.getTime())) {
-      throw new BadRequestException('QR payload has invalid expiration');
+      throw new BadRequestException('Payload de QR com expiração inválida');
     }
     if (expiration.getTime() <= Date.now()) {
-      throw new BadRequestException('QR payload expired');
+      throw new BadRequestException('QR expirado');
     }
 
     const expectedCheckpoint = body.expectedCheckpoint ? this.normalizeCheckpoint(body.expectedCheckpoint) : null;
     if (expectedCheckpoint && normalized.checkpoint !== expectedCheckpoint) {
-      throw new BadRequestException(`QR checkpoint mismatch: expected ${expectedCheckpoint}, got ${normalized.checkpoint}`);
+      throw new BadRequestException(`Checkpoint de QR divergente: esperado ${expectedCheckpoint}, recebido ${normalized.checkpoint}`);
     }
 
     const expectedSignature = normalized.format === 'legacy'
@@ -209,14 +209,14 @@ export class QrEngineService {
         });
 
     if (!this.constantTimeEquals(expectedSignature, normalized.signature)) {
-      throw new BadRequestException('QR signature mismatch');
+      throw new BadRequestException('Assinatura de QR inválida');
     }
 
     const patient = await this.prisma.patient.findFirst({
       where: { id: normalized.patientReference, tenantId },
       select: { id: true, name: true },
     });
-    if (!patient) throw new NotFoundException('Patient not found');
+    if (!patient) throw new NotFoundException('Paciente não encontrado');
 
     return {
       valid: true,
@@ -230,16 +230,16 @@ export class QrEngineService {
       return body.payload;
     }
     if (!body.token) {
-      throw new BadRequestException('Either token or payload must be provided');
+      throw new BadRequestException('Informe token ou payload');
     }
     try {
       const parsed = JSON.parse(body.token);
       if (!parsed || typeof parsed !== 'object') {
-        throw new BadRequestException('QR token must decode to object payload');
+        throw new BadRequestException('Token de QR deve decodificar para um objeto payload');
       }
       return parsed;
     } catch {
-      throw new BadRequestException('Invalid QR token format');
+      throw new BadRequestException('Formato de token QR inválido');
     }
   }
 
@@ -294,7 +294,7 @@ export class QrEngineService {
   private normalizeCheckpoint(value: unknown): QrCheckpoint {
     const checkpoint = String(value ?? 'BOARDING').trim().toUpperCase() as QrCheckpoint;
     if (!CHECKPOINTS.includes(checkpoint)) {
-      throw new BadRequestException(`Unsupported checkpoint: ${checkpoint}`);
+      throw new BadRequestException(`Checkpoint não suportado: ${checkpoint}`);
     }
     return checkpoint;
   }
@@ -302,7 +302,7 @@ export class QrEngineService {
   private normalizeValidityMinutes(value?: number) {
     const validity = Number(value ?? 24 * 60);
     if (!Number.isFinite(validity) || validity <= 0) {
-      throw new BadRequestException('validityMinutes must be a positive number');
+      throw new BadRequestException('validityMinutes deve ser um número positivo');
     }
     return Math.min(Math.round(validity), 30 * 24 * 60);
   }

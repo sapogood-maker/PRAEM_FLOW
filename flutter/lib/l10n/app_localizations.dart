@@ -184,13 +184,13 @@ abstract class AppLocalizations {
   /// No description provided for @openScannerAction.
   ///
   /// In pt_BR, this message translates to:
-  /// **'ABRIR SCANNER'**
+  /// **'ABRIR LEITOR QR'**
   String get openScannerAction;
 
   /// No description provided for @scanQrFab.
   ///
   /// In pt_BR, this message translates to:
-  /// **'SCAN QR'**
+  /// **'ESCANEAR QR'**
   String get scanQrFab;
 
   /// No description provided for @qrScannerTitle.
@@ -286,25 +286,25 @@ abstract class AppLocalizations {
   /// No description provided for @lastSyncUnknown.
   ///
   /// In pt_BR, this message translates to:
-  /// **'Último sync: —'**
+  /// **'Última sincronização: —'**
   String get lastSyncUnknown;
 
   /// No description provided for @lastSyncAt.
   ///
   /// In pt_BR, this message translates to:
-  /// **'Último sync: {time}'**
+  /// **'Última sincronização: {time}'**
   String lastSyncAt(Object time);
 
   /// No description provided for @syncAction.
   ///
   /// In pt_BR, this message translates to:
-  /// **'SYNC'**
+  /// **'SINCRONIZAR'**
   String get syncAction;
 
   /// No description provided for @connectivityOnline.
   ///
   /// In pt_BR, this message translates to:
-  /// **'ONLINE'**
+  /// **'Online'**
   String get connectivityOnline;
 
   /// No description provided for @connectivityDegraded.
@@ -316,7 +316,7 @@ abstract class AppLocalizations {
   /// No description provided for @connectivityOffline.
   ///
   /// In pt_BR, this message translates to:
-  /// **'OFFLINE'**
+  /// **'Offline'**
   String get connectivityOffline;
 
   /// No description provided for @connectivitySyncing.
@@ -478,7 +478,7 @@ abstract class AppLocalizations {
   /// No description provided for @emergencyBoardingAction.
   ///
   /// In pt_BR, this message translates to:
-  /// **'SCAN QR — Embarque de emergência'**
+  /// **'ESCANEAR QR — Embarque de emergência'**
   String get emergencyBoardingAction;
 
   /// No description provided for @tripDetailsTitle.
@@ -508,7 +508,7 @@ abstract class AppLocalizations {
   /// No description provided for @scanPatientQr.
   ///
   /// In pt_BR, this message translates to:
-  /// **'SCAN QR PACIENTE'**
+  /// **'ESCANEAR QR DO PACIENTE'**
   String get scanPatientQr;
 
   /// No description provided for @manifestWithCount.

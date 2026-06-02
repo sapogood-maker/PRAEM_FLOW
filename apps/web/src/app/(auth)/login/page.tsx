@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
+import { translateErrorMessage } from '@/lib/error-translations';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,7 +21,7 @@ export default function LoginPage() {
       await auth.login({ email, password });
       router.push('/');
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? 'Credenciais inválidas. Verifique e tente novamente.');
+      setError(translateErrorMessage(err?.response?.data?.message ?? 'Credenciais inválidas. Verifique e tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -83,4 +84,3 @@ export default function LoginPage() {
     </main>
   );
 }
-

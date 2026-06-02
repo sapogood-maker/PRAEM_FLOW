@@ -93,7 +93,7 @@ export default function RoutesPage() {
                 <th className='p-3 text-left'>Status</th>
                 <th className='p-3 text-left'>Estado Operacional</th>
                 <th className='p-3 text-left'>Stale Operacional</th>
-                <th className='p-3 text-left'>Replay</th>
+                <th className='p-3 text-left'>Reprodução</th>
                 <th className='p-3 text-left'>Recuperação</th>
               </tr>
             </thead>

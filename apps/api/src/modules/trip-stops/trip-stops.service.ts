@@ -7,7 +7,7 @@ export class TripStopsService {
 
   async findByTrip(tenantId: string, tripId: string) {
     const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId } });
-    if (!trip) throw new NotFoundException('Trip not found');
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
     return this.prisma.tripStop.findMany({
       where: { tripId, tenantId },
       include: { location: { select: { id: true, name: true, city: true, type: true, latitude: true, longitude: true } } },
@@ -30,7 +30,7 @@ export class TripStopsService {
     },
   ) {
     const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId } });
-    if (!trip) throw new NotFoundException('Trip not found');
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
     return this.prisma.tripStop.create({
       data: {
         tenantId,
@@ -66,7 +66,7 @@ export class TripStopsService {
 
   async findCurrentStop(tenantId: string, tripId: string) {
     const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId } });
-    if (!trip) throw new NotFoundException('Trip not found');
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
 
     // Current = first non-completed, non-skipped stop
     const current = await this.prisma.tripStop.findFirst({

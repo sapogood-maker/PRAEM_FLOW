@@ -6,6 +6,8 @@ import { useRealtimeStore } from '@/store/realtime.store';
 import { useAuthStore } from '@/store/auth.store';
 import type { VehiclePosition } from '@/types';
 import { api } from '@/services/api';
+import { translateEventType } from '@/lib/event-translations';
+import { translateStatus } from '@/lib/status-translations';
 
 export function useWebSocket(enabled = true) {
   const token = useAuthStore((s) => s.token);
@@ -205,7 +207,7 @@ export function useWebSocket(enabled = true) {
             } as VehiclePosition);
           }
         }
-        record(`📍 Replay de rastreio: ${trackingPoints?.length ?? 0} pontos`, 'replay');
+        record(`📍 Reprodução de rastreamento: ${trackingPoints?.length ?? 0} pontos`, 'replay');
       }
       const timeline = (data as any).timeline as Array<{ eventType?: string; toState?: string; createdAt?: string }> | undefined;
       if ((timeline?.length ?? 0) > 0) {
@@ -222,7 +224,7 @@ export function useWebSocket(enabled = true) {
     });
 
     socket.on('trip:status', (data: { tripId: string; status: string }) => {
-      record(`Viagem ${data.tripId} → ${data.status}`, 'trip');
+      record(`Viagem ${data.tripId} → ${translateStatus(data.status)}`, 'trip');
     });
 
     socket.on('trip:boarding', (data: { tripId: string; patientId: string; patientName?: string }) => {
@@ -266,7 +268,7 @@ export function useWebSocket(enabled = true) {
     });
 
     socket.on('trip:no_show', (data: { tripId: string; patientId?: string; patientName?: string }) => {
-      record(`🚫 No-show: ${data.patientName ?? data.patientId ?? data.tripId}`, 'trip');
+      record(`🚫 Não Compareceu: ${data.patientName ?? data.patientId ?? data.tripId}`, 'trip');
     });
 
     socket.on('trip:reinstate', (data: { tripId: string; patientId?: string; patientName?: string }) => {
@@ -302,11 +304,11 @@ export function useWebSocket(enabled = true) {
     });
 
     socket.on('route:status', (data: { routeId: string; status: string }) => {
-      record(`Rota ${data.routeId} → ${data.status}`, 'route');
+      record(`Rota ${data.routeId} → ${translateStatus(data.status)}`, 'route');
     });
 
     socket.on('route.status_changed', (data: { routeId: string; status: string }) => {
-      record(`Rota ${data.routeId} → ${data.status}`, 'route');
+      record(`Rota ${data.routeId} → ${translateStatus(data.status)}`, 'route');
     });
 
     socket.on('route:operational_state', (data: { routeId: string; operationalState: string }) => {
@@ -317,7 +319,7 @@ export function useWebSocket(enabled = true) {
           updatedAt: new Date().toISOString(),
         });
       }
-      record(`🧭 Rota ${data.routeId} → ${normalized ?? data.operationalState}`, 'ops');
+      record(`🧭 Rota ${data.routeId} → ${translateStatus(normalized ?? data.operationalState)}`, 'ops');
     });
 
     socket.on('operational:state_changed', (data: { routeId?: string; tripId?: string; operationalState: string }) => {
@@ -330,21 +332,21 @@ export function useWebSocket(enabled = true) {
         });
       }
       const target = data.tripId ? `viagem ${data.tripId}` : `rota ${data.routeId ?? '—'}`;
-      record(`🔄 ${target} → ${normalized ?? data.operationalState}`, 'ops');
+      record(`🔄 ${target} → ${translateStatus(normalized ?? data.operationalState)}`, 'ops');
     });
 
     socket.on('route:progression_suggestion', (data: { routeId?: string; suggestedState?: string }) => {
       const target = data.routeId ?? '—';
-      const suggested = normalizeOperationalState(data.suggestedState) ?? data.suggestedState ?? '—';
+      const suggested = translateStatus(normalizeOperationalState(data.suggestedState) ?? data.suggestedState ?? '—');
       record(`🧩 Sugestão operacional: rota ${target} → ${suggested}`, 'ops');
     });
 
     socket.on('operation:event', (data: { eventType?: string; operationId?: string; routeId?: string; tripId?: string }) => {
-      record(`🧩 Evento operacional: ${data.eventType ?? 'OPERATION_EVENT'} (${data.operationId ?? data.routeId ?? '—'})`, 'ops');
+      record(`🧩 Evento operacional: ${translateEventType(data.eventType ?? 'OPERATION_EVENT')} (${data.operationId ?? data.routeId ?? '—'})`, 'ops');
     });
 
     socket.on('route:tracking_archived', (data: { routeId?: string; points?: number }) => {
-      record(`🗄️ Tracking arquivado: rota ${data.routeId ?? '—'} (${data.points ?? 0} pontos)`, 'replay');
+      record(`🗄️ Rastreamento Arquivado na Finalização: rota ${data.routeId ?? '—'} (${data.points ?? 0} pontos)`, 'replay');
     });
 
     socket.on('route:deviation', (data: { routeId?: string; distanceMeters?: number }) => {

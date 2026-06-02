@@ -139,9 +139,9 @@ export class SyncService {
         case 'ROUTE_START': {
           if (!routeId) throw new BadRequestException('routeId is required');
           const route = await this.prisma.route.findFirst({ where: { id: routeId, tenantId }, select: { id: true, status: true } });
-          if (!route) throw new NotFoundException('Route not found');
+          if (!route) throw new NotFoundException('Rota não encontrada');
           if (['COMPLETED', 'CANCELLED'].includes(route.status)) {
-            return this.conflict(event, 'route', route.id, payload, { status: route.status }, 'server_authoritative', 'Route already closed on server');
+            return this.conflict(event, 'route', route.id, payload, { status: route.status }, 'server_authoritative', 'Rota já encerrada no servidor');
           }
           await this.routes.startRoute(routeId, tenantId, {
             tripId: event.tripId ?? payload.tripId,
@@ -157,9 +157,9 @@ export class SyncService {
         case 'ROUTE_FORCE_COMPLETE': {
           if (!routeId) throw new BadRequestException('routeId is required');
           const route = await this.prisma.route.findFirst({ where: { id: routeId, tenantId }, select: { id: true, status: true } });
-          if (!route) throw new NotFoundException('Route not found');
+          if (!route) throw new NotFoundException('Rota não encontrada');
           if (['COMPLETED', 'CANCELLED'].includes(route.status) && type === 'ROUTE_COMPLETE') {
-            return this.conflict(event, 'route', route.id, payload, { status: route.status }, 'server_authoritative', 'Route already closed on server');
+            return this.conflict(event, 'route', route.id, payload, { status: route.status }, 'server_authoritative', 'Rota já encerrada no servidor');
           }
           if (type === 'ROUTE_FORCE_COMPLETE') {
             await this.routes.forceCompleteRoute(routeId, tenantId, {
@@ -178,9 +178,9 @@ export class SyncService {
         case 'TRIP_STARTED': {
           if (!tripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, select: { id: true, status: true, routeId: true } });
-          if (!trip) throw new NotFoundException('Trip not found');
+          if (!trip) throw new NotFoundException('Viagem não encontrada');
           if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(trip.status)) {
-            return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
+            return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Viagem já encerrada no servidor');
           }
           await this.trips.inTransit(tripId, tenantId, {
             ...this.buildFlowContext(event, payload, actor, type),
@@ -191,7 +191,7 @@ export class SyncService {
         case 'TRIP_ARRIVED': {
           if (!tripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, select: { id: true, status: true, routeId: true } });
-          if (!trip) throw new NotFoundException('Trip not found');
+          if (!trip) throw new NotFoundException('Viagem não encontrada');
           if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(trip.status)) {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
@@ -204,7 +204,7 @@ export class SyncService {
         case 'TRIP_COMPLETED': {
           if (!tripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, select: { id: true, status: true, routeId: true } });
-          if (!trip) throw new NotFoundException('Trip not found');
+          if (!trip) throw new NotFoundException('Viagem não encontrada');
           if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
@@ -217,7 +217,7 @@ export class SyncService {
         case 'TRIP_BOARDED': {
           if (!tripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, select: { id: true, status: true, routeId: true } });
-          if (!trip) throw new NotFoundException('Trip not found');
+          if (!trip) throw new NotFoundException('Viagem não encontrada');
           if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(trip.status)) {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
@@ -237,7 +237,7 @@ export class SyncService {
         case 'TRIP_NO_SHOW': {
           if (!tripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: tripId, tenantId }, select: { id: true, status: true, routeId: true } });
-          if (!trip) throw new NotFoundException('Trip not found');
+          if (!trip) throw new NotFoundException('Viagem não encontrada');
           if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Trip already closed on server');
           }
@@ -331,7 +331,7 @@ export class SyncService {
           }
           if (!effectiveTripId) throw new BadRequestException('tripId is required');
           const trip = await this.prisma.trip.findFirst({ where: { id: effectiveTripId, tenantId }, select: { id: true, status: true, routeId: true, patientId: true } });
-          if (!trip) throw new NotFoundException('Trip not found');
+          if (!trip) throw new NotFoundException('Viagem não encontrada');
           if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(trip.status)) {
             return this.conflict(event, 'trip', trip.id, payload, { status: trip.status }, 'server_authoritative', 'Passenger already closed on server');
           }

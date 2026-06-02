@@ -133,7 +133,7 @@ export class TripsService {
 
   async noShow(id: string, tenantId: string, context?: { driverId?: string; actorUserId?: string; sourceScreen?: string; sourceAction?: string; endpoint?: string }) {
     const trip = await this.prisma.trip.findFirst({ where: { id, tenantId } });
-    if (!trip) throw new NotFoundException('Trip not found');
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
     const result = await this.flow.markNoShow(tenantId, { tripId: id }, {
       ...this.toFlowContext(context),
       source: 'TRIP_NO_SHOW',

@@ -11,6 +11,7 @@ import '../shared/widgets/operational_button.dart';
 import '../shared/widgets/status_badge.dart';
 import '../operational/operation_controller.dart';
 import '../core/l10n.dart';
+import '../core/status_translations.dart';
 
 // ─── Stop type / status helpers ───────────────────────────────────────────────
 
@@ -44,13 +45,13 @@ String _stopStatusLabel(String status) {
     case 'ARRIVED':
       return 'Chegou';
     case 'BOARDING':
-      return 'Embarcando';
+      return 'Embarque';
     case 'COMPLETED':
       return 'Concluída';
     case 'SKIPPED':
       return 'Pulada';
     default:
-      return status;
+      return translateStatusPtBr(status);
   }
 }
 
@@ -167,7 +168,7 @@ class _TripScreenState extends State<TripScreen> {
                     const SizedBox(height: 8),
                     Row(children: [
                       StatusBadge(
-                          label: route['status'] as String? ?? '—',
+                          label: translateStatusPtBr(route['status'] as String?),
                           color: statusColor(route['status'] as String? ?? '')),
                     ]),
                   ],
@@ -515,7 +516,7 @@ class _TripPatientCard extends StatelessWidget {
                         fontSize: 16,
                         fontWeight: FontWeight.bold)),
               ),
-              StatusBadge(label: status, color: statusColor(status)),
+              StatusBadge(label: translateStatusPtBr(status), color: statusColor(status)),
             ],
           ),
           const SizedBox(height: 4),

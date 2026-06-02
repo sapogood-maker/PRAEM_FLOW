@@ -868,7 +868,7 @@ export default function QueuePage() {
                       {terminal ? (
                         <div className='flex flex-wrap gap-1'>
                           <Link href={`/replay`} className='rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-700'>
-                            Replay
+                            Reprodução
                           </Link>
                           <Link href={`/reports`} className='rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-700'>
                             Relatórios

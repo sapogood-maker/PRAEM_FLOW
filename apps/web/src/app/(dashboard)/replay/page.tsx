@@ -35,7 +35,7 @@ export default function ReplayPage() {
     <section className='space-y-4'>
       <div className='flex flex-wrap items-end justify-between gap-3'>
         <div>
-          <h2 className='text-2xl font-bold text-slate-100'>Replay Operacional de Rotas</h2>
+          <h2 className='text-2xl font-bold text-slate-100'>Reprodução Operacional de Rotas</h2>
           <p className='text-sm text-slate-400'>Reconstrução histórica com trilha GPS, timeline e auditoria operacional.</p>
         </div>
       </div>

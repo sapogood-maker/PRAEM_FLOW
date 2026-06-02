@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import '../core/constants.dart';
+import '../core/status_translations.dart';
 
 /// All valid operational states for a driver session.
 enum OperationalState {
@@ -134,30 +135,7 @@ String operationalStateToString(OperationalState state) {
 
 /// PT-BR display label for each operational state.
 String operationalStateLabel(OperationalState state) {
-  switch (state) {
-    case OperationalState.offline:
-      return 'OFFLINE';
-    case OperationalState.created:
-      return 'AGUARDANDO DESPACHO';
-    case OperationalState.dispatched:
-      return 'ROTA DESPACHADA';
-    case OperationalState.driverAccepted:
-      return 'ROTA ACEITA';
-    case OperationalState.waitingPatient:
-      return 'AGUARDANDO PASSAGEIRO';
-    case OperationalState.boarding:
-      return 'EMBARQUE';
-    case OperationalState.boarded:
-      return 'TODOS EMBARCADOS';
-    case OperationalState.inTransit:
-      return 'EM DESLOCAMENTO';
-    case OperationalState.arrived:
-      return 'CHEGADA';
-    case OperationalState.completed:
-      return 'CONCLUÍDO';
-    case OperationalState.noShow:
-      return 'NÃO COMPARECEU';
-  }
+  return translateStatusPtBr(operationalStateToString(state)).toUpperCase();
 }
 
 /// UI accent color for each state.

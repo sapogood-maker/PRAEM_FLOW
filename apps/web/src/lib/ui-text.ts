@@ -10,10 +10,10 @@ export const UI_TEXT = {
     patients: 'Pacientes',
     vehicles: 'Frota',
     drivers: 'Motoristas',
-    alerts: 'Replay Operacional',
+    alerts: 'Reprodução Operacional',
     reports: 'Relatórios',
     settings: 'Configurações',
-    messageTemplates: 'Templates de Mensagens',
+    messageTemplates: 'Modelos de Mensagens',
   },
   topBar: {
     homologationBanner: 'MODO HOMOLOGAÇÃO · OPERAÇÕES SIMULADAS',

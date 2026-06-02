@@ -10,6 +10,7 @@ import '../shared/widgets/connection_status_bar.dart';
 import '../shared/widgets/operational_button.dart';
 import '../shared/widgets/status_badge.dart';
 import '../driver/driver_state.dart';
+import '../core/status_translations.dart';
 
 class MissionCenterScreen extends StatefulWidget {
   const MissionCenterScreen({super.key});
@@ -74,11 +75,11 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
       case 'WAITING':
         return 'AGUARDANDO';
       case 'SCHEDULED':
-        return 'AGENDADO';
+        return 'AGENDADA';
       case 'BOARDING':
-        return 'EMBARCANDO';
+        return 'EMBARQUE';
       case 'BOARDED':
-        return 'EMBARCANDO';
+        return 'EMBARCADO';
       case 'IN_TRANSIT':
         return context.l10n.statusInTransit;
       case 'ARRIVED':
@@ -93,7 +94,7 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
         return 'CONFIRMADO';
       case 'PENDING':
       default:
-        return context.l10n.statusWaiting;
+        return translateStatusPtBr(status).toUpperCase();
     }
   }
 

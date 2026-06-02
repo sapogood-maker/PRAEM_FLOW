@@ -56,10 +56,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get logout => 'Sair';
 
   @override
-  String get openScannerAction => 'ABRIR SCANNER';
+  String get openScannerAction => 'ABRIR LEITOR QR';
 
   @override
-  String get scanQrFab => 'SCAN QR';
+  String get scanQrFab => 'ESCANEAR QR';
 
   @override
   String get qrScannerTitle => 'Escanear QR do Passageiro';
@@ -115,24 +115,24 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
-  String get lastSyncUnknown => 'Último sync: —';
+  String get lastSyncUnknown => 'Última sincronização: —';
 
   @override
   String lastSyncAt(Object time) {
-    return 'Último sync: $time';
+    return 'Última sincronização: $time';
   }
 
   @override
-  String get syncAction => 'SYNC';
+  String get syncAction => 'SINCRONIZAR';
 
   @override
-  String get connectivityOnline => 'ONLINE';
+  String get connectivityOnline => 'Online';
 
   @override
   String get connectivityDegraded => 'DEGRADADO';
 
   @override
-  String get connectivityOffline => 'OFFLINE';
+  String get connectivityOffline => 'Offline';
 
   @override
   String get connectivitySyncing => 'SINCRONIZANDO';
@@ -223,7 +223,7 @@ class AppLocalizationsPt extends AppLocalizations {
   String get continueOperation => 'CONTINUAR OPERAÇÃO';
 
   @override
-  String get emergencyBoardingAction => 'SCAN QR — Embarque de emergência';
+  String get emergencyBoardingAction => 'ESCANEAR QR — Embarque de emergência';
 
   @override
   String get tripDetailsTitle => 'Detalhes da Viagem';
@@ -238,7 +238,7 @@ class AppLocalizationsPt extends AppLocalizations {
   String get stopsItinerary => 'ROTEIRO DE PARADAS';
 
   @override
-  String get scanPatientQr => 'SCAN QR PACIENTE';
+  String get scanPatientQr => 'ESCANEAR QR DO PACIENTE';
 
   @override
   String manifestWithCount(Object count) {
@@ -366,10 +366,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get logout => 'Sair';
 
   @override
-  String get openScannerAction => 'ABRIR SCANNER';
+  String get openScannerAction => 'ABRIR LEITOR QR';
 
   @override
-  String get scanQrFab => 'SCAN QR';
+  String get scanQrFab => 'ESCANEAR QR';
 
   @override
   String get qrScannerTitle => 'Escanear QR do Passageiro';
@@ -425,24 +425,24 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   }
 
   @override
-  String get lastSyncUnknown => 'Último sync: —';
+  String get lastSyncUnknown => 'Última sincronização: —';
 
   @override
   String lastSyncAt(Object time) {
-    return 'Último sync: $time';
+    return 'Última sincronização: $time';
   }
 
   @override
-  String get syncAction => 'SYNC';
+  String get syncAction => 'SINCRONIZAR';
 
   @override
-  String get connectivityOnline => 'ONLINE';
+  String get connectivityOnline => 'Online';
 
   @override
   String get connectivityDegraded => 'DEGRADADO';
 
   @override
-  String get connectivityOffline => 'OFFLINE';
+  String get connectivityOffline => 'Offline';
 
   @override
   String get connectivitySyncing => 'SINCRONIZANDO';
@@ -533,7 +533,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get continueOperation => 'CONTINUAR OPERAÇÃO';
 
   @override
-  String get emergencyBoardingAction => 'SCAN QR — Embarque de emergência';
+  String get emergencyBoardingAction => 'ESCANEAR QR — Embarque de emergência';
 
   @override
   String get tripDetailsTitle => 'Detalhes da Viagem';
@@ -548,7 +548,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get stopsItinerary => 'ROTEIRO DE PARADAS';
 
   @override
-  String get scanPatientQr => 'SCAN QR PACIENTE';
+  String get scanPatientQr => 'ESCANEAR QR DO PACIENTE';
 
   @override
   String manifestWithCount(Object count) {

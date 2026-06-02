@@ -6,15 +6,15 @@
 // ── Status de Viagem (TripStatus) ─────────────────────────────────────────────
 
 export const TRIP_STATUS_LABEL: Record<string, string> = {
-  SCHEDULED:   'Agendado',
+  SCHEDULED:   'Agendada',
   CONFIRMED:   'Confirmado',
-  BOARDING:    'Embarcando',
+  BOARDING:    'Embarque',
   BOARDED:     'Embarcado',
-  IN_TRANSIT:  'Em deslocamento',
+  IN_TRANSIT:  'Em Trânsito',
   ARRIVED:     'Chegou',
-  COMPLETED:   'Finalizado',
+  COMPLETED:   'Concluída',
   NO_SHOW:     'Não Compareceu',
-  CANCELLED:   'Cancelado',
+  CANCELLED:   'Cancelada',
 };
 
 export function getTripStatusLabel(status: string): string {
@@ -25,16 +25,16 @@ export function getTripStatusLabel(status: string): string {
 // ── Status de Rota (RouteStatus) ──────────────────────────────────────────────
 
 export const ROUTE_STATUS_LABEL: Record<string, string> = {
-  SCHEDULED:             'Agendado',
+  SCHEDULED:             'Agendada',
   PENDING:               'Pendente',
   PLANNED:               'Planejado',
   PREPARING:             'Preparando',
-  DISPATCHED:            'Despachado',
-  ACTIVE:                'Em Viagem',
+  DISPATCHED:            'Despachada',
+  ACTIVE:                'Em Operação',
   WAITING_CONSULTATION:  'Aguardando Consulta',
   RETURNING:             'Retornando',
-  COMPLETED:             'Finalizado',
-  CANCELLED:             'Cancelado',
+  COMPLETED:             'Concluída',
+  CANCELLED:             'Cancelada',
   BOARDED:               'Embarcado',
   PASSENGERS_ONBOARD:    'PASSAGEIROS EMBARCADOS',
 };
@@ -48,14 +48,14 @@ export function getRouteStatusLabel(status: string): string {
 
 export const DISPATCH_STATUS_LABEL: Record<string, string> = {
   PENDING_DISPATCH: 'Aguardando Despacho',
-  SCHEDULED:        'Agendado',
+  SCHEDULED:        'Agendada',
   ASSIGNED:         'Atribuído',
-  DISPATCHED:       'Motorista a Caminho',
-  BOARDING:         'Embarcando',
-  ACTIVE:           'Em Viagem',
+  DISPATCHED:       'Despachada',
+  BOARDING:         'Embarque',
+  ACTIVE:           'Em Operação',
   RETURNING:        'Retornando',
-  COMPLETED:        'Finalizado',
-  CANCELLED:        'Cancelado',
+  COMPLETED:        'Concluída',
+  CANCELLED:        'Cancelada',
 };
 
 export function getDispatchStatusLabel(status: string): string {
@@ -77,22 +77,22 @@ export const QUEUE_STATUS_LABEL: Record<string, string> = {
   WAITING_DISPATCH: 'Aguardando Despacho',
   PENDING_DISPATCH: 'Aguardando Despacho',
   SUGGESTED:  'Sugerido',
-  DISPATCHED: 'Despachado',
+  DISPATCHED: 'Despachada',
   IN_PROGRESS: 'Em andamento',
   WAITING:    'Aguardando',
   CALLED:     'Chamado',
   CONFIRMED:  'Confirmado',
   NO_SHOW:    'Não Compareceu',
-  CANCELLED:  'Cancelado',
+  CANCELLED:  'Cancelada',
   CLOSED:     'Encerrado',
   // Valores legados mantidos para compatibilidade
   ASSIGNED:   'Atribuído',
-  SCHEDULED:  'Agendado',
+  SCHEDULED:  'Agendada',
   CHECKED_IN: 'Check-in Feito',
-  BOARDING:   'Embarcando',
-  IN_TRANSIT: 'Em deslocamento',
+  BOARDING:   'Embarque',
+  IN_TRANSIT: 'Em Trânsito',
   ARRIVED:    'Chegou',
-  COMPLETED:  'Finalizado',
+  COMPLETED:  'Concluída',
 };
 
 export function getQueueStatusLabel(status: string): string {
@@ -162,7 +162,7 @@ export const OPERATIONAL_STATUS_LABEL: Record<string, string> = {
   GPS_LOST:    'GPS Perdido',
   WS_ONLY:     'Somente WS',
   OFFLINE:     'Offline',
-  MOVING:      'Em movimento',
+  MOVING:      'Em Movimento',
   IDLE:        'Parado',
   STOPPED:     'Parado',
 };
@@ -172,17 +172,17 @@ export function getOperationalStatusLabel(status: string): string {
 }
 
 export const TRACKING_STATUS_LABEL: Record<string, string> = {
-  MOVING: 'Em movimento',
+  MOVING: 'Em Movimento',
   IDLE: 'Parado',
   STOPPED: 'Parado',
   ONLINE: 'Online',
   OFFLINE: 'Offline',
-  BOARDING: 'Embarcando',
-  IN_TRANSIT: 'Em deslocamento',
+  BOARDING: 'Embarque',
+  IN_TRANSIT: 'Em Trânsito',
   WAITING: 'Aguardando',
   CRITICAL: 'Crítico',
   GPS_LOST: 'GPS Perdido',
-  COMPLETED: 'Finalizado',
+  COMPLETED: 'Concluída',
 };
 
 export function getTrackingStatusLabel(status: string): string {

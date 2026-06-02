@@ -28,14 +28,14 @@ interface RouteCard {
 // ─── Colunas do Kanban ────────────────────────────────────────────────────────
 
 const KANBAN_COLUMNS: Array<{ status: string; label: string; color: string; bg: string }> = [
-  { status: 'SCHEDULED',  label: 'Agendados',           color: 'text-blue-400',    bg: 'bg-blue-950/40' },
+  { status: 'SCHEDULED',  label: 'Agendadas',           color: 'text-blue-400',    bg: 'bg-blue-950/40' },
   { status: 'PENDING',    label: 'Aguard. Despacho',    color: 'text-amber-400',   bg: 'bg-amber-950/40' },
   { status: 'PREPARING',  label: 'Motorista a Caminho', color: 'text-yellow-400',  bg: 'bg-yellow-950/40' },
-  { status: 'DISPATCHED', label: 'Embarcando',          color: 'text-orange-400',  bg: 'bg-orange-950/40' },
-  { status: 'ACTIVE',     label: 'Em Viagem',           color: 'text-emerald-400', bg: 'bg-emerald-950/40' },
+  { status: 'DISPATCHED', label: 'Despachadas',         color: 'text-orange-400',  bg: 'bg-orange-950/40' },
+  { status: 'ACTIVE',     label: 'Em Operação',         color: 'text-emerald-400', bg: 'bg-emerald-950/40' },
   { status: 'RETURNING',  label: 'Retornando',          color: 'text-cyan-400',    bg: 'bg-cyan-950/40' },
-  { status: 'COMPLETED',  label: 'Finalizados',         color: 'text-slate-400',   bg: 'bg-slate-800/40' },
-  { status: 'CANCELLED',  label: 'Cancelados',          color: 'text-red-400',     bg: 'bg-red-950/40' },
+  { status: 'COMPLETED',  label: 'Concluídas',          color: 'text-slate-400',   bg: 'bg-slate-800/40' },
+  { status: 'CANCELLED',  label: 'Canceladas',          color: 'text-red-400',     bg: 'bg-red-950/40' },
 ];
 
 const MOBILITY_ICON: Record<string, string> = {

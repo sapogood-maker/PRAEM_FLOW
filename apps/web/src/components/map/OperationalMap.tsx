@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { cn } from '@/lib/utils';
+import { getTrackingStatusLabel } from '@/lib/i18n';
 import { useRealtimeStore } from '@/store/realtime.store';
 import { useOperationalControlStore, type OperationalFocus } from '@/store/operationalControl.store';
 import { UI_TEXT } from '@/lib/ui-text';
@@ -44,8 +45,8 @@ type OperationalMapProps = {
   className?: string;
 };
 
-const DEFAULT_CITY_CENTER: [number, number] = [-25.5163, -54.5854];
-const DEFAULT_CITY_ZOOM = 13;
+const DEFAULT_CITY_CENTER: [number, number] = [-25.2977, -54.0948];
+const DEFAULT_CITY_ZOOM = 14;
 
 function formatTime(iso?: string | null) {
   if (!iso) return '--:--';
@@ -130,7 +131,7 @@ function MapAutoFocus({
   focus,
 }: {
   followVehicles: boolean;
-  vehicles: Array<{ id: string; lat: number; lng: number }>;
+  vehicles: Array<{ id: string; lat: number; lng: number; online?: boolean }>;
   pickupPoints: Array<{ id: string; lat: number; lng: number }>;
   routes: OperationalMapProps['routes'];
   focus: OperationalFocus | null;
@@ -139,6 +140,18 @@ function MapAutoFocus({
   const initialized = useRef(false);
 
   useEffect(() => {
+    if (!focus && followVehicles) {
+      const activeVehicle = vehicles.find((vehicle) => vehicle.online !== false) ?? null;
+      if (activeVehicle) {
+        map.setView([activeVehicle.lat, activeVehicle.lng], 15);
+        initialized.current = true;
+        return;
+      }
+      map.setView(DEFAULT_CITY_CENTER, DEFAULT_CITY_ZOOM);
+      initialized.current = false;
+      return;
+    }
+
     const selectedRoute = focus?.routeId
       ? routes?.find((route) => route.id === focus.routeId || route.operationId === focus.routeId || route.operationId === focus.operationId)
       : focus?.operationId
@@ -161,7 +174,7 @@ function MapAutoFocus({
     ];
 
     if (points.length === 0) {
-      if (!initialized.current) map.setView(DEFAULT_CITY_CENTER, DEFAULT_CITY_ZOOM);
+      map.setView(DEFAULT_CITY_CENTER, DEFAULT_CITY_ZOOM);
       initialized.current = false;
       return;
     }
@@ -338,7 +351,7 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
             />
             <MapAutoFocus
               followVehicles={followVehicles}
-              vehicles={validVehicles.map((vehicle) => ({ id: vehicle.vehicleId, lat: vehicle.lat, lng: vehicle.lng }))}
+              vehicles={validVehicles.map((vehicle) => ({ id: vehicle.vehicleId, lat: vehicle.lat, lng: vehicle.lng, online: vehicle.online }))}
               pickupPoints={validPickups}
               routes={routes}
               focus={focus}
@@ -388,6 +401,9 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
               const plate = vehicle.plate ?? linkedRoute?.vehicle?.plate ?? undefined;
               const model = vehicle.vehicleModel ?? linkedRoute?.vehicle?.model ?? undefined;
               const driverName = vehicle.driverName ?? linkedRoute?.driver?.user?.name ?? undefined;
+              const operationLabel = linkedRoute
+                ? `${linkedRoute.origin ?? 'Origem'} → ${linkedRoute.destination ?? 'Destino'}`
+                : 'Sem rota ativa';
               return (
                 <VehicleMarker
                   key={vehicle.vehicleId}
@@ -397,6 +413,7 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
                   driverName={driverName}
                   plate={plate}
                   vehicleModel={model}
+                  operationLabel={operationLabel}
                   speed={vehicle.speed}
                   heading={vehicle.heading}
                   operationalStatus={vehicle.operationalStatus}
@@ -418,7 +435,7 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
                       operationId: route?.operationId ?? vehicle.routeId ?? null,
                       center: { lat: vehicle.lat, lng: vehicle.lng },
                       zoom: 15,
-                      label: route ? `${route.origin ?? 'Rota'} → ${route.destination ?? 'destino'}` : plate ?? vehicle.vehicleId,
+                      label: route ? `${route.origin ?? 'Rota'} → ${route.destination ?? 'Destino'}` : plate ?? 'Veículo operacional',
                       status: vehicle.operationalStatus,
                     });
                   }}
@@ -449,13 +466,13 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
                     <div key={vehicle.vehicleId} className={`rounded-2xl border px-3 py-3 transition-colors ${selectedVehicleId === vehicle.vehicleId ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-white/5 bg-white/5'}`}>
                       <div className='flex items-center justify-between gap-3'>
                         <div className='min-w-0'>
-                          <p className='truncate text-sm font-medium text-slate-100'>{vehicle.plate ?? vehicle.vehicleId}</p>
+                          <p className='truncate text-sm font-medium text-slate-100'>{vehicle.plate ?? 'Placa não informada'}</p>
                           <p className='mt-1 text-xs text-slate-500'>
-                            {vehicle.driverName ?? vehicle.driverId ?? UI_TEXT.operationalMap.driverPending} · {distance} km
+                            {vehicle.driverName ?? UI_TEXT.operationalMap.driverPending} · {distance} km
                           </p>
                         </div>
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTone(status, online)}`}>
-                          {status}
+                          {getTrackingStatusLabel(status)}
                         </span>
                       </div>
                       <p className='mt-2 text-xs text-slate-500'>
@@ -481,7 +498,7 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
                             operationId: route?.operationId ?? vehicle.routeId ?? null,
                             center: { lat: vehicle.lat, lng: vehicle.lng },
                             zoom: 15,
-                            label: route ? `${route.origin ?? 'Rota'} → ${route.destination ?? 'destino'}` : vehicle.plate ?? vehicle.vehicleId,
+                            label: route ? `${route.origin ?? 'Rota'} → ${route.destination ?? 'Destino'}` : vehicle.plate ?? 'Veículo operacional',
                             status: vehicle.operationalStatus,
                           });
                         }}

@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { AlertTriangle, Clock3, Gauge, MapPin, Truck, Wifi, WifiOff } from 'lucide-react';
 import type { ActivityEvent, QueueItem, VehiclePosition } from '@/types';
 import { UI_TEXT } from '@/lib/ui-text';
+import { getTrackingStatusLabel } from '@/lib/i18n';
 
 type OperationalQueueItem = QueueItem & {
   patient?: { name?: string; mobility?: string; specialNeeds?: string | null };
@@ -189,13 +190,13 @@ export function OperationalRail({ queueItems, alerts, vehicles, connected }: Ope
                 <div key={vehicle.vehicleId} className='rounded-2xl border border-white/5 bg-white/5 px-3 py-3'>
                   <div className='flex items-center justify-between gap-3'>
                     <div className='min-w-0'>
-                      <p className='truncate text-sm font-medium text-slate-100'>{vehicle.plate ?? vehicle.vehicleId}</p>
+                      <p className='truncate text-sm font-medium text-slate-100'>{vehicle.plate ?? 'Placa não informada'}</p>
                       <p className='mt-1 text-xs text-slate-500'>
-                        {vehicle.driverName ?? vehicle.driverId ?? UI_TEXT.operationalRail.driverPending} · {formatTime(vehicle.updatedAt ?? vehicle.timestamp)}
+                        {vehicle.driverName ?? UI_TEXT.operationalRail.driverPending} · {formatTime(vehicle.updatedAt ?? vehicle.timestamp)}
                       </p>
                     </div>
                     <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTone(status, online)}`}>
-                      {status}
+                      {getTrackingStatusLabel(status)}
                     </span>
                   </div>
                   <div className='mt-2 flex items-center gap-3 text-xs text-slate-500'>

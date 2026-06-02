@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useRealtimeStore } from '@/store/realtime.store';
-import { getTripStatusLabel } from '@/lib/i18n';
+import { getConnectionStatusLabel, getTripStatusLabel } from '@/lib/i18n';
 
 const STATUS_BADGE: Record<string, string> = {
   SCHEDULED: 'bg-slate-700 text-slate-300',
@@ -45,8 +45,8 @@ export default function TripsPage() {
     { value: 'SCHEDULED',   label: 'Agendado' },
     { value: 'CONFIRMED',   label: 'Confirmado' },
     { value: 'BOARDING',    label: 'Embarcando' },
-    { value: 'BOARDED',     label: 'EMBARCADO' },
-    { value: 'IN_TRANSIT',  label: 'EM DESLOCAMENTO' },
+    { value: 'BOARDED',     label: 'Embarcado' },
+    { value: 'IN_TRANSIT',  label: 'Em deslocamento' },
     { value: 'ARRIVED',     label: 'Chegou' },
     { value: 'COMPLETED',   label: 'Finalizado' },
     { value: 'NO_SHOW',     label: 'Não Compareceu' },
@@ -63,7 +63,7 @@ export default function TripsPage() {
           <div className='flex items-center gap-3'>
             <h2 className='text-2xl font-bold text-slate-100'>Viagens do Dia</h2>
             <span className={`rounded px-2 py-0.5 text-xs font-semibold ${connected ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300'}`}>
-              {connected ? '● AO VIVO' : '○ OFFLINE'}
+              {getConnectionStatusLabel(connected)}
             </span>
           </div>
           <p className='text-sm text-slate-400'>{total} viagem(ns) registrada(s)</p>

@@ -9,8 +9,8 @@ export const TRIP_STATUS_LABEL: Record<string, string> = {
   SCHEDULED:   'Agendado',
   CONFIRMED:   'Confirmado',
   BOARDING:    'Embarcando',
-  BOARDED:     'EMBARCADO',
-  IN_TRANSIT:  'EM DESLOCAMENTO',
+  BOARDED:     'Embarcado',
+  IN_TRANSIT:  'Em deslocamento',
   ARRIVED:     'Chegou',
   COMPLETED:   'Finalizado',
   NO_SHOW:     'Não Compareceu',
@@ -65,8 +65,8 @@ export function getDispatchStatusLabel(status: string): string {
 // ── Status de Conexão (ConnectionStatus) ──────────────────────────────────────
 
 export const CONNECTION_STATUS_LABEL: Record<string, string> = {
-  ONLINE:  '● Online',
-  OFFLINE: '○ Offline',
+  ONLINE:  '● Conectado',
+  OFFLINE: '○ Desconectado',
   IDLE:    '◌ Inativo',
 };
 
@@ -90,7 +90,7 @@ export const QUEUE_STATUS_LABEL: Record<string, string> = {
   SCHEDULED:  'Agendado',
   CHECKED_IN: 'Check-in Feito',
   BOARDING:   'Embarcando',
-  IN_TRANSIT: 'EM DESLOCAMENTO',
+  IN_TRANSIT: 'Em deslocamento',
   ARRIVED:    'Chegou',
   COMPLETED:  'Finalizado',
 };
@@ -162,10 +162,31 @@ export const OPERATIONAL_STATUS_LABEL: Record<string, string> = {
   GPS_LOST:    'GPS Perdido',
   WS_ONLY:     'Somente WS',
   OFFLINE:     'Offline',
+  MOVING:      'Em movimento',
+  IDLE:        'Parado',
+  STOPPED:     'Parado',
 };
 
 export function getOperationalStatusLabel(status: string): string {
   return OPERATIONAL_STATUS_LABEL[status] ?? status;
+}
+
+export const TRACKING_STATUS_LABEL: Record<string, string> = {
+  MOVING: 'Em movimento',
+  IDLE: 'Parado',
+  STOPPED: 'Parado',
+  ONLINE: 'Online',
+  OFFLINE: 'Offline',
+  BOARDING: 'Embarcando',
+  IN_TRANSIT: 'Em deslocamento',
+  WAITING: 'Aguardando',
+  CRITICAL: 'Crítico',
+  GPS_LOST: 'GPS Perdido',
+  COMPLETED: 'Finalizado',
+};
+
+export function getTrackingStatusLabel(status: string): string {
+  return TRACKING_STATUS_LABEL[status] ?? getOperationalStatusLabel(status);
 }
 
 // ── Status de Conexão ─────────────────────────────────────────────────────────

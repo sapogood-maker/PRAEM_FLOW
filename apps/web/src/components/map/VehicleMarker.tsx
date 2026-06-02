@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
+import { getTrackingStatusLabel } from '@/lib/i18n';
 
 type VehicleMarkerProps = {
   position: [number, number];
@@ -11,6 +12,7 @@ type VehicleMarkerProps = {
   driverName?: string | null;
   plate?: string;
   vehicleModel?: string;
+  operationLabel?: string;
   speed?: number;
   heading?: number;
   operationalStatus?: string;
@@ -36,31 +38,7 @@ const statusColors: Record<string, string> = {
 };
 
 function getOperationalLabel(status?: string) {
-  switch ((status ?? '').toUpperCase()) {
-    case 'WAITING':
-    case 'WAITING_PATIENT':
-      return 'Aguardando';
-    case 'BOARDING':
-      return 'Embarque';
-    case 'BOARDED':
-      return 'EMBARCADO';
-    case 'PASSENGERS_ONBOARD':
-      return 'PASSAGEIROS EMBARCADOS';
-    case 'STOPPED':
-      return 'Parado';
-    case 'IN_TRANSIT':
-    case 'MOVING':
-      return 'Em deslocamento';
-    case 'OFFLINE':
-      return 'Offline';
-    case 'CRITICAL':
-    case 'GPS_LOST':
-      return 'Crítico';
-    case 'ONLINE':
-      return 'Online';
-    default:
-      return 'Operacional';
-  }
+  return getTrackingStatusLabel((status ?? '').toUpperCase());
 }
 
 function getStatusColor(status?: string) {
@@ -76,11 +54,10 @@ function formatUpdatedAt(updatedAt?: string) {
 
 export function VehicleMarker({
   position,
-  vehicleId,
-  driverId,
   driverName,
   plate,
   vehicleModel,
+  operationLabel,
   speed,
   heading,
   operationalStatus,
@@ -148,8 +125,10 @@ export function VehicleMarker({
   const color = getStatusColor(online === false ? 'OFFLINE' : operationalStatus);
   const statusLabel = getOperationalLabel(online === false ? 'OFFLINE' : operationalStatus);
   const rotate = animatedHeading;
-  const label = plate ?? vehicleId;
-  const driverLabel = driverName ?? driverId ?? 'Não informado';
+  const label = plate ?? 'Placa não informada';
+  const driverLabel = driverName ?? 'Motorista não informado';
+  const modelLabel = vehicleModel ?? 'Modelo não informado';
+  const operationText = operationLabel ?? 'Sem rota ativa';
   const speedLabel = speed == null ? '—' : `${Math.max(0, speed).toFixed(0)} km/h`;
 
   const icon = useMemo(
@@ -193,15 +172,41 @@ export function VehicleMarker({
       icon={icon}
       eventHandlers={onSelect ? { click: onSelect } : undefined}
     >
-      <Popup>
-        <div className='min-w-[220px] text-xs text-slate-200'>
-          <p className='text-sm font-semibold text-slate-100'>Veículo: {label}</p>
-          <p className='mt-1 text-slate-300'>Motorista: {driverLabel}</p>
-          <p className='text-slate-300'>Modelo: {vehicleModel ?? 'Não informado'}</p>
-          <p className='text-slate-300'>Velocidade: {speedLabel}</p>
-          <p className='text-slate-300'>Status: {statusLabel}</p>
-          <p className='text-slate-400'>Última atualização: {formatUpdatedAt(updatedAt)}</p>
-          {focused && <p className='mt-2 text-cyan-300'>Foco operacional ativo</p>}
+      <Popup className='operational-map-popup'>
+        <div className='min-w-[260px] max-w-[320px] rounded-2xl border border-cyan-500/15 bg-slate-950 px-4 py-4 text-sm text-slate-200 shadow-2xl'>
+          <div className='space-y-3'>
+            <div>
+              <p className='text-[11px] font-semibold uppercase tracking-[0.35em] text-cyan-300/75'>Veículo operacional</p>
+              <p className='mt-1 text-xl font-semibold text-slate-50'>{label}</p>
+            </div>
+            <dl className='grid gap-2 text-sm'>
+              <div className='flex justify-between gap-3'>
+                <dt className='font-semibold text-slate-400'>Motorista:</dt>
+                <dd className='text-right text-slate-100'>{driverLabel}</dd>
+              </div>
+              <div className='flex justify-between gap-3'>
+                <dt className='font-semibold text-slate-400'>Modelo:</dt>
+                <dd className='text-right text-slate-100'>{modelLabel}</dd>
+              </div>
+              <div className='flex justify-between gap-3'>
+                <dt className='font-semibold text-slate-400'>Velocidade:</dt>
+                <dd className='text-right text-slate-100'>{speedLabel}</dd>
+              </div>
+              <div className='flex justify-between gap-3'>
+                <dt className='font-semibold text-slate-400'>Status:</dt>
+                <dd className='text-right text-slate-100'>{statusLabel}</dd>
+              </div>
+              <div className='flex justify-between gap-3'>
+                <dt className='font-semibold text-slate-400'>Última atualização:</dt>
+                <dd className='text-right text-slate-100'>{formatUpdatedAt(updatedAt)}</dd>
+              </div>
+              <div className='flex justify-between gap-3'>
+                <dt className='font-semibold text-slate-400'>Operação:</dt>
+                <dd className='text-right text-slate-100'>{operationText}</dd>
+              </div>
+            </dl>
+            {focused && <p className='rounded-xl border border-cyan-500/15 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-200'>Foco operacional ativo</p>}
+          </div>
         </div>
       </Popup>
     </Marker>

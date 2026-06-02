@@ -49,7 +49,7 @@ const STATUS_CFG: Record<DriverStatus, { label: string; cls: string }> = {
   AVAILABLE:  { label: 'Disponível',  cls: 'bg-emerald-900 text-emerald-300' },
   ON_ROUTE:   { label: 'Em Rota',     cls: 'bg-cyan-900 text-cyan-300' },
   REST:       { label: 'Descanso',    cls: 'bg-amber-900 text-amber-300' },
-  OFFLINE:    { label: 'Offline',     cls: 'bg-slate-800 text-slate-400' },
+  OFFLINE:    { label: 'Desconectado',     cls: 'bg-slate-800 text-slate-400' },
 };
 
 const OPS_CFG: Record<OperationalStatus, { label: string; cls: string; dot: string }> = {
@@ -57,7 +57,7 @@ const OPS_CFG: Record<OperationalStatus, { label: string; cls: string; dot: stri
   CONNECTED:   { label: 'WS Ativo',    cls: 'bg-cyan-900/60 text-cyan-300',       dot: 'bg-cyan-400' },
   GPS_LOST:    { label: 'GPS Perdido', cls: 'bg-amber-900/60 text-amber-400',     dot: 'bg-amber-400' },
   WS_ONLY:     { label: 'WS Apenas',   cls: 'bg-blue-900/60 text-blue-300',       dot: 'bg-blue-400' },
-  OFFLINE:     { label: 'Offline',     cls: 'bg-slate-800 text-slate-500',        dot: 'bg-slate-500' },
+  OFFLINE:     { label: 'Desconectado',     cls: 'bg-slate-800 text-slate-500',        dot: 'bg-slate-500' },
 };
 
 function StatusBadge({ status }: { status: DriverStatus }) {
@@ -336,7 +336,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'AVAILABLE', label: 'Disponível' },
   { key: 'ON_ROUTE',  label: 'Em Rota' },
   { key: 'REST',      label: 'Descanso' },
-  { key: 'OFFLINE',   label: 'Offline' },
+  { key: 'OFFLINE',   label: 'Desconectado' },
   { key: 'INACTIVE',  label: 'Inativos' },
 ];
 
@@ -618,4 +618,3 @@ export default function DriversPage() {
     </section>
   );
 }
-

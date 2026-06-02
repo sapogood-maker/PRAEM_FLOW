@@ -134,6 +134,13 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         updatedAt: raw.updatedAt ?? raw.timestamp ?? existed?.updatedAt,
         timestamp: raw.timestamp ?? raw.updatedAt ?? existed?.timestamp,
       };
+      console.debug('[MAP_POPUP_DEBUG]', {
+        vehicleId: normalized.vehicleId,
+        plate: normalized.plate ?? null,
+        driverId: normalized.driverId ?? null,
+        driverName: normalized.driverName ?? null,
+        vehicleModel: normalized.vehicleModel ?? null,
+      });
       console.debug('[MAP] payload accepted', {
         markerId,
         lat: normalized.lat,

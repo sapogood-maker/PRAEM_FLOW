@@ -79,7 +79,15 @@ export function useWebSocket(enabled = true) {
     const extractGpsPayload = (incoming: unknown): VehiclePosition => {
       const data = (incoming ?? {}) as Record<string, unknown>;
       const nested = (data.payload ?? data.location ?? data.data ?? data) as Record<string, unknown>;
-      return nested as unknown as VehiclePosition;
+      const payload = nested === data ? data : { ...data, ...nested };
+      console.debug('[MAP_POPUP_DEBUG]', {
+        vehicleId: typeof payload.vehicleId === 'string' ? payload.vehicleId : null,
+        plate: typeof payload.plate === 'string' ? payload.plate : null,
+        driverId: typeof payload.driverId === 'string' ? payload.driverId : null,
+        driverName: typeof payload.driverName === 'string' ? payload.driverName : null,
+        vehicleModel: typeof payload.vehicleModel === 'string' ? payload.vehicleModel : null,
+      });
+      return payload as unknown as VehiclePosition;
     };
 
     const dispatchGpsToStore = (event: string, incoming: unknown) => {

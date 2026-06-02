@@ -572,7 +572,7 @@ export default function QueuePage() {
         <div className='rounded-xl border border-border bg-panel px-4 py-3'>
           <p className='text-xs uppercase text-slate-500'>Conexão realtime</p>
           <p className={`text-sm font-semibold ${connected ? 'text-emerald-300' : 'text-red-300'}`}>
-            {connected ? 'Online' : 'Offline'}
+            {connected ? 'Conectado' : 'Desconectado'}
           </p>
         </div>
         <div className='rounded-xl border border-border bg-panel px-4 py-3'>

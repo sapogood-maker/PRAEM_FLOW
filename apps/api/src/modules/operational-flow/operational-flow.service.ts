@@ -294,6 +294,21 @@ export class OperationalFlowService {
   }
 
   async markBoarded(tenantId: string, scope: FlowScope, context: FlowContext = {}) {
+    // Ensure the route/trip is in BOARDING before promoting to BOARDED.
+    // This makes offline or single-shot QR scans resilient: if scanner finds route DISPATCHED
+    // and the scanning driver is assigned, confirmBoarding will auto-start the route and set BOARDING.
+    const entity = await this.loadEntity(tenantId, scope);
+    const currentState = this.deriveOperationalState(entity.route.status, entity.trip?.status ?? null);
+
+    // Idempotent: if already BOARDED, return current trip
+    if (currentState === 'BOARDED') {
+      return { trip: entity.trip, route: entity.route, queue: entity.trip ? await this.findLatestQueue(tenantId, entity.trip.patientId) : null };
+    }
+
+    // Ensure boarding state (this will auto-start route when appropriate)
+    await this.confirmBoarding(tenantId, scope, context);
+
+    // Now apply BOARDED transition
     return this.transitionState(tenantId, scope, 'BOARDED', context);
   }
 

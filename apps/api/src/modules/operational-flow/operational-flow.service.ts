@@ -221,15 +221,40 @@ export class OperationalFlowService {
       `[OPS] qr boarding evaluate tenantId=${tenantId} routeId=${entity.route.id} tripId=${entity.trip?.id ?? '-'} previous=${previousState}`,
     );
 
-    const refreshed = await this.loadEntity(tenantId, {
+    let refreshed = await this.loadEntity(tenantId, {
       routeId: entity.route.id,
       tripId: entity.trip?.id ?? scope.tripId,
       patientId: scope.patientId,
     });
-    const nextResolvedState = this.deriveOperationalState(refreshed.route.status, refreshed.trip?.status ?? null);
+    let nextResolvedState = this.deriveOperationalState(refreshed.route.status, refreshed.trip?.status ?? null);
     this.logger.log(
       `[OPS] qr boarding resolved tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} previous=${nextResolvedState} next=BOARDING`,
     );
+
+    // If route still DISPATCHED but the scanner is the assigned driver, try auto-starting the route to reduce UX friction
+    if (nextResolvedState === 'DISPATCHED' && context.driverId && refreshed.route.driverId && refreshed.route.driverId === context.driverId) {
+      this.logger.log(
+        `[OPS] qr boarding auto-starting route tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} driver=${context.driverId}`,
+      );
+      try {
+        await this.startRoute(tenantId, refreshed.route.id, context, refreshed.trip?.id ?? scope.tripId);
+        // reload entity and recompute state
+        refreshed = await this.loadEntity(tenantId, {
+          routeId: refreshed.route.id,
+          tripId: refreshed.trip?.id ?? scope.tripId,
+          patientId: scope.patientId,
+        });
+        nextResolvedState = this.deriveOperationalState(refreshed.route.status, refreshed.trip?.status ?? null);
+        this.logger.log(
+          `[OPS] qr boarding post-autostart tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} next=${nextResolvedState}`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[OPS] qr boarding auto-start failed tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} err=${String(err)}`,
+        );
+        throw new BadRequestException('Driver must accept route before boarding');
+      }
+    }
 
     if (nextResolvedState === 'BOARDING') {
       this.logger.log(
@@ -239,12 +264,13 @@ export class OperationalFlowService {
       return { trip: refreshed.trip, route: refreshed.route, queue };
     }
 
-    if (nextResolvedState === 'CREATED' || nextResolvedState === 'DISPATCHED' || nextResolvedState === 'DRIVER_ACCEPTED') {
+    if (nextResolvedState === 'CREATED' || nextResolvedState === 'DRIVER_ACCEPTED') {
       this.logger.warn(
         `[OPS] qr boarding rejected tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=driver_not_ready previous=${nextResolvedState}`,
       );
       throw new BadRequestException('Driver must accept route and set waiting status before boarding');
     }
+
     if (!['WAITING_PATIENT'].includes(nextResolvedState)) {
       this.logger.warn(
         `[OPS] qr boarding rejected tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=invalid_qr_state previous=${nextResolvedState}`,

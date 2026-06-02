@@ -37,6 +37,15 @@ export class SusImportService {
     private readonly mapper: SusImportRowMapper,
   ) {}
 
+  private logImportEvent(tag: string, details: Record<string, any> | string = {}) {
+    try {
+      const payload = typeof details === 'string' ? details : JSON.stringify(details);
+      this.logger.log(`[SUS_IMPORT] [${tag}] ${payload}`);
+    } catch (e) {
+      this.logger.error(`[SUS_IMPORT] [${tag}] (failed to serialize details)`);
+    }
+  }
+
   async upload(
     tenantId: string,
     userId: string | undefined,
@@ -73,6 +82,8 @@ export class SusImportService {
       },
       select: { id: true },
     });
+
+    this.logImportEvent('IMPORT_START', { tenantId, fileName: file?.originalname, fileHash, reprocessFromImportId: dto.reprocessFromImportId });
 
     let validRows = 0;
     let invalidRows = 0;
@@ -183,6 +194,8 @@ export class SusImportService {
         },
       },
     });
+
+    this.logImportEvent('IMPORT_RETURN', { importId: createdImport.id, created: processingResult.created, updated: processingResult.updated, skipped: processingResult.skipped });
 
     return {
       id: createdImport.id,
@@ -366,7 +379,10 @@ export class SusImportService {
       demandsCreated: 0,
       demandsUpdated: 0,
     };
-    if (rows.length === 0) return counters;
+    if (rows.length === 0) {
+      this.logImportEvent('IMPORT_RETURN', { reason: 'no_rows_to_process' });
+      return counters;
+    }
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -516,6 +532,7 @@ export class SusImportService {
         },
         select: { id: true },
       });
+      this.logImportEvent('PATIENT_MATCH', { action: 'created', patientName: row.patient_name, cpf: row.cpf });
       return { id: created.id, created: true, updated: false };
     }
 
@@ -535,9 +552,13 @@ export class SusImportService {
     if (row.source_cpf_provided && existing.cpf !== row.cpf) data.cpf = row.cpf;
     if (existing.birthDate.getTime() === new Date('1970-01-01T00:00:00Z').getTime() && birthDate) data.birthDate = birthDate;
 
-    if (Object.keys(data).length === 0) return { id: existing.id, created: false, updated: false };
+    if (Object.keys(data).length === 0) {
+      this.logImportEvent('PATIENT_MATCH', { action: 'no_update', patientId: existing.id });
+      return { id: existing.id, created: false, updated: false };
+    }
 
     await this.prisma.patient.update({ where: { id: existing.id }, data });
+    this.logImportEvent('PATIENT_MATCH', { action: 'updated', patientId: existing.id });
     return { id: existing.id, created: false, updated: true };
   }
 
@@ -564,8 +585,10 @@ export class SusImportService {
       if ((!existing.address || existing.address === existing.name) && row.destination_address) data.address = row.destination_address;
       if (Object.keys(data).length > 0) {
         await this.prisma.healthcareLocation.update({ where: { id: existing.id }, data });
+        this.logImportEvent('LOCATION_MATCH', { action: 'updated', locationId: existing.id, name: existing.name });
         return { id: existing.id, created: false, updated: true };
       }
+      this.logImportEvent('LOCATION_MATCH', { action: 'no_update', locationId: existing.id, name: existing.name });
       return { id: existing.id, created: false, updated: false };
     }
 
@@ -581,6 +604,7 @@ export class SusImportService {
       },
       select: { id: true },
     });
+    this.logImportEvent('LOCATION_MATCH', { action: 'created', name: row.destination_hospital });
     return { id: created.id, created: true, updated: false };
   }
 
@@ -626,7 +650,7 @@ export class SusImportService {
         },
         select: { id: true },
       });
-      this.logger.log(`[CREATE_NEW_DEMAND_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} demandId=${created.id}`);
+      this.logImportEvent('DEMAND_MATCH', { action: 'created_due_to_terminal', patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital, healthcareLocationId, demandId: created.id });
       return { id: created.id, created: true, updated: false };
     }
 
@@ -648,12 +672,12 @@ export class SusImportService {
 
       if (Object.keys(dataFromTerminal).length > 0) {
         await this.prisma.operationalDemand.update({ where: { id: existing.id }, data: dataFromTerminal });
-        this.logger.log(`[CREATE_NEW_DEMAND_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} demandId=${existing.id} reason=updated_from_terminal`);
+        this.logImportEvent('DEMAND_MATCH', { action: 'updated_due_to_terminal', patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital, healthcareLocationId, demandId: existing.id, reason: 'updated_from_terminal' });
         return { id: existing.id, created: false, updated: true };
       }
 
       // No data to update but treating as new demand: just log and return existing so queue creation proceeds.
-      this.logger.log(`[CREATE_NEW_DEMAND_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} demandId=${existing.id} reason=terminal_only_no_updates`);
+      this.logImportEvent('DEMAND_MATCH', { action: 'terminal_only_no_updates', patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital, healthcareLocationId, demandId: existing.id, reason: 'terminal_only_no_updates' });
       return { id: existing.id, created: false, updated: false };
     }
 
@@ -665,7 +689,7 @@ export class SusImportService {
     if (!existing.wheelchair && this.isWheelchair(row)) data.wheelchair = true;
     if (!existing.stretcher && this.isStretcher(row)) data.stretcher = true;
     if (Object.keys(data).length === 0) {
-      this.logger.log(`[SKIP_DEMAND] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${healthcareLocationId} reason=no_update_existing`);
+      this.logImportEvent('DEMAND_MATCH', { action: 'skipped', patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital, healthcareLocationId, reason: 'no_update_existing' });
       return { id: existing.id, created: false, updated: false };
     }
 
@@ -705,6 +729,7 @@ export class SusImportService {
         },
         select: { id: true },
       });
+      this.logImportEvent('QUEUE_MATCH', { action: 'created', patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital, queueId: created.id });
       return { id: created.id, created: true, updated: false };
     }
 
@@ -727,7 +752,7 @@ export class SusImportService {
         },
         select: { id: true },
       });
-      this.logger.log(`[CREATE_NEW_QUEUE_AFTER_TERMINAL] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${destinationId} newQueueId=${created.id} previousStatus=${existing.status}`);
+      this.logImportEvent('QUEUE_MATCH', { action: 'created_due_to_terminal', patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital, healthcareLocationId: destinationId, newQueueId: created.id, previousStatus: existing.status });
       return { id: created.id, created: true, updated: false };
     }
 
@@ -744,11 +769,12 @@ export class SusImportService {
       data.status = QueueStatus.WAITING_DISPATCH;
     }
     if (Object.keys(data).length === 0) {
-      this.logger.log(`[SKIP_QUEUE] patientId=${patientId} appointmentDate=${appointmentDate.toISOString()} destination=${row.destination_hospital} healthcareLocationId=${destinationId} existingStatus=${existing.status} reason=no_update_existing`);
+      this.logImportEvent('QUEUE_MATCH', { action: 'skipped', patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital, healthcareLocationId: destinationId, existingStatus: existing.status, reason: 'no_update_existing' });
       return { id: existing.id, created: false, updated: false };
     }
 
     await this.prisma.operationalQueue.update({ where: { id: existing.id }, data });
+    this.logImportEvent('QUEUE_MATCH', { action: 'updated', queueId: existing.id, patientId, appointmentDate: appointmentDate.toISOString(), destination: row.destination_hospital });
     return { id: existing.id, created: false, updated: true };
   }
 

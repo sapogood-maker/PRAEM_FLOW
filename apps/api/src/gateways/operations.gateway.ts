@@ -322,6 +322,7 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     }
 
     this.logger.log(`[TRACKING] [OPS] [GPS] driver update tenantId=${user.tenantId} driverId=${driverId ?? '-'} vehicleId=${vehicleId} routeId=${routeId ?? '-'} lat=${lat} lng=${lng}`);
+    const trackingRowsWritten = throttled ? 0 : 1;
     if (!throttled) {
       await this.prisma.vehicleTracking.create({
         data: {
@@ -435,6 +436,9 @@ export class OperationsGateway implements OnGatewayConnection, OnGatewayDisconne
     };
     this.logger.log(`[WEBSOCKET] broadcast driver:location:update tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'}`);
     this.logger.log(`[MAP] broadcast location tenantId=${user.tenantId} vehicleId=${vehicleId} routeId=${routeId ?? '-'} operationalStatus=${operationalStatus}`);
+    this.logger.log(
+      `[TRACKING_DEBUG] driverId=${driverId ?? '-'} vehicleId=${vehicleId} wsConnected=true lastGpsAt=${now.toISOString()} lastGpsAgeSeconds=0 trackingRowsWritten=${trackingRowsWritten} dashboardOnlineStatus=${operationalStatus === 'MOVING' || operationalStatus === 'IDLE' ? 'OPERATIONAL' : operationalStatus}`,
+    );
     this.server.to(room).emit('driver:location:update', broadcast);
     this.server.to(room).emit('vehicle.location_updated', broadcast);
     if (driverId) {

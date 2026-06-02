@@ -33,4 +33,12 @@ export class DailyOperationController {
   ) {
     return this.service.updateStatus(id, req.user.tenantId, sanitizePayload(body).status);
   }
+
+  @Post('recovery/reconcile-orphans')
+  reconcileOrphans(
+    @Request() req: AuthRequest,
+    @Body() body: { fromDate?: string; toDate?: string; onlyOpen?: boolean },
+  ) {
+    return this.service.reconcileOperations(req.user.tenantId, sanitizePayload(body));
+  }
 }

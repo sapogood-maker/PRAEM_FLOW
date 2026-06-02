@@ -42,6 +42,10 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
   OperationalState get state => _state;
   Map<String, dynamic>? get activeRoute => _activeRoute;
   List<Map<String, dynamic>> get patients => List.unmodifiable(_patients);
+  List<Map<String, dynamic>> get activePatients =>
+      _patients.where((p) => _isActivePassengerStatus(_normalizePassengerStatus(p['status'] as String?))).toList(growable: false);
+  List<Map<String, dynamic>> get finishedPatients =>
+      _patients.where((p) => _isFinishedPassengerStatus(_normalizePassengerStatus(p['status'] as String?))).toList(growable: false);
   List<Map<String, dynamic>> get stops => List.unmodifiable(_stops);
   bool get loading => _loading;
   bool get actionInProgress => _actionInProgress;
@@ -266,6 +270,21 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
             s != 'CANCELLED';
       }).length;
 
+  int get activeCount => activePatients.length;
+  int get boardedInMissionCount => _patients.where((p) {
+        final status = _normalizePassengerStatus(p['status'] as String?);
+        return status == 'BOARDING' || status == 'IN_TRANSIT';
+      }).length;
+  int get finishedCompletedCount => _patients.where((p) {
+        return _normalizePassengerStatus(p['status'] as String?) == 'COMPLETED';
+      }).length;
+  int get noShowCount => _patients.where((p) {
+        return _normalizePassengerStatus(p['status'] as String?) == 'NO_SHOW';
+      }).length;
+  int get cancelledCount => _patients.where((p) {
+        return _normalizePassengerStatus(p['status'] as String?) == 'CANCELLED';
+      }).length;
+
   Map<String, dynamic>? get currentStop {
     final pending = _stops.where((s) {
       final st = s['status'] as String?;
@@ -341,6 +360,25 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
         s == 'IN_TRANSIT' ||
         s == 'ARRIVED' ||
         s == 'COMPLETED';
+  }
+
+  String _normalizePassengerStatus(String? status) {
+    final s = (status ?? '').toUpperCase();
+    if (s == 'IN_PROGRESS') return 'IN_TRANSIT';
+    if (s == 'BOARDED') return 'BOARDING';
+    if (s == 'CONFIRMED' || s == 'PENDING_CONFIRMATION' || s == 'WAITING_PATIENT') return 'WAITING';
+    return s;
+  }
+
+  bool _isActivePassengerStatus(String status) {
+    return status == 'WAITING' ||
+        status == 'SCHEDULED' ||
+        status == 'BOARDING' ||
+        status == 'IN_TRANSIT';
+  }
+
+  bool _isFinishedPassengerStatus(String status) {
+    return status == 'COMPLETED' || status == 'NO_SHOW' || status == 'CANCELLED';
   }
 
   Map<String, dynamic>? get _activeTrip {

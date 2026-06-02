@@ -8,6 +8,7 @@ type VehicleMarkerProps = {
   position: [number, number];
   vehicleId: string;
   driverId?: string | null;
+  driverName?: string | null;
   plate?: string;
   vehicleModel?: string;
   speed?: number;
@@ -77,6 +78,7 @@ export function VehicleMarker({
   position,
   vehicleId,
   driverId,
+  driverName,
   plate,
   vehicleModel,
   speed,
@@ -147,7 +149,7 @@ export function VehicleMarker({
   const statusLabel = getOperationalLabel(online === false ? 'OFFLINE' : operationalStatus);
   const rotate = animatedHeading;
   const label = plate ?? vehicleId;
-  const driverLabel = driverId ?? 'Não informado';
+  const driverLabel = driverName ?? driverId ?? 'Não informado';
   const speedLabel = speed == null ? '—' : `${Math.max(0, speed).toFixed(0)} km/h`;
 
   const icon = useMemo(

@@ -32,6 +32,8 @@ export type VehicleTrackingPayload = {
 
 // Seconds without heartbeat before a vehicle is considered OFFLINE
 const OFFLINE_THRESHOLD_SECONDS = 60;
+const WS_CONNECTED_THRESHOLD_SECONDS = 90;
+const GPS_ACTIVE_THRESHOLD_SECONDS = 60;
 
 function deriveOperationalStatus(speed?: number | null, online?: boolean): string {
   if (!online) return 'OFFLINE';
@@ -284,15 +286,61 @@ export class TrackingService {
         vehicle: { select: { id: true, plate: true, model: true, type: true, status: true, capacity: true } },
       },
     });
+    const driverIds = Array.from(
+      new Set(
+        trackings
+          .map((t: any) => (typeof t.driverId === 'string' && t.driverId.length > 0 ? t.driverId : null))
+          .filter((id): id is string => id !== null),
+      ),
+    );
+    const drivers = driverIds.length
+      ? await this.prisma.driver.findMany({
+          where: { tenantId, id: { in: driverIds } },
+          select: {
+            id: true,
+            wsLastSeenAt: true,
+            lastHeartbeatAt: true,
+            user: { select: { name: true } },
+          },
+        })
+      : [];
+    const driverMap = new Map(drivers.map((d: any) => [d.id, d]));
 
     const now = Date.now();
     return trackings.map((t: any) => {
+      const driver = t.driverId ? driverMap.get(t.driverId) : null;
       const staleSecs = t.lastHeartbeatAt
         ? (now - new Date(t.lastHeartbeatAt).getTime()) / 1000
         : Infinity;
       const isOffline = staleSecs > OFFLINE_THRESHOLD_SECONDS;
+      const wsLastSeenAt = driver?.wsLastSeenAt ? new Date(driver.wsLastSeenAt).getTime() : null;
+      const driverLastGpsAt = driver?.lastHeartbeatAt ? new Date(driver.lastHeartbeatAt).getTime() : null;
+      const wsConnected = wsLastSeenAt != null ? (now - wsLastSeenAt) / 1000 <= WS_CONNECTED_THRESHOLD_SECONDS : false;
+      const gpsActive = driverLastGpsAt != null ? (now - driverLastGpsAt) / 1000 <= GPS_ACTIVE_THRESHOLD_SECONDS : false;
+      const dashboardOnlineStatus = wsConnected && gpsActive
+        ? 'OPERATIONAL'
+        : wsConnected
+          ? 'CONNECTED'
+          : driverLastGpsAt != null
+            ? 'GPS_LOST'
+            : wsLastSeenAt != null
+              ? 'WS_ONLY'
+              : 'OFFLINE';
+      const lastGpsAtIso = t.lastHeartbeatAt?.toISOString?.() ?? t.timestamp?.toISOString?.() ?? null;
+      const lastGpsAgeSeconds = lastGpsAtIso ? Math.max(0, Math.round((now - new Date(lastGpsAtIso).getTime()) / 1000)) : null;
+      this.logger.debug(
+        `[TRACKING_DEBUG] driverId=${t.driverId ?? '-'} vehicleId=${t.vehicleId} wsConnected=${wsConnected} lastGpsAt=${lastGpsAtIso ?? '-'} lastGpsAgeSeconds=${lastGpsAgeSeconds ?? -1} trackingRowsWritten=1 dashboardOnlineStatus=${dashboardOnlineStatus}`,
+      );
       return {
         ...t,
+        plate: t.vehicle?.plate ?? null,
+        vehicleModel: t.vehicle?.model ?? null,
+        driverName: driver?.user?.name ?? null,
+        wsConnected,
+        gpsActive,
+        lastGpsAt: lastGpsAtIso,
+        lastGpsAgeSeconds,
+        dashboardOnlineStatus,
         operationalStatus: isOffline ? 'OFFLINE' : t.operationalStatus,
         online: !isOffline,
         staleSecs: Math.round(staleSecs),

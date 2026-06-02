@@ -60,6 +60,11 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         vehicleId?: string;
         driverId?: string | null;
         routeId?: string | null;
+        plate?: string | null;
+        vehicleModel?: string | null;
+        driverName?: string | null;
+        vehicle?: { plate?: string | null; model?: string | null } | null;
+        driver?: { user?: { name?: string | null } | null } | null;
       };
       const rawLat = raw.lat ?? raw.latitude;
       const rawLng = raw.lng ?? raw.longitude;
@@ -114,13 +119,20 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       const normalized: VehiclePosition = {
         ...raw,
         vehicleId: markerId,
+        driverId: raw.driverId ?? existed?.driverId ?? null,
+        routeId: raw.routeId ?? existed?.routeId ?? null,
+        plate: raw.plate ?? raw.vehicle?.plate ?? existed?.plate,
+        vehicleModel: raw.vehicleModel ?? raw.vehicle?.model ?? existed?.vehicleModel,
+        driverName: raw.driverName ?? raw.driver?.user?.name ?? existed?.driverName ?? null,
         lat,
         lng,
         speed: speedSafe,
         heading: raw.heading == null ? undefined : Number(raw.heading),
         accuracy: raw.accuracy == null ? undefined : Number(raw.accuracy),
-        online: raw.online ?? true,
+        online: raw.online ?? existed?.online ?? true,
         operationalStatus: normalizedStatus,
+        updatedAt: raw.updatedAt ?? raw.timestamp ?? existed?.updatedAt,
+        timestamp: raw.timestamp ?? raw.updatedAt ?? existed?.timestamp,
       };
       console.debug('[MAP] payload accepted', {
         markerId,

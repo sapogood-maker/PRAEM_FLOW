@@ -11,6 +11,7 @@ class AppRoutes {
   static const String login = '/';
   static const String home = '/home';
   static const String trip = '/trip';
+  static const String history = '/history';
   static const String qrScanner = '/qr';
   static const String vehicleSelect = '/vehicles';
   static const String settings = '/settings';

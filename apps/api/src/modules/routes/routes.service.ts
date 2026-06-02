@@ -487,8 +487,11 @@ export class RoutesService {
   }
 
   async remove(id: string, tenantId: string) {
-    await this.findOne(id, tenantId);
+    const route = await this.findOne(id, tenantId);
     await this.prisma.route.update({ where: { id }, data: { status: 'CANCELLED' } });
+    if (route.operationId) {
+      await this.flow.reconcileOperationStatus(tenantId, route.operationId, { source: 'routes.remove' });
+    }
     return { cancelled: true };
   }
 

@@ -59,6 +59,115 @@ export class DailyOperationService {
     return this.prisma.operation.update({ where: { id }, data: { status: status as any } });
   }
 
+  async reconcileOperation(tenantId: string, operationId: string) {
+    const operation = await this.prisma.operation.findFirst({
+      where: { id: operationId, tenantId },
+      select: { id: true, status: true },
+    });
+    if (!operation) throw new NotFoundException('Operation not found');
+
+    const terminalRouteStatuses = ['COMPLETED', 'CANCELLED'] as any[];
+    const terminalTripStatuses = ['COMPLETED', 'NO_SHOW', 'CANCELLED'] as any[];
+
+    const [totalRoutes, activeRoutes, cancelledRoutes, totalTrips, activeTrips] = await Promise.all([
+      this.prisma.route.count({ where: { tenantId, operationId } }),
+      this.prisma.route.count({ where: { tenantId, operationId, status: { notIn: terminalRouteStatuses } } }),
+      this.prisma.route.count({ where: { tenantId, operationId, status: 'CANCELLED' as any } }),
+      this.prisma.trip.count({ where: { tenantId, operationId } }),
+      this.prisma.trip.count({ where: { tenantId, operationId, status: { notIn: terminalTripStatuses } } }),
+    ]);
+
+    const allRoutesClosed = totalRoutes > 0 && activeRoutes === 0;
+    const allTripsClosedWithoutActiveRoutes = totalTrips > 0 && activeTrips === 0 && activeRoutes === 0;
+
+    if (!allRoutesClosed && !allTripsClosedWithoutActiveRoutes) {
+      return {
+        operationId,
+        previousStatus: operation.status,
+        status: operation.status,
+        closed: false,
+      };
+    }
+
+    const nextStatus = totalRoutes > 0 && cancelledRoutes === totalRoutes ? 'CANCELLED' : 'COMPLETED';
+    if (operation.status === nextStatus) {
+      return {
+        operationId,
+        previousStatus: operation.status,
+        status: operation.status,
+        closed: true,
+      };
+    }
+
+    await this.prisma.operation.update({
+      where: { id: operationId },
+      data: { status: nextStatus as any },
+    });
+
+    return {
+      operationId,
+      previousStatus: operation.status,
+      status: nextStatus,
+      closed: true,
+    };
+  }
+
+  async reconcileOperations(
+    tenantId: string,
+    filters?: { fromDate?: string; toDate?: string; onlyOpen?: boolean },
+  ) {
+    const onlyOpen = filters?.onlyOpen !== false;
+    const where: any = { tenantId };
+    if (filters?.fromDate || filters?.toDate) {
+      where.date = {
+        ...(filters.fromDate ? { gte: new Date(filters.fromDate) } : {}),
+        ...(filters.toDate ? { lte: new Date(filters.toDate) } : {}),
+      };
+    }
+    if (onlyOpen) {
+      where.status = { notIn: ['COMPLETED', 'CANCELLED'] as any[] };
+    }
+
+    const operations = await this.prisma.operation.findMany({
+      where,
+      select: { id: true },
+      orderBy: { date: 'desc' },
+    });
+
+    const results: Array<{ operationId: string; previousStatus: string; status: string; closed: boolean }> = [];
+    for (const operation of operations) {
+      const result = await this.reconcileOperation(tenantId, operation.id);
+      results.push(result);
+    }
+
+    return {
+      scanned: operations.length,
+      closed: results.filter((r) => r.closed).length,
+      unchanged: results.filter((r) => !r.closed).length,
+      operations: results,
+    };
+  }
+
+  async reconcileOperationsAllTenants() {
+    const tenants = await this.prisma.tenant.findMany({
+      where: { active: true },
+      select: { id: true },
+    });
+
+    const summary: Array<{ tenantId: string; scanned: number; closed: number; unchanged: number }> = [];
+    for (const tenant of tenants) {
+      const result = await this.reconcileOperations(tenant.id, { onlyOpen: true });
+      summary.push({
+        tenantId: tenant.id,
+        scanned: result.scanned,
+        closed: result.closed,
+        unchanged: result.unchanged,
+      });
+    }
+
+    return summary;
+  }
+
   /**
    * Bootstrap all tenants — called by the daily cron at 00:01.
    * Creates today's Operation + shifts for every tenant that doesn't have one yet.

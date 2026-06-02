@@ -23,4 +23,18 @@ export class OperationBootstrapService {
       this.logger.error('Daily operation bootstrap failed', err);
     }
   }
+
+  /** Hourly reconciliation to close orphan operations left open after route/trip finalization. */
+  @Cron(CronExpression.EVERY_HOUR, { name: 'daily-operation-reconcile-orphans' })
+  async handleOrphanReconciliation(): Promise<void> {
+    this.logger.log('Running orphan daily operation reconciliation...');
+    try {
+      const summary = await this.dailyOperationService.reconcileOperationsAllTenants();
+      const scanned = summary.reduce((acc, row) => acc + row.scanned, 0);
+      const closed = summary.reduce((acc, row) => acc + row.closed, 0);
+      this.logger.log(`Orphan daily operation reconciliation completed. scanned=${scanned} closed=${closed}`);
+    } catch (err) {
+      this.logger.error('Orphan daily operation reconciliation failed', err);
+    }
+  }
 }

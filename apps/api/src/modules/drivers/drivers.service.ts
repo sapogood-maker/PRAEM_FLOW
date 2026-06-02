@@ -175,6 +175,11 @@ export class DriversService {
         d.lastHeartbeatAt   ? 'GPS_LOST'     :
         d.wsLastSeenAt      ? 'WS_ONLY'      :
                               'OFFLINE';
+      const lastGpsAtIso = d.lastHeartbeatAt?.toISOString() ?? null;
+      const lastGpsAgeSeconds = lastGpsAtIso ? Math.max(0, Math.round((now - new Date(lastGpsAtIso).getTime()) / 1000)) : null;
+      this.logger.debug(
+        `[TRACKING_DEBUG] driverId=${d.id} vehicleId=${d.devices?.[0]?.vehicleId ?? '-'} wsConnected=${wsConnected} lastGpsAt=${lastGpsAtIso ?? '-'} lastGpsAgeSeconds=${lastGpsAgeSeconds ?? -1} trackingRowsWritten=-1 dashboardOnlineStatus=${operationalStatus}`,
+      );
 
       return {
         driverId: d.id,

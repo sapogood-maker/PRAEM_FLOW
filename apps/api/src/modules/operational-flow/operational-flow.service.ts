@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OperationsGateway } from '../../gateways/operations.gateway';
 import { AuditService } from '../audit/audit.service';
 import { OperationEventsService } from '../operation-events/operation-events.service';
+import { DailyOperationService } from '../daily-operation/daily-operation.service';
 
 type FlowScope = {
   routeId?: string;
@@ -67,8 +68,7 @@ const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
   CANCELLED: [],
 };
 
-// Terminal trip statuses exclude NO_SHOW so that it can be reversed by supervisors
-const TERMINAL_TRIP_STATUSES = ['COMPLETED', 'CANCELLED'];
+const TERMINAL_TRIP_STATUSES = ['COMPLETED', 'NO_SHOW', 'CANCELLED'];
 
 type FlowTrip = {
   id: string;
@@ -101,6 +101,7 @@ export class OperationalFlowService {
     private readonly gateway: OperationsGateway,
     private readonly audit: AuditService,
     private readonly operationEvents: OperationEventsService,
+    private readonly dailyOperationService: DailyOperationService,
   ) {}
 
   async recordDispatch(tenantId: string, routeId: string, context: FlowContext = {}) {
@@ -182,12 +183,7 @@ export class OperationalFlowService {
     });
 
     const operationId = route.operation?.id ?? null;
-    if (operationId) {
-      await this.prisma.operation.updateMany({
-        where: { id: operationId, tenantId },
-        data: { status: 'COMPLETED' as any },
-      });
-    }
+    await this.reconcileOperationById(tenantId, operationId);
 
     await this.audit.log({
       tenantId,
@@ -431,6 +427,7 @@ export class OperationalFlowService {
         diagnostics.push({ routeId: route.id, action: 'FORCE_COMPLETE_ROUTE', activeTrips: activeTrips.length, boardedTrips: boardedTrips.length });
         this.logger.warn(`[STALE_ROUTE] route force-completed routeId=${route.id} elapsedHours=${elapsedHours} activeTrips=${activeTrips.length} boardedTrips=${boardedTrips.length}`);
       }
+      await this.reconcileOperationById(tenantId, route.operationId ?? null);
     }
     this.logger.log(`[RECOVERY] [STALE_ROUTE] stale routes processed=${diagnostics.length}`);
     return { processed: diagnostics.length, diagnostics };
@@ -647,6 +644,7 @@ export class OperationalFlowService {
       source: context.source ?? 'FORCE_COMPLETE',
       metadata: { completedTripIds, noShowTripIds },
     });
+    await this.reconcileOperationById(tenantId, operationId);
 
     this.logger.log(
       `[FINALIZE] forceCompleteRoute done routeId=${routeId} completed=${completedTripIds.length} noShow=${noShowTripIds.length}`,
@@ -899,12 +897,13 @@ export class OperationalFlowService {
     }
 
     const operationStatus = this.mapOperationStatus(targetState);
-    if (operationStatus && operationId) {
+    if (operationId && operationStatus) {
       await this.prisma.operation.updateMany({
         where: { id: operationId, tenantId },
         data: { status: operationStatus as any },
       });
     }
+    await this.reconcileOperationById(tenantId, operationId);
 
     if (queue && Object.keys(queueUpdate).length > 0) {
       await this.prisma.operationalQueue.update({ where: { id: queue.id }, data: queueUpdate });
@@ -1611,8 +1610,23 @@ export class OperationalFlowService {
     return null;
   }
 
-  private mapOperationStatus(state: OperationalState): string {
-    const mapping: Record<OperationalState, string> = {
+  private async reconcileOperationById(tenantId: string, operationId: string | null) {
+    if (!operationId) return null;
+    try {
+      return await this.dailyOperationService.reconcileOperation(tenantId, operationId);
+    } catch (error) {
+      this.logger.warn(`[OPS_RECONCILE] failed tenantId=${tenantId} operationId=${operationId} error=${error}`);
+      return null;
+    }
+  }
+
+  async reconcileOperationStatus(tenantId: string, operationId: string, context: { source?: string | null } = {}) {
+    this.logger.log(`[OPS_RECONCILE] manual reconcile tenantId=${tenantId} operationId=${operationId} source=${context.source ?? 'api'}`);
+    return this.dailyOperationService.reconcileOperation(tenantId, operationId);
+  }
+
+  private mapOperationStatus(state: OperationalState): string | null {
+    const mapping: Record<OperationalState, string | null> = {
       CREATED: 'PENDING_DISPATCH',
       DISPATCHED: 'DISPATCHED',
       DRIVER_ACCEPTED: 'DISPATCHED',
@@ -1622,8 +1636,8 @@ export class OperationalFlowService {
       IN_TRANSIT: 'IN_TRANSIT',
       ARRIVED: 'ARRIVED',
       COMPLETED: 'COMPLETED',
-      NO_SHOW: 'CANCELLED',
-      CANCELLED: 'CANCELLED',
+      NO_SHOW: null,
+      CANCELLED: null,
     };
     return mapping[state];
   }

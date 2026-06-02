@@ -79,6 +79,11 @@ export interface VehiclePosition {
   accuracy?: number;
   ignition?: boolean;
   online?: boolean;
+  wsConnected?: boolean;
+  gpsActive?: boolean;
+  dashboardOnlineStatus?: string;
+  lastGpsAt?: string;
+  lastGpsAgeSeconds?: number;
   operationalStatus?: string;
   updatedAt?: string;
   timestamp?: string;

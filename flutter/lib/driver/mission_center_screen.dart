@@ -71,10 +71,14 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
 
   String _patientStatusLabel(String status) {
     switch (status.toUpperCase()) {
+      case 'WAITING':
+        return 'AGUARDANDO';
+      case 'SCHEDULED':
+        return 'AGENDADO';
       case 'BOARDING':
         return 'EMBARCANDO';
       case 'BOARDED':
-        return 'EMBARCADO';
+        return 'EMBARCANDO';
       case 'IN_TRANSIT':
         return context.l10n.statusInTransit;
       case 'ARRIVED':
@@ -95,6 +99,10 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
 
   Color _patientStatusColor(String status) {
     switch (status.toUpperCase()) {
+      case 'WAITING':
+      case 'SCHEDULED':
+      case 'CONFIRMED':
+        return AppColors.warning;
       case 'BOARDING':
         return AppColors.boarding;
       case 'BOARDED':
@@ -107,8 +115,6 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
       case 'NO_SHOW':
       case 'CANCELLED':
         return AppColors.danger;
-      case 'CONFIRMED':
-        return AppColors.warning;
       default:
         return AppColors.textSecondary;
     }
@@ -116,6 +122,9 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
 
   IconData _patientIcon(String status) {
     switch (status.toUpperCase()) {
+      case 'WAITING':
+      case 'SCHEDULED':
+        return Icons.schedule;
       case 'BOARDED':
       case 'IN_TRANSIT':
         return Icons.check_circle;
@@ -140,9 +149,8 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
     final ctrl = context.watch<OperationController>();
 
     final route = ctrl.activeRoute;
-    final patients = ctrl.patients;
-    final boardedCount = ctrl.boardedCount;
-    final pendingCount = ctrl.pendingBoardingCount;
+    final activePatients = ctrl.activePatients;
+    final finishedPatients = ctrl.finishedPatients;
     final vehicleName = driver.vehicle?['plate'] as String? ??
         auth.vehicle?['plate'] as String? ??
         '—';
@@ -160,6 +168,11 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
               color: AppColors.textPrimary, fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history, color: AppColors.textSecondary),
+            tooltip: 'Histórico',
+            onPressed: () => Navigator.pushNamed(context, AppRoutes.history),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: AppColors.textSecondary),
             onPressed: ctrl.loading ? null : ctrl.loadRoute,
@@ -219,16 +232,28 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                   Row(
                     children: [
                       StatusBadge(
-                          label: '${patients.length} PACIENTES',
+                          label: '${ctrl.activeCount} ATIVOS',
                           color: AppColors.warning),
                       const SizedBox(width: 8),
                       StatusBadge(
-                          label: '$boardedCount EMBARCADOS',
+                          label: '${ctrl.boardedInMissionCount} EMBARCADOS',
                           color: AppColors.primary),
                       const SizedBox(width: 8),
                       StatusBadge(
-                          label: '$pendingCount PENDENTES',
+                          label: '${ctrl.finishedCompletedCount} FINALIZADOS',
                           color: AppColors.textSecondary),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      StatusBadge(
+                          label: '${ctrl.noShowCount} NÃO COMPARECERAM',
+                          color: AppColors.danger),
+                      const SizedBox(width: 8),
+                      StatusBadge(
+                          label: '${ctrl.cancelledCount} CANCELADOS',
+                          color: AppColors.danger),
                     ],
                   ),
                 ],
@@ -317,7 +342,7 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              'Pacientes',
+              'Pacientes ativos',
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -338,7 +363,7 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                   style: TextStyle(color: AppColors.textSecondary),
                 ),
               )
-            else if (patients.isEmpty)
+            else if (activePatients.isEmpty)
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -347,20 +372,18 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                   border: Border.all(color: AppColors.border),
                 ),
                 child: const Text(
-                  'Nenhum paciente atribuído.',
+                  'Nenhum paciente ativo.',
                   style: TextStyle(color: AppColors.textSecondary),
                 ),
               )
             else
-              ...patients.map((trip) {
+              ...activePatients.map((trip) {
                 final patient = (trip['patient'] as Map?) ?? trip;
                 final status =
                     (trip['status'] as String? ?? 'PENDING').toUpperCase();
                 final name = (patient['name'] as String?) ??
                     (trip['id'] as String? ?? 'Paciente');
                 final tripId = trip['id'] as String;
-                final canAct =
-                    !['COMPLETED', 'CANCELLED', 'NO_SHOW'].contains(status);
                 return Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   padding: const EdgeInsets.all(14),
@@ -423,30 +446,22 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                         runSpacing: 8,
                         children: [
                           OutlinedButton.icon(
-                            onPressed: canAct
-                                ? () => _openScanner(context, ctrl)
-                                : null,
+                            onPressed: () => _openScanner(context, ctrl),
                             icon: const Icon(Icons.qr_code_scanner, size: 16),
                             label: const Text('QR'),
                           ),
                           OutlinedButton.icon(
-                            onPressed: canAct
-                                ? () => ctrl.confirmPassengerBoarded(tripId)
-                                : null,
+                            onPressed: () => ctrl.confirmPassengerBoarded(tripId),
                             icon: const Icon(Icons.how_to_reg, size: 16),
                             label: const Text('Confirmar'),
                           ),
                           OutlinedButton.icon(
-                            onPressed: canAct
-                                ? () => ctrl.markPassengerNoShow(tripId)
-                                : null,
+                            onPressed: () => ctrl.markPassengerNoShow(tripId),
                             icon: const Icon(Icons.person_off, size: 16),
                             label: const Text('Ausente'),
                           ),
                           OutlinedButton.icon(
-                            onPressed: canAct
-                                ? () => ctrl.reportPassengerIssue(tripId)
-                                : null,
+                            onPressed: () => ctrl.reportPassengerIssue(tripId),
                             icon: const Icon(Icons.report_problem, size: 16),
                             label: const Text('Problema'),
                           ),
@@ -456,6 +471,66 @@ class _MissionCenterScreenState extends State<MissionCenterScreen> {
                   ),
                 );
               }),
+            if (finishedPatients.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Theme(
+                data: Theme.of(context).copyWith(
+                  dividerColor: Colors.transparent,
+                ),
+                child: ExpansionTile(
+                  collapsedIconColor: AppColors.textSecondary,
+                  iconColor: AppColors.textPrimary,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 2),
+                  title: Text(
+                    'Finalizados (${finishedPatients.length})',
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  children: [
+                    ...finishedPatients.map((trip) {
+                      final patient = (trip['patient'] as Map?) ?? trip;
+                      final status =
+                          (trip['status'] as String? ?? 'PENDING').toUpperCase();
+                      final name = (patient['name'] as String?) ??
+                          (trip['id'] as String? ?? 'Paciente');
+                      final isCompleted = status == 'COMPLETED';
+                      final statusLabel = _patientStatusLabel(status);
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Row(
+                          children: [
+                            Text(
+                              isCompleted ? '✓' : '✗',
+                              style: TextStyle(
+                                color: isCompleted ? AppColors.primary : AppColors.danger,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '$name - $statusLabel',
+                                style: const TextStyle(color: AppColors.textPrimary),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
           ],
         ),

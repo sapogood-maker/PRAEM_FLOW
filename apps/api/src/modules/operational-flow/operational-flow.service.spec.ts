@@ -32,6 +32,10 @@ const mockOperationEvents = {
   record: jest.fn(),
 } as any;
 
+const mockDailyOperationService = {
+  reconcileOperation: jest.fn(),
+} as any;
+
 describe('OperationalFlowService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -44,10 +48,16 @@ describe('OperationalFlowService', () => {
     (mockPrisma.operationalTimeline.create as jest.Mock).mockResolvedValue({});
     (mockAudit.log as jest.Mock).mockResolvedValue({});
     (mockOperationEvents.record as jest.Mock).mockResolvedValue({});
+    (mockDailyOperationService.reconcileOperation as jest.Mock).mockResolvedValue({
+      operationId: 'operation-1',
+      previousStatus: 'BOARDING',
+      status: 'COMPLETED',
+      closed: true,
+    });
   });
 
   it('promotes boarding trips to in-transit when a route becomes active', async () => {
-    const service = new OperationalFlowService(mockPrisma, mockGateway, mockAudit, mockOperationEvents);
+    const service = new OperationalFlowService(mockPrisma, mockGateway, mockAudit, mockOperationEvents, mockDailyOperationService);
 
     (mockPrisma.trip.findMany as jest.Mock).mockResolvedValueOnce([
       {
@@ -94,7 +104,7 @@ describe('OperationalFlowService', () => {
   });
 
   it('completes in-transit trips when a route is completed', async () => {
-    const service = new OperationalFlowService(mockPrisma, mockGateway, mockAudit, mockOperationEvents);
+    const service = new OperationalFlowService(mockPrisma, mockGateway, mockAudit, mockOperationEvents, mockDailyOperationService);
 
     (mockPrisma.trip.findMany as jest.Mock).mockResolvedValueOnce([
       {
@@ -136,7 +146,7 @@ describe('OperationalFlowService', () => {
   });
 
   it('emits route state before promoted trip events during route activation', async () => {
-    const service = new OperationalFlowService(mockPrisma, mockGateway, mockAudit, mockOperationEvents);
+    const service = new OperationalFlowService(mockPrisma, mockGateway, mockAudit, mockOperationEvents, mockDailyOperationService);
     const emitTransitionEvents = jest.spyOn(service as any, 'emitTransitionEvents').mockImplementation(() => undefined);
     const emitToRoute = jest.spyOn(service as any, 'emitToRoute').mockImplementation(() => undefined);
     jest.spyOn(service as any, 'loadEntity').mockResolvedValue({

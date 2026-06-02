@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import '../auth/screens/login_screen.dart';
 import '../driver/mission_center_screen.dart';
+import '../driver/route_history_screen.dart';
 import '../trips/trip_screen.dart';
 import '../qr/qr_scanner_screen.dart';
 import '../vehicles/vehicle_select_screen.dart';
@@ -18,6 +19,8 @@ Route<dynamic> generateRoute(RouteSettings settings) {
       return MaterialPageRoute(builder: (_) => const MissionCenterScreen());
     case AppRoutes.trip:
       return MaterialPageRoute(builder: (_) => const TripScreen());
+    case AppRoutes.history:
+      return MaterialPageRoute(builder: (_) => const RouteHistoryScreen());
     case AppRoutes.qrScanner:
       return MaterialPageRoute(builder: (_) => const QrScannerScreen());
     case AppRoutes.vehicleSelect:

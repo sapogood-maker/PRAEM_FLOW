@@ -261,6 +261,13 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
     [focus?.operationId, focus?.routeId, routes],
   );
   const selectedVehicleId = focus?.vehicleId ?? selectedRoute?.vehicle?.id ?? null;
+  const routeByVehicleId = useMemo(() => {
+    const map = new Map<string, NonNullable<OperationalMapProps['routes']>[number]>();
+    for (const route of routes) {
+      if (route.vehicle?.id) map.set(route.vehicle.id, route);
+    }
+    return map;
+  }, [routes]);
   const focusedPickupIds = useMemo(() => new Set(focus?.queueIds ?? []), [focus?.queueIds]);
   const focusedTitle = getFocusLabel(focus);
   const queueItemLookup = useMemo(
@@ -375,41 +382,49 @@ export default function OperationalMap({ pickupPoints = [], queueItems = [], rou
                 }
               />
             ))}
-            {validVehicles.map((vehicle) => (
-              <VehicleMarker
-                key={vehicle.vehicleId}
-                position={[vehicle.lat, vehicle.lng]}
-                vehicleId={vehicle.vehicleId}
-                driverId={vehicle.driverId}
-                plate={vehicle.plate}
-                vehicleModel={vehicle.vehicleModel}
-                speed={vehicle.speed}
-                heading={vehicle.heading}
-                operationalStatus={vehicle.operationalStatus}
-                online={vehicle.online}
-                updatedAt={vehicle.timestamp ?? vehicle.updatedAt}
-                focused={selectedVehicleId === vehicle.vehicleId}
-                onSelect={() => {
-                  const route = routes.find((item) => item.vehicle?.id === vehicle.vehicleId || item.id === vehicle.routeId || item.operationId === vehicle.routeId);
-                  const queueIds =
-                    route?.trips?.flatMap((trip) => {
-                      const queueId = trip.patient?.id ? queueItemLookup.get(trip.patient.id) : null;
-                      return queueId ? [queueId] : [];
-                    }) ?? [];
-                  setFocus({
-                    scope: route ? 'route' : 'vehicle',
-                    queueIds,
-                    routeId: route?.id ?? vehicle.routeId ?? null,
-                    vehicleId: vehicle.vehicleId,
-                    operationId: route?.operationId ?? vehicle.routeId ?? null,
-                    center: { lat: vehicle.lat, lng: vehicle.lng },
-                    zoom: 15,
-                    label: route ? `${route.origin ?? 'Rota'} → ${route.destination ?? 'destino'}` : vehicle.plate ?? vehicle.vehicleId,
-                    status: vehicle.operationalStatus,
-                  });
-                }}
-              />
-            ))}
+            {validVehicles.map((vehicle) => {
+              const linkedRoute = routeByVehicleId.get(vehicle.vehicleId)
+                ?? routes.find((item) => item.id === vehicle.routeId || item.operationId === vehicle.routeId);
+              const plate = vehicle.plate ?? linkedRoute?.vehicle?.plate ?? undefined;
+              const model = vehicle.vehicleModel ?? linkedRoute?.vehicle?.model ?? undefined;
+              const driverName = vehicle.driverName ?? linkedRoute?.driver?.user?.name ?? undefined;
+              return (
+                <VehicleMarker
+                  key={vehicle.vehicleId}
+                  position={[vehicle.lat, vehicle.lng]}
+                  vehicleId={vehicle.vehicleId}
+                  driverId={vehicle.driverId}
+                  driverName={driverName}
+                  plate={plate}
+                  vehicleModel={model}
+                  speed={vehicle.speed}
+                  heading={vehicle.heading}
+                  operationalStatus={vehicle.operationalStatus}
+                  online={vehicle.online}
+                  updatedAt={vehicle.timestamp ?? vehicle.updatedAt}
+                  focused={selectedVehicleId === vehicle.vehicleId}
+                  onSelect={() => {
+                    const route = linkedRoute;
+                    const queueIds =
+                      route?.trips?.flatMap((trip) => {
+                        const queueId = trip.patient?.id ? queueItemLookup.get(trip.patient.id) : null;
+                        return queueId ? [queueId] : [];
+                      }) ?? [];
+                    setFocus({
+                      scope: route ? 'route' : 'vehicle',
+                      queueIds,
+                      routeId: route?.id ?? vehicle.routeId ?? null,
+                      vehicleId: vehicle.vehicleId,
+                      operationId: route?.operationId ?? vehicle.routeId ?? null,
+                      center: { lat: vehicle.lat, lng: vehicle.lng },
+                      zoom: 15,
+                      label: route ? `${route.origin ?? 'Rota'} → ${route.destination ?? 'destino'}` : plate ?? vehicle.vehicleId,
+                      status: vehicle.operationalStatus,
+                    });
+                  }}
+                />
+              );
+            })}
           </MapContainer>
         </div>
 

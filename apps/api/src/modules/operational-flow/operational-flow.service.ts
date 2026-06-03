@@ -949,6 +949,30 @@ export class OperationalFlowService {
     });
     this.logger.log(`[OPS] broadcasting transition state=${targetState} routeState=${routeOperationalState} routeId=${payload.routeId} tripId=${payload.tripId} tenantId=${routeWithRelations.tenantId} driverId=${routeWithRelations.driverId ?? '-'}`);
 
+    // Ensure vehicle DB status reflects active route so dashboard KPIs count it as 'ON_ROUTE'
+    if (routeWithRelations.vehicleId) {
+      try {
+        // Mark vehicle as ON_ROUTE when route is active
+        if (routeWithRelations.status === 'ACTIVE') {
+          await this.prisma.vehicle.updateMany({
+            where: { id: routeWithRelations.vehicleId, tenantId: routeWithRelations.tenantId },
+            data: { status: 'ON_ROUTE' as any, active: true },
+          });
+          this.logger.log(`[VEHICLE] set vehicleId=${routeWithRelations.vehicleId} status=ON_ROUTE tenantId=${routeWithRelations.tenantId}`);
+        }
+        // Reset vehicle status to AVAILABLE when route completes or is cancelled
+        if (['COMPLETED', 'CANCELLED'].includes(String(routeWithRelations.status).toUpperCase())) {
+          await this.prisma.vehicle.updateMany({
+            where: { id: routeWithRelations.vehicleId, tenantId: routeWithRelations.tenantId },
+            data: { status: 'AVAILABLE' as any },
+          });
+          this.logger.log(`[VEHICLE] set vehicleId=${routeWithRelations.vehicleId} status=AVAILABLE tenantId=${routeWithRelations.tenantId}`);
+        }
+      } catch (err) {
+        this.logger.warn(`[VEHICLE] failed to update status for vehicleId=${routeWithRelations.vehicleId} tenantId=${routeWithRelations.tenantId}: ${(err as Error).message}`);
+      }
+    }
+
     this.emitTransitionEvents(targetState, routeWithRelations.tenantId, routeWithRelations.driverId, payload);
     if (promotedBoardingTrips.length > 0) {
       for (const boardingTrip of promotedBoardingTrips) {

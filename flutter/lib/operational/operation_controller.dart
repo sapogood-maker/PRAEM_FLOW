@@ -260,15 +260,19 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
 
   int get boardedCount => _patients.where(_isBoarded).length;
   int get pendingBoardingCount => _patients.where((p) {
-        final s = (p['status'] as String? ?? '').toUpperCase();
-        return s != 'BOARDING' &&
-            s != 'IN_PROGRESS' &&
-            s != 'IN_TRANSIT' &&
-            s != 'ARRIVED' &&
-            s != 'COMPLETED' &&
-            s != 'NO_SHOW' &&
-            s != 'CANCELLED';
-      }).length;
+    final s = (p['status'] as String? ?? '').toUpperCase();
+
+    return ![
+      'BOARDING',
+      'BOARDED',
+      'IN_PROGRESS',
+      'IN_TRANSIT',
+      'ARRIVED',
+      'COMPLETED',
+      'NO_SHOW',
+      'CANCELLED'
+    ].contains(s);
+  }).length;
 
   int get activeCount => activePatients.length;
   int get boardedInMissionCount => _patients.where((p) {

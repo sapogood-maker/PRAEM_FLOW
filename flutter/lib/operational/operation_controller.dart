@@ -840,11 +840,9 @@ class OperationController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _completeRoute() async {
-    final trip = _activeTrip;
-    if (trip == null) return;
-    final tripId = trip['id'] as String?;
-    if (tripId == null) return;
-    await _apiPost('/trips/$tripId/complete', onSuccess: () {
+    final routeId = _activeRoute?['id'] as String?;
+    if (routeId == null) return;
+    await _apiPost('/routes/$routeId/complete', onSuccess: () {
       _gps.stop();
     });
   }

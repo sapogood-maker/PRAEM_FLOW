@@ -1,0 +1,1208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id               String             @id @default(uuid())
+  name             String
+  slug             String             @unique
+  cnpj             String?
+  city             String
+  state            String
+  active           Boolean            @default(true)
+  createdAt        DateTime           @default(now())
+  users                User[]
+  patients             Patient[]
+  drivers              Driver[]
+  vehicles             Vehicle[]
+  queues               OperationalQueue[]
+  routes               Route[]
+  trips                Trip[]
+  checkpoints          Checkpoint[]
+  auditLogs            AuditLog[]
+  operations           Operation[]
+  operationShifts      OperationShift[]
+  vehicleTrackings     VehicleTracking[]
+  trackingPoints       TrackingPoint[]
+  operationalTimelines OperationalTimeline[]
+  operationEvents      OperationEvent[]
+  healthcareLocations  HealthcareLocation[]
+  operationalDemands   OperationalDemand[]
+  devices              Device[]
+  geoFenceEvents       GeoFenceEvent[]
+  notificationTemplates NotificationTemplate[]
+  notificationLogs      NotificationLog[]
+  processedEvents       ProcessedEvent[]
+  conflictLogs          ConflictLog[]
+  susImports            SusImport[]
+  susImportRows         SusImportRow[]
+  importHistory         ImportHistory[]
+}
+
+model User {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  email      String
+  password   String
+  phone      String?
+  role       Role
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  driver       Driver?
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+  COORDINATOR
+  SUPERVISOR
+  ADMIN_PREFEITURA
+  DRIVER
+  VIEWER
+}
+
+model Patient {
+  id                String        @id @default(uuid())
+  tenantId          String
+  name              String
+  cpf               String
+  susCard           String?
+  birthDate         DateTime
+  phone             String?
+  address           String
+  lat               Float?
+  lng               Float?
+  mobility          MobilityType
+  clinicalRisk      RiskLevel
+  recurrent         Boolean       @default(false)
+  recurringPatient  Boolean       @default(false)
+  notes             String?
+  praemId           String?
+  qrHash            String?
+  qrCodeUrl         String?
+  qrCode            String?       @unique
+  operationalId     String?       @unique
+  lastTransportDate DateTime?
+  specialRequirements String?
+  emergencyContact  String?
+  // QR Code seguro (LGPD) — token criptográfico, nunca contém CPF
+  qrToken           String?       @unique
+  qrIssuedAt        DateTime?
+  qrActive          Boolean       @default(false)
+  qrLastReadAt      DateTime?
+  // QR hardening — only SHA-256 hash stored in DB, raw token lives only in QR image
+  qrTokenHash       String?       @unique
+  qrExpiresAt       DateTime?
+  qrRevokedAt       DateTime?
+  qrVersion         Int           @default(1)
+  qrLastUsedAt      DateTime?
+  // Companion / Acompanhante
+  requiresCompanion Boolean       @default(false)
+  companionName     String?
+  companionDocument String?
+  companionPhone    String?
+  createdAt         DateTime      @default(now())
+  tenant            Tenant        @relation(fields: [tenantId], references: [id])
+  queues            OperationalQueue[]
+  demands           OperationalDemand[]
+  trips             Trip[]
+  qrAccessLogs      PatientQrAccessLog[]
+  tripTokens        TripToken[]
+  notificationLogs  NotificationLog[]
+
+  @@index([tenantId])
+  @@index([qrToken])
+  @@unique([tenantId, susCard])
+}
+
+enum MobilityType {
+  NORMAL
+  WHEELCHAIR
+  STRETCHER
+  OXYGEN
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Driver {
+  id               String       @id @default(uuid())
+  tenantId         String
+  userId           String       @unique
+  cnh              String
+  cnhExpiry        DateTime
+  active           Boolean      @default(true)
+  lat              Float?
+  lng              Float?
+  status           DriverStatus
+  defaultVehicleId String?
+  // Operational tracking timestamps
+  wsLastSeenAt     DateTime?    // last time the tablet WebSocket joined/pinged
+  lastHeartbeatAt  DateTime?    // last GPS heartbeat received from the tablet
+  tenant           Tenant       @relation(fields: [tenantId], references: [id])
+  user             User         @relation(fields: [userId], references: [id])
+  routes           Route[]
+  checkpoints      Checkpoint[]
+  devices          Device[]
+
+  @@index([tenantId])
+  @@index([lastHeartbeatAt])
+  @@index([wsLastSeenAt])
+}
+
+enum DriverStatus {
+  AVAILABLE
+  ON_ROUTE
+  OFFLINE
+  REST
+}
+
+model Vehicle {
+  id               String          @id @default(uuid())
+  tenantId         String
+  plate            String          @unique
+  model            String
+  type             VehicleType
+  capacity         Int
+  wheelchair       Boolean         @default(false)
+  stretcher        Boolean         @default(false)
+  active           Boolean         @default(true)
+  status           VehicleStatus
+  tenant           Tenant          @relation(fields: [tenantId], references: [id])
+  routes           Route[]
+  trackings        VehicleTracking[]
+  devices          Device[]
+
+  @@index([tenantId])
+}
+
+enum VehicleType {
+  VAN
+  BUS
+  AMBULANCE
+  CAR
+  ADAPTED
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  ON_ROUTE
+  BOARDING
+  WAITING
+  MAINTENANCE
+  INACTIVE
+  OFFLINE
+}
+
+model OperationalQueue {
+  id                     String              @id @default(uuid())
+  tenantId               String
+  operationId            String?
+  demandId               String?
+  patientId              String
+  appointmentDate        DateTime
+  destination            String?
+  healthcareLocationId   String?
+  lat                    Float?
+  lng                    Float?
+  priority               QueuePriority
+  status                 QueueStatus
+  queueType              QueueType           @default(LOGISTICS)
+  notes                  String?
+  // Confirmação operacional
+  confirmationStatus     ConfirmationStatus  @default(PENDING)
+  confirmedAt            DateTime?
+  confirmationChannel    ConfirmationChannel @default(MANUAL)
+  confirmationAttempts   Int                 @default(0)
+  lastContactAt          DateTime?
+  // Recorrência de tratamento
+  recurrenceType         RecurrenceType?
+  recurrenceDays         String?             // JSON array de dias: "[1,3,5]" (0=dom … 6=sáb)
+  recurrenceInterval     Int?                @default(1)
+  recurrenceEndDate      DateTime?
+  // ─── Timestamps operacionais (timeline do paciente) ───────────────────
+  calledAt               DateTime?
+  boardedAt              DateTime?
+  departedAt             DateTime?
+  arrivedAt              DateTime?
+  cancelledAt            DateTime?
+  noShowAt               DateTime?
+  checkedInAt            DateTime?
+  // ─── SLA operacional ──────────────────────────────────────────────────
+  estimatedDepartureAt   DateTime?
+  expectedArrivalAt      DateTime?
+  slaMinutes             Int?                // limite SLA em minutos por prioridade
+  slaStatus              QueueSlaStatus      @default(ON_TIME)
+  estimatedWaitMinutes   Int?
+  actualWaitMinutes      Int?
+  delayMinutes           Int?
+  // ─── No-show ─────────────────────────────────────────────────────────
+  noShowReason           NoShowReason?
+  createdAt              DateTime            @default(now())
+  tenant                 Tenant              @relation(fields: [tenantId], references: [id])
+  operation              Operation?          @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  demand                 OperationalDemand?  @relation(fields: [demandId], references: [id], onDelete: SetNull)
+  patient                Patient             @relation(fields: [patientId], references: [id])
+  healthcareLocation     HealthcareLocation? @relation(fields: [healthcareLocationId], references: [id])
+
+  @@index([tenantId])
+  @@index([patientId])
+  @@index([demandId])
+  @@index([operationId])
+  @@index([confirmationStatus])
+  @@index([healthcareLocationId])
+  @@index([status])
+  @@index([slaStatus])
+  @@index([priority])
+}
+
+enum QueueType {
+  MEDICAL
+  LOGISTICS
+}
+
+enum ConfirmationStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  UNREACHABLE
+  WAITING_MANUAL_CONFIRMATION
+}
+
+enum ConfirmationChannel {
+  TELEGRAM
+  WHATSAPP
+  SMS
+  PHONE_CALL
+  MANUAL
+}
+
+enum RecurrenceType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum QueuePriority {
+  EMERGENCY
+  CRITICAL
+  HIGH
+  NORMAL
+  LOW
+  PENDING
+}
+
+enum QueueStatus {
+  WAITING_DISPATCH
+  WAITING
+  CALLED
+  CONFIRMED
+  CHECKED_IN
+  BOARDING
+  IN_TRANSIT
+  ARRIVED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  ASSIGNED
+  SCHEDULED
+}
+
+model OperationalDemand {
+  id                   String             @id @default(uuid())
+  tenantId             String
+  sourceImportId       String?
+  patientId            String
+  healthcareLocationId String
+  appointmentDate      DateTime
+  priority             QueuePriority      @default(NORMAL)
+  returnTrip           Boolean            @default(false)
+  wheelchair           Boolean            @default(false)
+  stretcher            Boolean            @default(false)
+  notes                String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  tenant               Tenant             @relation(fields: [tenantId], references: [id])
+  sourceImport         SusImport?         @relation(fields: [sourceImportId], references: [id], onDelete: SetNull)
+  patient              Patient            @relation(fields: [patientId], references: [id])
+  healthcareLocation   HealthcareLocation @relation(fields: [healthcareLocationId], references: [id])
+  queueItems           OperationalQueue[]
+
+  @@unique([tenantId, patientId, healthcareLocationId, appointmentDate])
+  @@index([tenantId, appointmentDate])
+  @@index([sourceImportId])
+  @@map("operational_demands")
+}
+
+enum QueueSlaStatus {
+  ON_TIME
+  WARNING
+  DELAYED
+  CRITICAL
+}
+
+enum NoShowReason {
+  NOT_FOUND
+  CANCELLED
+  REFUSED
+  LATE
+  UNKNOWN
+}
+
+model Route {
+  id                      String       @id @default(uuid())
+  tenantId                String
+  operationId             String?
+  driverId                String?      // optional — may be assigned later when scheduling
+  vehicleId               String?      // optional — may be assigned later when scheduling
+  date                    DateTime
+  scheduledAt             DateTime?    // explicit dispatch/departure datetime for future routes
+  origin                  String
+  destination             String
+  status                  RouteStatus  @default(SCHEDULED)
+  dispatchType            DispatchType @default(IMMEDIATE)
+  waypoints               Json?
+  estimatedKm             Float?
+  estimatedDuration       Int?
+  // IA logistics fields — prepared for route optimization
+  estimatedDistanceKm     Float?
+  estimatedFuelCost       Float?
+  routeOptimizationScore  Float?
+  occupancyPrediction     Float?
+  operationalState        RouteOperationalState @default(CREATED)
+  operationalVersion      Int          @default(1)
+  createdAt               DateTime     @default(now())
+  tenant                  Tenant       @relation(fields: [tenantId], references: [id])
+  operation               Operation?   @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  driver                  Driver?      @relation(fields: [driverId], references: [id])
+  vehicle                 Vehicle?     @relation(fields: [vehicleId], references: [id])
+  trips                   Trip[]
+  operationEvents         OperationEvent[]
+  checkpoints             Checkpoint[]
+  timelines               OperationalTimeline[]
+  trackingPoints          TrackingPoint[]
+  notificationLogs        NotificationLog[]
+
+  @@index([tenantId])
+  @@index([operationId])
+  @@index([scheduledAt])
+}
+
+enum RouteStatus {
+  SCHEDULED
+  PENDING
+  PLANNED
+  PREPARING
+  DISPATCHED
+  ACTIVE
+  WAITING_CONSULTATION
+  RETURNING
+  COMPLETED
+  CANCELLED
+}
+
+enum RouteOperationalState {
+  CREATED
+  DISPATCHED
+  DRIVER_ACCEPTED
+  WAITING_PATIENT
+  BOARDING
+  PASSENGERS_ONBOARD
+  IN_TRANSIT
+  ARRIVED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+// DispatchStatus — logística operacional (separado do QueueStatus e ConnectionStatus)
+enum DispatchStatus {
+  PENDING_DISPATCH
+  SCHEDULED
+  ASSIGNED
+  DISPATCHED
+  BOARDING
+  ACTIVE
+  RETURNING
+  COMPLETED
+  CANCELLED
+}
+
+enum DispatchType {
+  IMMEDIATE
+  SCHEDULED
+}
+
+model Trip {
+  id          String     @id @default(uuid())
+  tenantId    String
+  operationId String?
+  routeId     String
+  patientId   String
+  status      TripStatus
+  boardedAt   DateTime?
+  completedAt DateTime?
+  qrScanned   Boolean    @default(false)
+  version     Int        @default(1)
+  notes       String?
+  tenant      Tenant     @relation(fields: [tenantId], references: [id])
+  operation   Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  route       Route      @relation(fields: [routeId], references: [id])
+  patient     Patient    @relation(fields: [patientId], references: [id])
+  checkpoints Checkpoint[]
+  tokens      TripToken[]
+  stops       TripStop[]
+  timelines   OperationalTimeline[]
+  operationEvents OperationEvent[]
+  notificationLogs NotificationLog[]
+
+  @@index([tenantId])
+  @@index([operationId])
+}
+
+enum TripStatus {
+  IMPORTED
+  PENDING_CONFIRMATION
+  SCHEDULED
+  CONFIRMED
+  BOARDING
+  BOARDED
+  IN_TRANSIT
+  IN_PROGRESS
+  ARRIVED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+model Checkpoint {
+  id        String         @id @default(uuid())
+  tenantId  String
+  tripId    String
+  routeId   String
+  type      CheckpointType
+  lat       Float
+  lng       Float
+  address   String?
+  timestamp DateTime       @default(now())
+  driverId  String
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
+  trip      Trip           @relation(fields: [tripId], references: [id])
+  route     Route          @relation(fields: [routeId], references: [id])
+  driver    Driver         @relation(fields: [driverId], references: [id])
+
+  @@index([tenantId])
+}
+
+enum CheckpointType {
+  DEPARTURE
+  PICKUP
+  DROP_OFF
+  ARRIVAL
+  BREAK
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  endpoint  String?
+  method    String?
+  deviceId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([entity])
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle Tracking — separado do motorista; pertence ao veículo e à rota
+// ---------------------------------------------------------------------------
+model VehicleTracking {
+  id                    String                   @id @default(uuid())
+  tenantId              String
+  operationId           String?
+  vehicleId             String
+  routeId               String?
+  driverId              String?
+  lat                   Float
+  lng                   Float
+  speed                 Float?                   // km/h
+  heading               Float?                   // graus 0–360
+  accuracy              Float?                   // metros
+  batteryLevel          Float?                   // 0–100 %
+  signalStrength        Float?                   // dBm
+  gpsSource             String?                  // GPS | NETWORK | FUSED
+  ignition              Boolean                  @default(false)
+  online                Boolean                  @default(true)
+  operationalStatus     VehicleOperationalStatus @default(OFFLINE)
+  lastHeartbeatAt       DateTime?
+  lastMovementAt        DateTime?                // last time speed > 0
+  timestamp             DateTime                 @default(now())
+  tenant                Tenant                   @relation(fields: [tenantId], references: [id])
+  operation             Operation?               @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  vehicle               Vehicle                  @relation(fields: [vehicleId], references: [id])
+
+  @@index([tenantId])
+  @@index([operationId])
+  @@index([vehicleId])
+  @@index([routeId])
+  @@index([operationalStatus])
+  @@index([lastHeartbeatAt])
+}
+
+// ---------------------------------------------------------------------------
+// VehicleOperationalStatus — derived from GPS + speed + heartbeat
+// ---------------------------------------------------------------------------
+enum VehicleOperationalStatus {
+  ONLINE
+  OFFLINE
+  MOVING
+  IDLE
+  BOARDING
+  WAITING
+  ARRIVED
+  MAINTENANCE
+}
+
+// ---------------------------------------------------------------------------
+// GeoFenceEvent — prepared for automated geofence detection (hospital/UBS arrival)
+// ---------------------------------------------------------------------------
+model GeoFenceEvent {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  operationId          String?
+  vehicleId            String
+  routeId              String?
+  tripId               String?
+  eventType            String   // ARRIVED_AT_DESTINATION | LEFT_DESTINATION | ENTERED_ZONE | EXITED_ZONE
+  locationId           String?  // HealthcareLocation id if applicable
+  locationName         String?
+  lat                  Float
+  lng                  Float
+  detectedAt           DateTime @default(now())
+  tenant               Tenant   @relation(fields: [tenantId], references: [id])
+  operation            Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([operationId])
+  @@index([vehicleId])
+  @@index([routeId])
+}
+
+model TrackingPoint {
+  id         String   @id @default(uuid())
+  tenantId   String
+  operationId String?
+  routeId    String?
+  driverId   String?
+  vehicleId  String
+  lat        Float
+  lng        Float
+  speed      Float?
+  heading    Float?
+  timestamp  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  operation  Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  route      Route?   @relation(fields: [routeId], references: [id])
+
+  @@index([tenantId])
+  @@index([operationId])
+  @@index([routeId])
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([timestamp])
+}
+
+model OperationalTimeline {
+  id            String   @id @default(uuid())
+  tenantId      String
+  operationId   String?
+  routeId       String?
+  tripId        String?
+  patientId     String?
+  driverId      String?
+  vehicleId     String?
+  eventType     String
+  fromState     String?
+  toState       String?
+  source        String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  operation     Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  route         Route?   @relation(fields: [routeId], references: [id])
+  trip          Trip?    @relation(fields: [tripId], references: [id])
+
+  @@index([tenantId])
+  @@index([operationId])
+  @@index([routeId])
+  @@index([tripId])
+  @@index([patientId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model OperationEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  operationId String
+  routeId     String?
+  tripId      String?
+  patientId   String?
+  eventType   String
+  actorType   String?
+  actorId     String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  route       Route?    @relation(fields: [routeId], references: [id])
+  trip        Trip?     @relation(fields: [tripId], references: [id])
+
+  @@index([tenantId])
+  @@index([operationId])
+  @@index([routeId])
+  @@index([tripId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("operation_events")
+}
+
+model ProcessedEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  eventId     String
+  operationId String?
+  deviceId    String
+  type        String
+  payload     Json
+  status      String   @default("PROCESSED")
+  processedAt DateTime @default(now())
+  syncedAt    DateTime?
+  retryCount  Int      @default(0)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, eventId])
+  @@index([tenantId])
+  @@index([deviceId])
+  @@map("processed_events")
+}
+
+model ConflictLog {
+  id             String   @id @default(uuid())
+  tenantId       String
+  eventId        String
+  operationId    String?
+  deviceId       String?
+  entityType     String
+  entityId       String?
+  localStateJson Json?
+  serverStateJson Json?
+  resolution     String
+  reason         String
+  createdAt      DateTime @default(now())
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([eventId])
+  @@map("conflict_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Operation — operação central (fonte de verdade da lifecycle operacional)
+// ---------------------------------------------------------------------------
+model Operation {
+  id                   String          @id @default(uuid())
+  tenantId             String
+  date                 DateTime
+  status               OperationStatus @default(IMPORTED)
+  totalVehicles        Int             @default(0)
+  totalDrivers         Int             @default(0)
+  totalPatients        Int             @default(0)
+  totalRoutes          Int             @default(0)
+  notes                String?
+  createdAutomatically Boolean         @default(false)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime?       @updatedAt
+  tenant               Tenant          @relation(fields: [tenantId], references: [id])
+  shifts               OperationShift[] @relation("OperationShifts")
+  legacyShifts         OperationShift[] @relation("LegacyOperationShifts")
+  queues               OperationalQueue[]
+  routes               Route[]
+  trips                Trip[]
+  vehicleTrackings     VehicleTracking[]
+  geoFenceEvents       GeoFenceEvent[]
+  trackingPoints       TrackingPoint[]
+  timelines            OperationalTimeline[]
+  operationEvents      OperationEvent[]
+
+  @@unique([tenantId, date])
+  @@index([tenantId])
+  @@map("DailyOperation")
+}
+
+enum OperationStatus {
+  IMPORTED
+  PENDING_DISPATCH
+  DISPATCHED
+  PENDING_CONFIRMATION
+  CONFIRMED
+  BOARDING
+  IN_TRANSIT
+  ARRIVED
+  COMPLETED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// OperationShift — turno operacional (manhã, tarde, noite, integral)
+// ---------------------------------------------------------------------------
+model OperationShift {
+  id               String         @id @default(uuid())
+  tenantId         String
+  dailyOperationId  String?
+  operationId      String?
+  name             String
+  startTime        String         // "06:00"
+  endTime          String         // "12:00"
+  status           ShiftStatus    @default(PENDING)
+  createdAt        DateTime       @default(now())
+  tenant           Tenant         @relation(fields: [tenantId], references: [id])
+  dailyOperation   Operation?     @relation("LegacyOperationShifts", fields: [dailyOperationId], references: [id], onDelete: SetNull)
+  operation        Operation?     @relation("OperationShifts", fields: [operationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([dailyOperationId])
+  @@index([operationId])
+}
+
+enum ShiftStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// HealthcareLocation — destinos médicos padronizados (hospitais, clínicas, etc.)
+// ---------------------------------------------------------------------------
+model HealthcareLocation {
+  id                    String                       @id @default(uuid())
+  tenantId              String
+  name                  String
+  type                  HealthcareLocationType
+  address               String
+  number                String?
+  district              String?
+  city                  String
+  state                 String
+  zipCode               String?
+  latitude              Float?
+  longitude             Float?
+  contactPhone          String?
+  active                Boolean                      @default(true)
+  notes                 String?
+  // Google Maps / Geolocation integration
+  googlePlaceId         String?
+  geocodingValidated    Boolean                      @default(false)
+  routeNotes            String?
+  operationalArea       String?
+  estimatedTravelMinutes Int?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  tenant                Tenant                       @relation(fields: [tenantId], references: [id])
+  specialties           HealthcareLocationSpecialty[]
+  queues                OperationalQueue[]
+  demands               OperationalDemand[]
+  tripStops             TripStop[]
+
+  @@index([tenantId])
+  @@index([type])
+  @@index([active])
+}
+
+enum HealthcareLocationType {
+  HOSPITAL
+  CLINIC
+  LAB
+  UBS
+  SPECIALTY_CENTER
+  HEMODIALYSIS
+  ONCOLOGY_CENTER
+}
+
+model HealthcareLocationSpecialty {
+  id                   String             @id @default(uuid())
+  healthcareLocationId String
+  specialty            String
+  healthcareLocation   HealthcareLocation @relation(fields: [healthcareLocationId], references: [id], onDelete: Cascade)
+
+  @@index([healthcareLocationId])
+  @@index([specialty])
+}
+
+// ---------------------------------------------------------------------------
+// PatientQrAccessLog — rastreabilidade e antifraude de leituras de QR Code
+// ---------------------------------------------------------------------------
+model PatientQrAccessLog {
+  id           String        @id @default(uuid())
+  tenantId     String
+  patientId    String
+  qrToken      String
+  // Audit & antifraude
+  status       QrScanStatus  @default(SUCCESS)
+  gpsLat       Float?
+  gpsLng       Float?
+  operatorId   String?
+  tripId       String?
+  routeId      String?
+  source       QrScanSource  @default(API)
+  scannedAt    DateTime      @default(now())
+  ip           String?
+  device       String?
+  vehicleId    String?
+  checkpoint   String?
+  patient      Patient       @relation(fields: [patientId], references: [id])
+
+  @@index([patientId])
+  @@index([qrToken])
+  @@index([scannedAt])
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum QrScanStatus {
+  SUCCESS
+  INVALID
+  EXPIRED
+  REVOKED
+  DUPLICATED
+}
+
+enum QrScanSource {
+  TABLET
+  TABLET_SMART_SCANNER
+  TOTEM
+  MOBILE
+  API
+}
+
+// ---------------------------------------------------------------------------
+// Device — dispositivos operacionais (tablets motoristas, totens, mobiles)
+// ---------------------------------------------------------------------------
+model Device {
+  id            String      @id @default(uuid())
+  tenantId      String
+  name          String
+  serialNumber  String?     @unique
+  type          DeviceType
+  platform      String?     // android | ios | web
+  vehicleId     String?
+  driverId      String?
+  active        Boolean     @default(true)
+  lastSeenAt    DateTime?
+  appVersion    String?
+  ipAddress     String?
+  authToken     String?     @unique
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  vehicle       Vehicle?    @relation(fields: [vehicleId], references: [id])
+  driver        Driver?     @relation(fields: [driverId], references: [id])
+
+  @@index([tenantId])
+  @@index([type])
+  @@index([vehicleId])
+  @@index([driverId])
+}
+
+enum DeviceType {
+  TABLET
+  TOTEM
+  MOBILE
+  DISPATCH
+}
+
+// ---------------------------------------------------------------------------
+// PatientTransportStatus — ciclo de vida do transporte do paciente
+// ---------------------------------------------------------------------------
+enum PatientTransportStatus {
+  WAITING
+  CONFIRMED
+  CHECKED_IN
+  BOARDED
+  IN_TRANSIT
+  ARRIVED
+  MISSED
+}
+
+// ---------------------------------------------------------------------------
+// ConnectionStatus — presença online (WebSocket/dispositivo)
+// ---------------------------------------------------------------------------
+enum ConnectionStatus {
+  ONLINE
+  OFFLINE
+  IDLE
+}
+
+enum SusImportStatus {
+  UPLOADED
+  PREVIEW_READY
+  VALIDATED
+  PROCESSING
+  PROCESSED
+  FAILED
+  REPROCESSED
+}
+
+enum SusImportRowStatus {
+  PENDING
+  VALID
+  INVALID
+  PROCESSED
+  SKIPPED
+}
+
+model SusImport {
+  id                     String            @id @default(uuid())
+  tenantId               String
+  uploadedByUserId       String?
+  sourceSystem           String            @default("SUS")
+  fileName               String
+  fileMimeType           String?
+  fileSizeBytes          Int?
+  status                 SusImportStatus   @default(UPLOADED)
+  notes                  String?
+  totalRows              Int               @default(0)
+  validRows              Int               @default(0)
+  invalidRows            Int               @default(0)
+  processingAttempts     Int               @default(0)
+  processedAt            DateTime?
+  reprocessedFromImportId String?
+  metadata               Json?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  tenant                 Tenant            @relation(fields: [tenantId], references: [id])
+  rows                   SusImportRow[]
+  demands                OperationalDemand[]
+  reprocessedFrom        SusImport?        @relation("SusImportReprocess", fields: [reprocessedFromImportId], references: [id])
+  reprocessChildren      SusImport[]       @relation("SusImportReprocess")
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@index([reprocessedFromImportId])
+  @@map("sus_imports")
+}
+
+model SusImportRow {
+  id                 String             @id @default(uuid())
+  tenantId           String
+  importId           String
+  lineNumber         Int
+  rowHash            String?
+  status             SusImportRowStatus @default(PENDING)
+  rawData            Json
+  normalizedData     Json?
+  validationErrors   Json?
+  validationWarnings Json?
+  processingAttempts Int                @default(0)
+  processedAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  tenant             Tenant             @relation(fields: [tenantId], references: [id])
+  import             SusImport          @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, lineNumber])
+  @@index([tenantId, importId])
+  @@index([status])
+  @@map("sus_import_rows")
+}
+
+model ImportHistory {
+  id                String   @id @default(uuid())
+  tenantId          String
+  fileHash          String
+  importDate        DateTime @default(now())
+  recordsRead       Int      @default(0)
+  recordsCreated    Int      @default(0)
+  recordsUpdated    Int      @default(0)
+  duplicatesSkipped Int      @default(0)
+  errors            Int      @default(0)
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, importDate])
+  @@index([tenantId, fileHash])
+  @@map("import_history")
+}
+
+// ---------------------------------------------------------------------------
+// TripToken — tokens operacionais para confirmação, embarque, retorno, etc.
+// Utilizados via QR Code, Telegram, links públicos.
+// ---------------------------------------------------------------------------
+model TripToken {
+  id         String          @id @default(uuid())
+  tenantId   String
+  tripId     String
+  patientId  String
+  token      String          @unique @default(uuid())
+  type       TripTokenType
+  expiresAt  DateTime
+  usedAt     DateTime?
+  usedByIp   String?
+  usedByGps  String?         // "lat,lng" quando disponível
+  deviceInfo String?
+  createdAt  DateTime        @default(now())
+  trip       Trip            @relation(fields: [tripId], references: [id])
+  patient    Patient         @relation(fields: [patientId], references: [id])
+
+  @@index([token])
+  @@index([tripId])
+  @@index([patientId])
+  @@index([tenantId])
+  @@index([type])
+}
+
+enum TripTokenType {
+  CONFIRMATION
+  BOARDING
+  RETURN
+  REBOOK
+}
+
+// ---------------------------------------------------------------------------
+// TripStop — paradas individuais de uma viagem (multi-stop route)
+// ---------------------------------------------------------------------------
+
+model TripStop {
+  id             String         @id @default(uuid())
+  tenantId       String
+  tripId         String
+  sequence       Int
+  type           TripStopType
+  locationId     String?
+  name           String
+  lat            Float?
+  lng            Float?
+  plannedArrival DateTime?
+  actualArrival  DateTime?
+  status         TripStopStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  trip           Trip           @relation(fields: [tripId], references: [id])
+  location       HealthcareLocation? @relation(fields: [locationId], references: [id])
+
+  @@index([tenantId])
+  @@index([tripId])
+  @@index([status])
+  @@index([sequence])
+}
+
+enum TripStopType {
+  PICKUP
+  CLINIC
+  HOSPITAL
+  EXAM
+  PHARMACY
+  RETURN
+  DROPOFF
+}
+
+enum TripStopStatus {
+  PENDING
+  EN_ROUTE
+  ARRIVED
+  BOARDING
+  COMPLETED
+  SKIPPED
+}
+
+// ---------------------------------------------------------------------------
+// Notification — WhatsApp (Z-API) / provider-agnostic messaging
+// ---------------------------------------------------------------------------
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  DUPLICATE
+  SKIPPED
+}
+
+model NotificationTemplate {
+  id        String   @id @default(uuid())
+  tenantId  String
+  key       String
+  title     String
+  message   String   @db.Text
+  variables Json?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  logs      NotificationLog[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@index([active])
+}
+
+model NotificationLog {
+  id                String               @id @default(uuid())
+  tenantId          String
+  templateId        String?
+  patientId         String?
+  tripId            String?
+  routeId           String?
+  phone             String
+  message           String               @db.Text
+  status            NotificationStatus   @default(PENDING)
+  provider          String               @default("ZAPI")
+  providerMessageId String?
+  retryCount        Int                  @default(0)
+  maxRetries        Int                  @default(3)
+  queuedAt          DateTime             @default(now())
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedReason      String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  tenant            Tenant               @relation(fields: [tenantId], references: [id])
+  template          NotificationTemplate? @relation(fields: [templateId], references: [id])
+  patient           Patient?             @relation(fields: [patientId], references: [id])
+  trip              Trip?                @relation(fields: [tripId], references: [id])
+  route             Route?               @relation(fields: [routeId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([phone])
+  @@index([patientId])
+  @@index([tripId])
+  @@index([routeId])
+  @@index([createdAt])
+}

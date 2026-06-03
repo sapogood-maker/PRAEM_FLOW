@@ -56,7 +56,7 @@ type RouteDerivedOperationalState =
 const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
   CREATED: ['DISPATCHED', 'CANCELLED'],
   DISPATCHED: ['DRIVER_ACCEPTED', 'NO_SHOW', 'CANCELLED'],
-  DRIVER_ACCEPTED: ['WAITING_PATIENT', 'NO_SHOW', 'CANCELLED'],
+  DRIVER_ACCEPTED: ['WAITING_PATIENT', 'BOARDING', 'NO_SHOW', 'CANCELLED'],
   WAITING_PATIENT: ['BOARDING', 'NO_SHOW', 'CANCELLED'],
   BOARDING: ['BOARDED', 'NO_SHOW', 'CANCELLED'],
   BOARDED: ['IN_TRANSIT', 'NO_SHOW', 'CANCELLED'],
@@ -239,7 +239,7 @@ export class OperationalFlowService {
       return { trip: refreshed.trip, route: refreshed.route, queue };
     }
 
-    if (nextResolvedState === 'CREATED' || nextResolvedState === 'DISPATCHED' || nextResolvedState === 'DRIVER_ACCEPTED') {
+    if (nextResolvedState === 'CREATED' || nextResolvedState === 'DISPATCHED') {
       this.logger.warn(
         `[OPS] qr boarding rejected tenantId=${tenantId} routeId=${refreshed.route.id} tripId=${refreshed.trip?.id ?? '-'} reason=driver_not_ready previous=${nextResolvedState}`,
       );

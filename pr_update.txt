@@ -1,0 +1,43 @@
+Operational: prevent automatic NO_SHOW and allow re-creating SUS demands/queues after terminal states
+
+Summary
+- Fixes: prevent recovery jobs from auto-marking trips NO_SHOW when queue is WAITING_DISPATCH/PENDING_DISPATCH.
+- Sus-import: allow creating new OperationalQueue when existing queue is terminal (NO_SHOW/COMPLETED/CANCELLED) and treat terminal-only OperationalDemand as re-creatable for new imports.
+
+Files changed
+- apps/api/src/modules/operational-flow/operational-flow.service.ts
+  - recoverStaleTrips: skip auto-NO_SHOW if latest queue is WAITING_DISPATCH/PENDING_DISPATCH.
+  - forceCompleteRoute: skip force-NO_SHOW for trips whose latest queue is WAITING_DISPATCH/PENDING_DISPATCH.
+- apps/api/src/modules/sus-import/services/sus-import.service.ts
+  - Add SKIP_DEMAND / SKIP_QUEUE logs (diagnostic).
+  - CREATE_NEW_QUEUE_AFTER_TERMINAL: create new queue when existing is terminal.
+  - CREATE_NEW_DEMAND_AFTER_TERMINAL: treat demand with only terminal queues as eligible for new import (update metadata and allow queue creation).
+
+Commits
+- 1994b7d (prevent auto-NO_SHOW for WAITING_DISPATCH/PENDING_DISPATCH)
+- 779c928 (add SKIP_DEMAND / SKIP_QUEUE logs)
+- ffd4063 (CREATE_NEW_* behavior)
+
+Validation (run after deploy)
+1) Confirm no premature NO_SHOWs:
+   SELECT id, "patientId", "appointmentDate", status, "noShowAt" FROM "OperationalQueue" WHERE status = 'NO_SHOW' AND "noShowAt" >= now() - interval '24 hours' AND "appointmentDate" > "noShowAt" ORDER BY "noShowAt" DESC;
+
+2) Confirm new queues created for reimports (time window for imports):
+   SELECT q.id, q."patientId", q."appointmentDate", q.status, q."createdAt" FROM "OperationalQueue" q WHERE q."tenantId" = '<TENANT_ID>' AND q."createdAt" BETWEEN '2026-06-02 19:00:00' AND '2026-06-02 23:00:00' ORDER BY q."createdAt" ASC;
+
+3) Logs to watch
+- [RECOVERY] [OPS] skipping auto-NO_SHOW for tripId=
+- [FINALIZE] skipping tripId=
+- [SKIP_DEMAND]
+- [SKIP_QUEUE]
+- [CREATE_NEW_DEMAND_AFTER_TERMINAL]
+- [CREATE_NEW_QUEUE_AFTER_TERMINAL]
+
+Notes
+- Chose non-invasive approach: no schema changes. We reuse existing demand if present but with only terminal queues; we update metadata and allow new queues. If you prefer explicit new demand records per import, we can implement schema migration later.
+
+Next steps
+- Deploy to staging and run the SUS files from production (19:12–21:49) to verify CREATE_NEW_* logs and new queue creation.
+- If OK, promote to production and monitor logs for 24–48h.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>

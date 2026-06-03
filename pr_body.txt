@@ -1,0 +1,24 @@
+Summary:
+Protect trips whose latest OperationalQueue status is WAITING_DISPATCH or PENDING_DISPATCH from being auto-marked NO_SHOW by recovery/force-complete flows.
+
+Files changed:
+- apps/api/src/modules/operational-flow/operational-flow.service.ts (recoverStaleTrips, forceCompleteRoute)
+
+What changed:
+- recoverStaleTrips: skip marking trip NO_SHOW when latest queue status is WAITING_DISPATCH or PENDING_DISPATCH (added log).
+- forceCompleteRoute: skip forcing NO_SHOW for trips whose latest queue status is WAITING_DISPATCH or PENDING_DISPATCH (added log).
+
+Root cause:
+Recovery jobs used route.date and boardedAt to decide staleness and forced NO_SHOW without checking queue dispatch status. Queues still PENDING_DISPATCH / WAITING_DISPATCH must not be auto-finalized.
+
+Validation steps (after deploy):
+1) SQL (Postgres):
+   SELECT id, "patientId", "appointmentDate", status, "noShowAt"
+   FROM "OperationalQueue"
+   WHERE status = 'NO_SHOW' AND "noShowAt" >= now() - interval '24 hours' AND "appointmentDate" > "noShowAt"
+   ORDER BY "noShowAt" DESC;
+2) Watch logs for:
+   - "[RECOVERY] [OPS] skipping auto-NO_SHOW for tripId="
+   - "[FINALIZE] skipping tripId="
+
+Commit: 1994b7d

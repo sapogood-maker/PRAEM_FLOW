@@ -55,7 +55,7 @@ type RouteDerivedOperationalState =
 // Transition graph updated to explicitly model BOARDED and allow NO_SHOW reversal
 const TRANSITION_GRAPH: Record<OperationalState, OperationalState[]> = {
   CREATED: ['DISPATCHED', 'CANCELLED'],
-  DISPATCHED: ['DRIVER_ACCEPTED', 'NO_SHOW', 'CANCELLED'],
+  DISPATCHED: ['DRIVER_ACCEPTED', 'BOARDING', 'BOARDED', 'NO_SHOW', 'CANCELLED'],
   DRIVER_ACCEPTED: ['WAITING_PATIENT', 'BOARDING', 'NO_SHOW', 'CANCELLED'],
   WAITING_PATIENT: ['BOARDING', 'NO_SHOW', 'CANCELLED'],
   BOARDING: ['BOARDED', 'NO_SHOW', 'CANCELLED'],
